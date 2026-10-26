@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plugin xmlns="http://apache.org/cordova/ns/plugins/1.0" id="native-ui-engine-cordova-fixture" version="0.0.0">
+  <name>EngineFixture</name>
+  <platform name="android">
+    <config-file target="res/xml/config.xml" parent="/*">
+      <feature name="EngineFixture"><param name="android-package" value="dev.rdlabo.engine.fixture.EngineFixture"/><param name="onload" value="true"/></feature>
+    </config-file>
+    <source-file src="src/android/EngineFixture.kt" target-dir="app/src/main/kotlin/dev/rdlabo/engine/fixture"/>
+    <framework src="src/android/engine.gradle" custom="true" type="gradleReference"/>
+  </platform>
+  <platform name="ios" package="swift">
+    <config-file target="config.xml" parent="/*">
+      <feature name="EngineFixture"><param name="ios-package" value="EngineFixture"/><param name="onload" value="true"/></feature>
+    </config-file>
+    <source-file src="src/ios/EngineFixture.swift"/>
+  </platform>
+</plugin>

@@ -5,6 +5,8 @@ import android.view.View
 import android.view.ViewTreeObserver
 import android.view.Window
 import android.webkit.WebView
+import android.webkit.WebResourceResponse
+import android.net.Uri
 import androidx.webkit.ScriptHandler
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
@@ -21,13 +23,15 @@ class NativeUIProjection(
     projectionSelector: String,
     private val receiveListeners: ReceiveListeners = ReceiveListeners(),
     allowedOrigins: Set<String> = setOf("https://localhost", "http://localhost"),
-    failedFallback: FailedFallback,
+    failedFallback: FailedFallback = FailedFallback.WEB,
     private val captureMode: CaptureMode = CaptureMode.COMPOSITED,
     private val canCapture: () -> Boolean = { true },
     private val beforeNativeReveal: () -> Unit = {},
-    private val updatePlacement: ((JSONObject) -> Unit)?,
+    private val updatePlacement: ((JSONObject) -> Unit)? = null,
+    private val runtime: Runtime = Runtime.CAPACITOR,
     view: () -> View?
 ) : AutoCloseable {
+    enum class Runtime { CAPACITOR, CORDOVA }
     /** Preserve the pre-placement-handoff constructor, including Kotlin default arguments. */
     constructor(
         window: Window,
@@ -42,7 +46,7 @@ class NativeUIProjection(
         beforeNativeReveal: () -> Unit = {},
         view: () -> View?
     ) : this(window, webView, plugin, projectionSelector, receiveListeners, allowedOrigins,
-        failedFallback, captureMode, canCapture, beforeNativeReveal, null, view)
+        failedFallback, captureMode, canCapture, beforeNativeReveal, null, Runtime.CAPACITOR, view)
 
     /** Preserve the original source and JVM constructor contracts for existing plugin binaries. */
     constructor(
@@ -55,7 +59,7 @@ class NativeUIProjection(
         canCapture: () -> Boolean = { true },
         view: () -> View?
     ) : this(window, webView, plugin, projectionSelector, receiveListeners, allowedOrigins,
-        FailedFallback.WEB, CaptureMode.COMPOSITED, canCapture, {}, null, view)
+        FailedFallback.WEB, CaptureMode.COMPOSITED, canCapture, {}, null, Runtime.CAPACITOR, view)
 
     /** True only after an opaque VIEW handoff hid native pixels. Main-thread access only. */
     var isProjecting: Boolean = false
@@ -124,11 +128,29 @@ class NativeUIProjection(
         val matches = listOf("native" to routes.native, "web" to routes.web, "none" to routes.none)
             .filter { eventName in it.second }
         if (matches.size == 1) notificationDestination = matches.single().first
+        if (runtime == Runtime.CORDOVA && (matches.isNotEmpty() || eventName in receiveListeners.update)) {
+            val args = JSONArray().put(id).put(eventName).put(data ?: JSONObject()).toString()
+            webView.post {
+                if (!closed) webView.evaluateJavascript("globalThis.CapacitorNativeUIEngineRuntime?.notify(...$args)", null)
+            }
+        }
     }
     private val sourceView = view
     private fun views() = sourceView()?.let { mapOf("view" to it) } ?: emptyMap()
     private val id = "nativeUI" + UUID.randomUUID().toString().replace("-", "")
-    private val snapshots = NativeUISnapshots(File(webView.context.cacheDir, "native-ui-engine/$id"))
+    private val snapshotDirectory = File(webView.context.cacheDir, "native-ui-engine/$id")
+    private val snapshots = NativeUISnapshots(snapshotDirectory)
+    /** Delegate a CordovaPluginPathHandler here; serves only this registration's PNGs. */
+    fun handleResource(path: String): WebResourceResponse? {
+        val prefix = "__native_ui_engine__/$id/"
+        if (runtime != Runtime.CORDOVA || !path.startsWith(prefix)) return null
+        val name = path.removePrefix(prefix)
+        val stream = if (!closed && name.matches(Regex("[a-fA-F0-9-]+-[0-9]+\\.png"))) {
+            try { File(snapshotDirectory, name).inputStream() } catch (_: java.io.IOException) { null }
+        } else null
+        return if (stream != null) WebResourceResponse("image/png", null, 200, "OK", mapOf("Cache-Control" to "no-store"), stream)
+        else WebResourceResponse("text/plain", "UTF-8", 404, "Not Found", emptyMap(), java.io.ByteArrayInputStream(byteArrayOf()))
+    }
     private data class Anchor(val native: RectF, val image: RectF)
     private val anchors = mutableMapOf<String, Map<String, Anchor>>()
     private val webReadyTokens = mutableSetOf<String>()
@@ -141,7 +163,7 @@ class NativeUIProjection(
     internal var awaitWebDraw: (WebView, () -> Boolean, (Boolean) -> Unit) -> Unit = NativeUIWebReadiness::draw
     private var suspended = false
     private var visible = true
-    private var closed = false
+    @Volatile private var closed = false
     private var documentID: String? = null
     private val script: ScriptHandler
     private val stopInteraction: () -> Unit
@@ -156,7 +178,7 @@ class NativeUIProjection(
         require(projectionSelector.isNotBlank())
         require(WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER) &&
             WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) { "WebView document-start messaging is required" }
-        val config = JSONObject().put("id", id).put("plugin", plugin).put("projectionSelector", projectionSelector)
+        val config = JSONObject().put("runtime", if (runtime == Runtime.CORDOVA) "cordova" else "capacitor").put("id", id).put("plugin", plugin).put("projectionSelector", projectionSelector)
             .put("receiveListeners", receiveListeners.configuration()).put("failedFallback", failedFallback.value).put("captureMode", if (captureMode == CaptureMode.VIEW) "view" else "composited")
         if (updatePlacement != null) config.put("placementHandoff", true)
         val runtime = webView.context.assets.open("native-ui-engine.js").bufferedReader().use { it.readText() }
@@ -393,6 +415,13 @@ class NativeUIProjection(
     }
     private fun reply(key: String?, value: JSONObject, error: String? = null) {
         if (closed) return
+        if (runtime == Runtime.CORDOVA) value.optJSONArray("parts")?.let { parts ->
+            for (index in 0 until parts.length()) {
+                val part = parts.getJSONObject(index)
+                val uri = Uri.parse(part.optString("url"))
+                if (uri.scheme == "file") part.put("url", "/__native_ui_engine__/$id/${uri.lastPathSegment}")
+            }
+        }
         val args = JSONArray().put(id).put(key ?: JSONObject.NULL).put(value).put(error ?: JSONObject.NULL)
         webView.evaluateJavascript("globalThis.CapacitorNativeUIEngineRuntime?.receive(...$args)", null)
     }

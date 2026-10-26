@@ -7,7 +7,6 @@ test('the bundled native runtime matches the TypeScript source', () => {
   const expected = buildSync({
     entryPoints: ['src/native-bootstrap.ts'],
     bundle: true,
-    alias: { '@capacitor/core': new URL('../src/native-capacitor.ts', import.meta.url).pathname },
     format: 'iife',
     globalName: 'CapacitorNativeUIEngineRuntime',
     minify: true,
@@ -67,4 +66,51 @@ test('injected runtime retains the existing Capacitor object and disposes a pend
   expect(await page.evaluate(() => Object.keys((window as any).events))).toEqual([]);
   expect(await page.evaluate(() => (window as any).messages.length)).toBe(1);
   await expect(page.locator('#slot')).not.toHaveAttribute('data-native-ui-snapshot');
+});
+
+test('Cordova notifications use the existing session without Capacitor subscriptions or duplicate application events', async ({ page }) => {
+  await page.setContent('<div id="slot" style="width:120px;height:40px"></div>');
+  await page.evaluate(() => {
+    const w = window as any;
+    w.messages = [];
+    w.channel = {
+      postMessage: (raw: string) => {
+        const message = JSON.parse(raw);
+        w.messages.push(message.request);
+        const result = message.request.action === 'connect' ? { destination: 'native' } : {};
+        queueMicrotask(() => w.CapacitorNativeUIEngineRuntime.receive('channel', message.key, result));
+      },
+    };
+    // Even when both frameworks exist, a Cordova registration must not subscribe to Capacitor.
+    w.Capacitor = {
+      addListener: () => {
+        throw new Error('Wrong bridge');
+      },
+    };
+  });
+  await page.addScriptTag({ content: runtime });
+  await page.evaluate(async () => {
+    const w = window as any;
+    await w.CapacitorNativeUIEngineRuntime.start({
+      id: 'channel',
+      runtime: 'cordova',
+      plugin: 'Fixture',
+      projectionSelector: '#slot',
+      receiveListeners: { projection: { none: ['hidden'], native: ['shown'] }, match: { slot: 'first' } },
+    });
+  });
+  await expect
+    .poll(() => page.evaluate(() => (window as any).messages.some((m: any) => m.action === 'visibility' && m.visible)))
+    .toBe(true);
+  await page.evaluate(() => (window as any).CapacitorNativeUIEngineRuntime.notify('channel', 'hidden', { slot: 'other' }));
+  await expect(page.locator('#slot')).not.toHaveAttribute('data-native-ui-session-channel', 'none');
+  await page.evaluate(() => (window as any).CapacitorNativeUIEngineRuntime.notify('channel', 'hidden', { slot: 'first' }));
+  await expect(page.locator('#slot')).toHaveAttribute('data-native-ui-session-channel', 'none');
+  await page.evaluate(async () => {
+    const w = window as any;
+    await w.CapacitorNativeUIEngineRuntime.stop('channel');
+    w.count = w.messages.length;
+    w.CapacitorNativeUIEngineRuntime.notify('channel', 'shown', { slot: 'first' });
+  });
+  expect(await page.evaluate(() => (window as any).messages.length === (window as any).count)).toBe(true);
 });

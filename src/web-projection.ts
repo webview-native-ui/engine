@@ -1,4 +1,4 @@
-import { Capacitor } from '@capacitor/core';
+import { projectionURL } from './runtime.js';
 import type {
   WebProjectionSource,
   ScopedWebProjectionSource as Candidate,
@@ -236,7 +236,8 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
       if (
         result.parts.some(
           (part) =>
-            !part.url.startsWith('file:') ||
+            (!part.url.startsWith('file:') &&
+              !/^\/__native_ui_engine__\/nativeUI[a-fA-F0-9]+\/[a-fA-F0-9-]+-[0-9]+\.png$/.test(part.url)) ||
             !part.ids.length ||
             part.ids.some((id) => !ids.has(id)) ||
             ![part.x, part.y, part.width, part.height].every(Number.isFinite) ||
@@ -258,7 +259,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
           result.parts.map(async (part) => {
             const image = doc.createElement('img');
             images.push(image);
-            image.src = Capacitor.convertFileSrc(part.url);
+            image.src = projectionURL(part.url);
             await image.decode();
             return image;
           }),

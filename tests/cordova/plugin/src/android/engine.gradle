@@ -1,0 +1,10 @@
+repositories {
+    exclusiveContent {
+        forRepository { maven { url = uri(System.getenv('NATIVE_UI_ENGINE_REPOSITORY')) } }
+        filter { includeGroup('io.github.rdlabo') }
+    }
+}
+dependencies {
+    implementation 'androidx.webkit:webkit:1.14.0'
+    implementation "io.github.rdlabo:native-ui-engine:${System.getenv('NATIVE_UI_ENGINE_VERSION')}"
+}

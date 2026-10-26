@@ -5,6 +5,9 @@ const sessions = new Map<string, { destroy(): Promise<void>; hide(): void; show(
 const pending = new Map<string, { resolve(value: any): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> }>();
 const interactions = new Map<string, (event: { active: boolean }) => void>();
 const documentID = Array.from(crypto.getRandomValues(new Uint32Array(4)), (part) => part.toString(16)).join('-');
+const notifications = new Map<string, Map<string, (event: unknown) => void>>();
+/** Cordova plugins forward their existing notifications through NativeUIProjection.receive. */
+export const notify = (id: string, name: string, data: unknown) => notifications.get(id)?.get(name)?.(data);
 let sequence = 0;
 const send = (id: string, request: unknown): Promise<any> =>
   new Promise((resolve, reject) => {
@@ -53,6 +56,7 @@ export const hide = (id: string) => {
 export const stop = async (id: string) => {
   const session = sessions.get(id);
   sessions.delete(id);
+  notifications.delete(id);
   for (const [key, item] of pending) {
     if (!key.startsWith(`${id}:`)) continue;
     pending.delete(key);
@@ -87,22 +91,42 @@ export const start = async (config: NativeSessionConfiguration) => {
     if (document.readyState === 'loading')
       await new Promise<void>((resolve) => document.addEventListener('DOMContentLoaded', () => resolve(), { once: true }));
     if (cancelled) return;
-    actual = await startNativeSession(config, {
-      send: (request) => send(config.id, request),
-      listen: async (listener): Promise<ListenerHandle> => {
-        interactions.set(config.id, listener);
-        return {
-          remove: () => {
-            interactions.delete(config.id);
-          },
-        };
+    const listeners = new Map<string, (event: unknown) => void>();
+    if (config.runtime === 'cordova') notifications.set(config.id, listeners);
+    actual = await startNativeSession(
+      config,
+      {
+        send: (request) => send(config.id, request),
+        listen: async (listener): Promise<ListenerHandle> => {
+          interactions.set(config.id, listener);
+          return {
+            remove: () => {
+              interactions.delete(config.id);
+            },
+          };
+        },
       },
-    });
+      config.runtime === 'cordova'
+        ? {
+            addListener: async (name, listener) => {
+              listeners.set(name, listener);
+              return {
+                remove: () => {
+                  listeners.delete(name);
+                },
+              };
+            },
+          }
+        : undefined,
+    );
     if (pendingDestination === 'none') actual.hide();
     else if (pendingDestination === 'native') actual.show();
     if (cancelled) await actual.destroy();
   } catch (error) {
-    if (sessions.get(config.id) === reservation) sessions.delete(config.id);
+    if (sessions.get(config.id) === reservation) {
+      sessions.delete(config.id);
+      notifications.delete(config.id);
+    }
     throw error;
   }
 };

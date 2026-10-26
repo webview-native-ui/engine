@@ -1,0 +1,12 @@
+{
+  "name": "native-ui-engine-cordova-fixture",
+  "version": "0.0.0",
+  "private": true,
+  "cordova": {
+    "id": "native-ui-engine-cordova-fixture",
+    "platforms": [
+      "ios",
+      "android"
+    ]
+  }
+}

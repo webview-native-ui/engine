@@ -1,0 +1,32 @@
+<!doctype html>
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' data:; style-src 'self' 'unsafe-inline'; img-src 'self' data:" />
+    <style>
+      body {
+        font: 16px system-ui;
+        margin: 20px;
+      }
+      #slot {
+        position: absolute;
+        left: 20px;
+        top: 120px;
+        width: 220px;
+        height: 60px;
+        background: #ddd;
+      }
+      #result {
+        margin-top: 200px;
+        white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Cordova Engine</h1>
+    <div id="slot">Web fallback</div>
+    <pre id="result">Waiting…</pre>
+    <script src="cordova.js"></script>
+    <script src="test.js"></script>
+  </body>
+</html>

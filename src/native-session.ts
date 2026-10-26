@@ -11,6 +11,7 @@ import type { Frame, ScrollPlacement, ListenerHandle, WebProjectionRequest } fro
 export interface NativeSessionConfiguration {
   id: string;
   plugin: string;
+  runtime?: 'capacitor' | 'cordova';
   projectionSelector: string;
   /** Recovery while native is requested. Explicit web/none destinations take precedence. */
   failedFallback?: 'web' | 'native';

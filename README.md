@@ -332,6 +332,10 @@ enableSupportIonicOverlays({
 
 Use `covers(overlay, target)` only when a registered DOM projection needs a custom coverage rule; return `undefined` for the default, or a boolean to override it. Exclusions and explicit native-window ownership take precedence. The standard relationship uses overlay order, DOM containment and backdrop state, rather than attempting to interpret arbitrary CSS stacking contexts. Configure unusual layouts explicitly.
 
+## Cordova
+
+The same Engine supports Cordova plugins without installing Capacitor. Select `runtime: .cordova` (Swift) or `runtime = Runtime.CORDOVA` (Kotlin) and connect the host lifecycle/resource handler. See the [Cordova plugin integration guide](docs/cordova.md). The projection implementation is shared; there is no separate Cordova package.
+
 ## Install inside a plugin
 
 ```sh
@@ -598,7 +602,7 @@ For local packaging verification, run `python3 scripts/native-ui-engine-release/
 
 ## Maintainer release setup
 
-This repository starts from the merged Engine implementation at [ionic-theme-ios27 `b218d8b`](https://github.com/rdlabo-dev/ionic-theme-ios27/commit/b218d8bfe0c87c02addc668fee9c7aa333489486). Source behavior is unchanged by extraction. The package version is retained during migration; the next publication must use a new, unused version.
+This repository starts from the merged Engine implementation at [ionic-theme-ios27 `b218d8b`](https://github.com/rdlabo-dev/ionic-theme-ios27/commit/b218d8bfe0c87c02addc668fee9c7aa333489486). Extraction preserves the merged implementation; Cordova host support is developed in this repository. The package version is retained during migration; the next publication must use a new, unused version.
 
 Configure npm trusted publishing for `rdlabo-dev/capacitor-native-ui-engine`, workflow `release.yml`, and provision the Maven secrets above in this repository. Credentials are not copied by moving source files.
 

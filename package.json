@@ -1,7 +1,7 @@
 {
   "name": "@rdlabo/capacitor-native-ui-engine",
   "version": "2.0.3",
-  "description": "Native UI placement, scroll tracking, and Web projection for Capacitor plugin maintainers.",
+  "description": "Native UI placement, scroll tracking, and Web projection for Capacitor and Cordova plugin maintainers.",
   "type": "module",
   "license": "Zlib",
   "repository": {
@@ -24,7 +24,8 @@
     "CapacitorNativeUIEngine.podspec",
     "README.md",
     "LICENSE",
-    "NOTICE"
+    "NOTICE",
+    "docs"
   ],
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.json && node scripts/build-runtime.mjs",
@@ -35,7 +36,8 @@
     "prepublishOnly": "npm run build",
     "test:release": "node --test scripts/native-ui-engine-release/publish.test.mjs",
     "test:package": "node scripts/verify-package.mjs",
-    "release": "np --no-publish --no-tests --branch main"
+    "release": "np --no-publish --no-tests --branch main",
+    "test:cordova": "node scripts/verify-cordova.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.0",
@@ -50,5 +52,10 @@
   "peerDependencies": {
     "@capacitor/core": ">=8.0.0 <9"
   },
-  "types": "./dist/index.d.ts"
+  "types": "./dist/index.d.ts",
+  "peerDependenciesMeta": {
+    "@capacitor/core": {
+      "optional": true
+    }
+  }
 }
