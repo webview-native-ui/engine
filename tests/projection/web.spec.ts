@@ -812,7 +812,9 @@ test('renderer visibility excludes Engine hiding without changing authored visib
 for (const delay of [undefined, 300]) {
   test(`capture delay ${delay ?? 'default 50'} debounces updates without blocking prepared handoff`, async ({ page }) => {
     await prepare(page, false, false, false, false, false, delay);
-    await page.clock.install();
+    const now = new Date('2026-01-01T00:00:00Z');
+    await page.clock.install({ time: now });
+    await page.clock.pauseAt(now);
     const interval = delay ?? 50;
     const captures = () => page.evaluate(() => (window as any).calls.filter((call: any) => call.action === 'prepare').length);
     const update = () =>
