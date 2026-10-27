@@ -1,4 +1,6 @@
 import UIKit
+import CoreImage
+import ImageIO
 
 /// Immutable, locally served images of controls that will be covered by a Web overlay.
 /// Native interaction invalidates in-flight captures before Web receives the activation.
@@ -15,6 +17,7 @@ public final class NativeUICoveredSnapshots {
         let parts: [Part]
     }
     public init() {}
+    private let imageContext = CIContext()
     private var captures: [String: Capture] = [:]
     private var restoration: (token: String, views: [UIImageView], entry: Bool)?
     private var hiddenControls: (token: String, restore: [() -> Void])?
@@ -80,18 +83,22 @@ public final class NativeUICoveredSnapshots {
             regions.append(([id], rect))
         }
         let bounds = regions.reduce(CGRect.null) { $0.union($1.rect) }
-        let format = UIGraphicsImageRendererFormat()
-        format.scale = scale
-        format.opaque = true
-        // Rasterize the visible window directly. A screen snapshot is a display
-        // replica, not a bitmap source; drawing that replica can succeed with
-        // black pixels on physical devices.
-        var drawn = false
-        let image = UIGraphicsImageRenderer(size: bounds.size, format: format).image { context in
-            context.cgContext.translateBy(x: -bounds.minX, y: -bounds.minY)
-            drawn = window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
-        }
-        guard drawn, let pixels = image.cgImage else { complete([:]); return }
+        // Preserve wide-gamut precision during capture. Encode to integer 16-bit
+        // Display P3 only off the presentation path, without a Canvas conversion.
+        guard let space = CGColorSpace(name: CGColorSpace.extendedDisplayP3),
+              let outputSpace = CGColorSpace(name: CGColorSpace.displayP3),
+              let context = CGContext(data: nil, width: Int(bounds.width * scale), height: Int(bounds.height * scale),
+                bitsPerComponent: 16, bytesPerRow: 0, space: space,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.floatComponents.rawValue | CGBitmapInfo.byteOrder16Little.rawValue)
+        else { complete([:]); return }
+        context.translateBy(x: 0, y: bounds.height * scale)
+        context.scaleBy(x: scale, y: -scale)
+        context.translateBy(x: -bounds.minX, y: -bounds.minY)
+        // Capture the window itself: display-replica views can rasterize as black on devices.
+        UIGraphicsPushContext(context)
+        let drawn = window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+        UIGraphicsPopContext()
+        guard drawn, let pixels = context.makeImage() else { complete([:]); return }
         let token = UUID().uuidString
         let directory = self.directory
         let crops = regions.compactMap { region -> (ids: [String], frame: CGRect, image: UIImage)? in
@@ -101,15 +108,25 @@ public final class NativeUICoveredSnapshots {
             return (region.ids, window.convert(region.rect, to: webView), UIImage(cgImage: part, scale: scale, orientation: .up))
         }
         guard crops.count == regions.count else { complete([:]); return }
+        let imageContext = self.imageContext
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             var parts: [Part] = []
             do {
                 try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
                 for (index, crop) in crops.enumerated() {
-                    guard let png = crop.image.pngData() else { throw CocoaError(.fileWriteUnknown) }
+                    guard let pixels = crop.image.cgImage,
+                          let png = imageContext.pngRepresentation(of: CIImage(cgImage: pixels), format: .RGBA16,
+                            colorSpace: outputSpace, options: [:]) else { throw CocoaError(.fileWriteUnknown) }
+                    // Native entry/return copies must use the same encoded pixels as Web,
+                    // including gamut clipping performed by integer PNG conversion.
+                    guard let source = CGImageSourceCreateWithData(png as CFData, nil),
+                          let decoded = CGImageSourceCreateImageAtIndex(source, 0,
+                            [kCGImageSourceShouldCacheImmediately: true] as CFDictionary)
+                    else { throw CocoaError(.fileWriteUnknown) }
+                    let image = UIImage(cgImage: decoded, scale: scale, orientation: .up)
                     let file = directory.appendingPathComponent("\(token)-\(index).png")
                     try png.write(to: file, options: .atomic)
-                    parts.append(Part(ids: crop.ids, frame: crop.frame, image: crop.image, file: file))
+                    parts.append(Part(ids: crop.ids, frame: crop.frame, image: image, file: file))
                 }
             } catch {
                 parts.forEach { try? FileManager.default.removeItem(at: $0.file) }
