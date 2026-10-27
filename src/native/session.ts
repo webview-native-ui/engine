@@ -19,6 +19,8 @@ export interface NativeSessionConfiguration {
   captureMode?: 'composited' | 'view';
   /** Native registration accepts a final placement in its reveal request. */
   placementHandoff?: boolean;
+  /** Android can cover prepared pixels before a Web scroll event arrives. */
+  nativeDragHandoff?: boolean;
   receiveListeners?: {
     update?: string[];
     projection?: Partial<Record<ProjectionDestination, string[]>>;
@@ -31,11 +33,16 @@ export interface NativeSessionBridge {
       | WebProjectionRequest
       | { action: 'resume'; token?: string }
       | { action: 'visibility'; visible: boolean }
-      | { action: 'track'; viewportWidth: number; scroll?: ScrollPlacement }
+      | {
+          action: 'track';
+          viewportWidth: number;
+          scroll?: ScrollPlacement;
+          gesture?: { viewport: Frame; offsetX: number; offsetY: number; rangeX: number; rangeY: number };
+        }
       | { action: 'connect' }
       | { action: 'destination'; destination: ProjectionDestination },
   ): Promise<any>;
-  listen(listener: (event: { active: boolean }) => void): Promise<ListenerHandle>;
+  listen(listener: (event: { active: boolean; precovered?: string }) => void): Promise<ListenerHandle>;
 }
 
 /** Native startup calls this; application code does not initialize or wrap the plugin. */
@@ -65,6 +72,7 @@ export const startNativeSession = async (
   const effectiveDestination = (): ProjectionDestination =>
     requestedDestination === 'native' && target && overlays.isCovered(target) ? 'web' : requestedDestination;
   let automaticMotion = false;
+  let nativeDragging = false;
   let placementPending = false;
   let nativeScroll = false;
   let scrollOwner: HTMLElement | undefined;
@@ -94,16 +102,25 @@ export const startNativeSession = async (
     }
   };
   const bridge: NativeSessionBridge = {
-    listen: (listener) => nativeBridge.listen(listener),
+    listen: (listener) =>
+      nativeBridge.listen((event) => {
+        listener(event);
+        if (!event.active && nativeDragging) {
+          nativeDragging = false;
+          endAutomaticMotionLater();
+        }
+        if (event.precovered) adoptNativeCover(event.precovered);
+      }),
     send: (request) => {
       if (!config.placementHandoff) return nativeBridge.send(request);
       const binding = projectionPlacement(target);
       if (request.action === 'cover') {
+        const alreadyCovered = coveredToken === request.token && binding?.owner === placementOwner && binding.projected;
         const epoch = ++placementEpoch;
         coveredToken = request.token;
         if (binding) {
           binding.owner = placementOwner;
-          binding.projected = false;
+          binding.projected = !!alreadyCovered;
         }
         return nativeBridge
           .send(request)
@@ -139,7 +156,17 @@ export const startNativeSession = async (
             : request;
         return nativeBridge
           .send(payload)
-          .then((result) => {
+          .then(async (result) => {
+            // A native drag can race retirement before its notification reaches JS.
+            // Keep the prepared underlay until native has applied a fresh return placement.
+            if (request.action === 'release' && result?.requiresPlacement) {
+              if (binding && (!binding.owner || binding.owner === placementOwner)) {
+                result = await nativeBridge.send({ ...request, placement: binding.measure() } as typeof request);
+              } else {
+                await nativeBridge.send({ action: 'visibility', visible: false });
+                result = await nativeBridge.send(request);
+              }
+            }
             if (
               epoch === placementEpoch &&
               (request.action === 'resume' || releasing || request.action === 'reset' || request.action === 'visibility')
@@ -273,6 +300,7 @@ export const startNativeSession = async (
         const created = await createWebProjection(createWebProjectionScope(target, config.id), bridge, {
           wake,
           captureDelayMs: config.captureDelayMs,
+          retainPreparedUntilRelease: config.nativeDragHandoff,
           blocked: () => destination !== 'native' || automaticMotion || (placementPending && !manager?.token),
           revision: () => revision,
           captureRevision: config.captureMode === 'view' ? () => contentRevision : undefined,
@@ -307,7 +335,24 @@ export const startNativeSession = async (
         );
       });
       const scroll = scrollOwner && readScrollPlacement(target!, scrollOwner, () => config.id);
-      const tracking = await bridge.send({ action: 'track', viewportWidth: innerWidth, ...(scroll ? { scroll } : {}) });
+      // Gesture gating needs a hit region, not native compositor scroll eligibility.
+      // Rounded/clipped Ionic hosts can reject readScrollPlacement while still scrolling in Web.
+      const gesture =
+        config.nativeDragHandoff && config.captureMode === 'view' && scrollOwner
+          ? {
+              viewport: scrollOwner.getBoundingClientRect(),
+              offsetX: scrollOwner.scrollLeft,
+              offsetY: scrollOwner.scrollTop,
+              rangeX: Math.max(0, scrollOwner.scrollWidth - scrollOwner.clientWidth),
+              rangeY: Math.max(0, scrollOwner.scrollHeight - scrollOwner.clientHeight),
+            }
+          : undefined;
+      const tracking = await bridge.send({
+        action: 'track',
+        viewportWidth: innerWidth,
+        ...(scroll ? { scroll } : {}),
+        ...(gesture ? { gesture } : {}),
+      });
       if (stopped || version !== generation) return;
       nativeScroll = tracking?.tracked === true;
       manager.consider(config.captureMode === 'view' ? contentRevision : ++revision, sources());
@@ -370,14 +415,39 @@ export const startNativeSession = async (
       else applyFailedFallback();
     } else if (config.captureMode === 'view') manager?.moved();
     else manager?.changed();
+    endAutomaticMotionLater();
+  };
+  function endAutomaticMotionLater() {
     clearTimeout(scrollTimer);
     scrollTimer = setTimeout(() => {
+      if (nativeDragging) return;
       automaticMotion = false;
       if (stopped || destination !== 'native') return;
       manager?.end();
       if (!manager?.restoring) schedule();
     }, 100);
-  };
+  }
+  function adoptNativeCover(token: string) {
+    if (stopped || destination !== 'native' || !target?.isConnected || !manager) return;
+    nativeDragging = true;
+    // A scroll handler may have adopted the same native cover before its notification arrives.
+    if (manager.token) return;
+    if (restoring || manager.restoring) generation++;
+    coveredToken = token;
+    const binding = projectionPlacement(target);
+    if (binding) {
+      binding.owner = placementOwner;
+      binding.projected = true;
+    }
+    automaticMotion = true;
+    beginProjection();
+    if (!manager.token) {
+      automaticMotion = false;
+      void recoverFailedProjection();
+      return;
+    }
+    endAutomaticMotionLater();
+  }
   // Listen on composed-tree ancestors themselves: non-composed scroll events inside
   // Ionic's shadow tree never reach document, and Node.contains excludes slotted children.
   const refreshScrollListeners = () => {
@@ -417,6 +487,7 @@ export const startNativeSession = async (
   const applyDestination = (next: ProjectionDestination, force = false) => {
     if (stopped || (!force && next === destination)) return;
     automaticMotion = false;
+    nativeDragging = false;
     clearTimeout(scrollTimer);
     destination = next;
     generation++;
@@ -427,12 +498,12 @@ export const startNativeSession = async (
         .send({ action: 'visibility', visible: false })
         .then(() => {
           if (destination !== 'none' || version !== generation || stopped) return;
-          manager?.invalidate();
+          manager?.invalidate(true);
           setVisibility();
         })
         .catch(() => {
           if (destination !== 'none' || version !== generation || stopped) return;
-          manager?.invalidate();
+          manager?.invalidate(true);
           setVisibility();
         });
     } else if (destination === 'web') {
@@ -512,8 +583,9 @@ export const startNativeSession = async (
         requestedDestination = destination = 'none';
         generation++;
         automaticMotion = false;
+        nativeDragging = false;
         clearTimeout(scrollTimer);
-        manager?.invalidate();
+        manager?.invalidate(true);
         setVisibility();
       },
     };

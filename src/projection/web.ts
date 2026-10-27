@@ -17,6 +17,8 @@ export interface WebProjectionOptions {
   events?: ProjectionEvents;
   /** Debounce before preparing replacement pixels, in milliseconds. Defaults to 50; never delays handoff. */
   captureDelayMs?: number;
+  /** Preserve an idle underlay while native disarms a possible early drag cover. */
+  retainPreparedUntilRelease?: boolean;
   wake(): void;
   blocked(): boolean;
   revision?(): number;
@@ -148,6 +150,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
   let paintFrame = 0;
   let presentation = 0;
   let cached: Prepared | undefined;
+  let retiring: object | undefined;
   let active: Prepared | undefined;
   let touching = false;
   let ending = false;
@@ -723,12 +726,40 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     finishRestoration();
     schedule();
   };
-  const invalidate = () => {
+  const invalidate = (nativeHidden = false) => {
     pendingCleanup.forEach((run) => run());
     generation++;
     win.clearTimeout(timer);
     const previous = cached;
     cached = undefined;
+    if (nativeHidden || stopped) retiring = undefined;
+    if (callbacks.retainPreparedUntilRelease && !active && !nativeHidden && !stopped) {
+      if (previous) {
+        const pending = {};
+        retiring = pending;
+        void bounded(call({ action: 'release', token: previous.data.token }))
+          .catch(() => {})
+          .finally(() => {
+            previous.images.forEach((image) => {
+              image.src = '';
+            });
+            if (retiring !== pending) return;
+            retiring = undefined;
+            if (cached || active) return;
+            // Another session can already own the same host; retire only our own DOM markers.
+            for (const target of rendered) {
+              if (target.getAttribute(imageMarker) !== preparedKeys.get(target)) {
+                rendered.delete(target);
+                preparedTargets.delete(target);
+              }
+            }
+            detach();
+            preparedKeys.clear();
+            win.dispatchEvent(new Event(sourcesChangedEvent));
+          });
+      }
+      if (retiring) return;
+    }
     dispose(previous);
     if (active) abandon(active, false);
     else {
@@ -891,7 +922,7 @@ export const createWebProjectionBatch = async (
     end: () => engine?.end(),
     updated: (token, ids, revision) => engine?.updated(token, ids, revision),
     retireRestoration: () => engine?.retireRestoration(),
-    invalidate: () => engine?.invalidate(),
+    invalidate: (nativeHidden?: boolean) => engine?.invalidate(nativeHidden),
     async destroy() {
       stopped = true;
       await initializing;

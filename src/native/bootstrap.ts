@@ -3,7 +3,7 @@ import type { ListenerHandle } from '../types.js';
 
 const sessions = new Map<string, { destroy(): Promise<void>; hide(): void; show(): void }>();
 const pending = new Map<string, { resolve(value: any): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> }>();
-const interactions = new Map<string, (event: { active: boolean }) => void>();
+const interactions = new Map<string, (event: { active: boolean; precovered?: string }) => void>();
 const documentID = Array.from(crypto.getRandomValues(new Uint32Array(4)), (part) => part.toString(16)).join('-');
 const notifications = new Map<string, Map<string, (event: unknown) => void>>();
 /** Cordova plugins forward their existing notifications through NativeUIProjection.receive. */
