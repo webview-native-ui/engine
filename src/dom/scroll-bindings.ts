@@ -1,4 +1,4 @@
-import type { WebProjectionSource } from './types.js';
+import type { WebProjectionSource } from '../types.js';
 
 /** Coordinate ownership, independent of any plugin's update transport or rendering. */
 export const createScrollBindings = () => {

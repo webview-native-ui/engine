@@ -1,4 +1,4 @@
-import type { WebProjectionScope } from './web-projection-scope.js';
+import type { WebProjectionScope } from './projection/scope.js';
 
 /** All wire coordinates are CSS pixels, relative to the Web viewport. */
 export interface Frame {

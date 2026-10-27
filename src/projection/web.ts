@@ -1,16 +1,16 @@
-import { projectionURL } from './runtime.js';
+import { projectionURL } from '../native/resource-url.js';
 import type {
   WebProjectionSource,
   ScopedWebProjectionSource as Candidate,
   PreparedWebProjection as CoveredSnapshot,
   Frame,
   WebProjectionTransport,
-} from './types.js';
-import type { WebProjectionScope } from './web-projection-scope.js';
-import { bounded, boundedListener } from './bridge.js';
-import { bindProjectionEvents, type ProjectionEvents, type ProjectionDestination } from './projection-events.js';
-import { projectionAncestors } from './geometry.js';
-import { snapshotStyles } from './snapshot-styles.js';
+} from '../types.js';
+import type { WebProjectionScope } from './scope.js';
+import { bounded, boundedListener } from '../native/bridge.js';
+import { bindProjectionEvents, type ProjectionEvents, type ProjectionDestination } from './events.js';
+import { projectionAncestors } from '../dom/geometry.js';
+import { snapshotStyles } from './styles.js';
 
 export interface WebProjectionOptions {
   /** Existing plugin notifications, scoped to this presentation surface. */

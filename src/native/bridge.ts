@@ -1,4 +1,4 @@
-import type { ListenerHandle as PluginListenerHandle } from './types.js';
+import type { ListenerHandle as PluginListenerHandle } from '../types.js';
 
 // A failed bridge must not leave the source inaccessible indefinitely.
 export const bounded = <T>(promise: Promise<T>): Promise<T> =>

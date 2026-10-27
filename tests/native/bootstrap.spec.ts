@@ -5,7 +5,7 @@ const runtime = readFileSync('ios/Sources/WebViewNativeUIEngine/Resources/native
 
 test('the bundled native runtime matches the TypeScript source', () => {
   const expected = buildSync({
-    entryPoints: ['src/native-bootstrap.ts'],
+    entryPoints: ['src/native/bootstrap.ts'],
     bundle: true,
     format: 'iife',
     globalName: 'WebViewNativeUIEngineRuntime',
