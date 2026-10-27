@@ -134,6 +134,14 @@ class NativeUIEngineTest {
    assertEquals(part.getString("url"),moved.getJSONArray("parts").getJSONObject(0).getString("url"))
    assertEquals(188,moved.getJSONArray("parts").getJSONObject(0).getInt("y"))
    main{snapshots.release(moved.getString("token"))}
+   // App-private cache files can be evicted without any appearance change.
+   assertTrue(original.delete())
+   val recovered=prepareAgain(0)
+   val recoveredFile=File(java.net.URI(recovered.getJSONArray("parts").getJSONObject(0).getString("url")))
+   assertTrue("A missing cached PNG must be captured again",recoveredFile.isFile)
+   val recoveredImage=BitmapFactory.decodeFile(recoveredFile.path)
+   assertNotNull(recoveredImage);assertEquals(Color.RED,recoveredImage.getPixel(0,0));recoveredImage.recycle()
+   main{snapshots.release(recovered.getString("token"))}
    val changed=prepareAgain(1)
    assertNotEquals(part.getString("url"),changed.getJSONArray("parts").getJSONObject(0).getString("url"))
    assertFalse(original.exists())

@@ -83,7 +83,7 @@ const boot = async (
           listen: async () => ({ remove() {} }),
         },
         {
-          addListener: async (name: string, callback: Function) => {
+          addListener: async (name: string, callback: (event: unknown) => void) => {
             w.events[name] = callback;
             return {
               remove() {
@@ -775,7 +775,7 @@ test('an older session resume acknowledgement cannot clear a newer session place
         listen: async () => ({ remove() {} }),
       },
       {
-        addListener: async (name: string, callback: Function) => {
+        addListener: async (name: string, callback: (event: unknown) => void) => {
           w.newEvents[name] = callback;
           return { remove() {} };
         },

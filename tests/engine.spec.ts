@@ -92,7 +92,7 @@ const prepare = async (page: Page, fail = false, shadow = false, proxy = false, 
             }
             return {};
           },
-          listen: async (listener: Function) => {
+          listen: async (listener: (event: { active: boolean }) => void) => {
             w.interact = listener;
             return {
               remove() {
@@ -107,7 +107,7 @@ const prepare = async (page: Page, fail = false, shadow = false, proxy = false, 
           revision: () => w.revision,
           events: events
             ? {
-                addListener: async (name: string, callback: Function) => {
+                addListener: async (name: string, callback: (event: unknown) => void) => {
                   (w.eventListeners ??= {})[name] = callback;
                   return { remove: () => (w.removedEvents ??= []).push(name) };
                 },
@@ -760,7 +760,7 @@ test('hidden notification invalidates delayed cover and updates cannot resurrect
     w.holdCover = true;
     w.eventListeners.transitionStarted({ id: 'counter' });
     w.eventListeners.hidden({ id: 'counter' });
-    w.coverReplies.splice(0).forEach((resolve: Function) => resolve({ shown: true }));
+    w.coverReplies.splice(0).forEach((resolve: (value: { shown: boolean }) => void) => resolve({ shown: true }));
     w.eventListeners.setColors({ id: 'counter' });
   });
   await page.waitForTimeout(100);

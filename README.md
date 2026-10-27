@@ -528,15 +528,18 @@ This uses WKWebView's internal overflow hierarchy without private class names. M
 
 ## Development
 
-From this repository:
+Use Node.js 24, matching CI. From this repository:
 
 ```sh
 npm ci
 npm run build
+npm run lint
 npx playwright install chromium
 npm test
 xcodebuild -scheme CapacitorNativeUIEngine -destination 'platform=iOS Simulator,id=<booted simulator UUID>' test
 ```
+
+Lint combines strict TypeScript checking, the standard ESLint/TypeScript recommended rules, and typed Promise checks for `src`. Scripts and tests receive syntax-level linting; Prettier owns formatting. `npm run format` applies formatting only. Bridge payloads and test doubles may use explicit `any`; production boundary validation remains necessary. An explicit `void` marks background work, but does not handle a rejected Promise. Android uses `lintRelease` with warnings treated as errors in CI; Swift is compiled and tested on an iOS simulator.
 
 The engine is versioned independently of its consumers. Publish order is the native Maven artifact → npm engine; consumers upgrade separately. npm releases verify that the matching POM and AAR exist on Maven Central before publication. No publication is performed by build or test commands. Tests cover plain DOM, fractional/RTL geometry, stale ACKs, image ownership and native WKWebView scroll tracking; consumer tests remain responsible for Ionic/SDK integration.
 

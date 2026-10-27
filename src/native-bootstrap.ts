@@ -57,6 +57,7 @@ export const stop = async (id: string) => {
   const session = sessions.get(id);
   sessions.delete(id);
   notifications.delete(id);
+  interactions.delete(id);
   for (const [key, item] of pending) {
     if (!key.startsWith(`${id}:`)) continue;
     pending.delete(key);
@@ -64,7 +65,6 @@ export const stop = async (id: string) => {
     item.reject(new Error('Native UI session closed'));
   }
   await session?.destroy();
-  interactions.delete(id);
 };
 export const start = async (config: NativeSessionConfiguration) => {
   if (sessions.has(config.id)) return;
@@ -101,7 +101,7 @@ export const start = async (config: NativeSessionConfiguration) => {
           interactions.set(config.id, listener);
           return {
             remove: () => {
-              interactions.delete(config.id);
+              if (interactions.get(config.id) === listener) interactions.delete(config.id);
             },
           };
         },

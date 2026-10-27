@@ -319,7 +319,7 @@ export const startNativeSession = async (
     scheduled = true;
     if (!ready || reconciling) return;
     reconciling = true;
-    queueMicrotask(async () => {
+    void Promise.resolve().then(async () => {
       try {
         while (scheduled && !stopped) {
           scheduled = false;

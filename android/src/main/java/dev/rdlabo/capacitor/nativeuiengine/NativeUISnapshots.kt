@@ -91,7 +91,7 @@ class NativeUISnapshots(private val directory: File) : AutoCloseable {
         }
         val cached = viewCache
         if (sourceViews != null && cached != null && cached.revision == contentRevision && cached.views == sourceViews &&
-            cached.parts.all { part -> frames[part.id]?.let { it.width() == part.frame.width() && it.height() == part.frame.height() } == true }) {
+            cached.parts.all { part -> part.file.isFile && frames[part.id]?.let { it.width() == part.frame.width() && it.height() == part.frame.height() } == true }) {
             deliver(cached.parts.map { it.copy(frame = RectF(frames.getValue(it.id))) })
             return
         }

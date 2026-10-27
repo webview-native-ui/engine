@@ -1,5 +1,6 @@
 package dev.rdlabo.capacitor.nativeuiengine
 
+import android.annotation.SuppressLint
 import android.graphics.RectF
 import android.view.View
 import android.view.ViewTreeObserver
@@ -78,11 +79,13 @@ class NativeUIProjection(
                 "Install NativeUIProjection during plugin load, before WebView navigation"
             }
             val owners = mutableMapOf<String, java.lang.ref.WeakReference<NativeUIProjection>>()
-            WebViewCompat.addWebMessageListener(webView, "nativeUIEngine", allowedOrigins) { _, message, _, mainFrame, _ ->
-                if (mainFrame) runCatching { JSONObject(message.data ?: "") }.getOrNull()?.let {
-                    owners[it.optString("key").substringBefore(":")]?.get()?.let { owner -> if (!owner.closed) owner.receive(it) }
+            if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
+                WebViewCompat.addWebMessageListener(webView, "nativeUIEngine", allowedOrigins) { _, message, _, mainFrame, _ ->
+                    if (mainFrame) runCatching { JSONObject(message.data ?: "") }.getOrNull()?.let {
+                        owners[it.optString("key").substringBefore(":")]?.get()?.let { owner -> if (!owner.closed) owner.receive(it) }
+                    }
                 }
-            }
+            } else throw UnsupportedOperationException("WebView message listeners are required")
             registrations[webView] = owners
             origins[webView] = allowedOrigins.toSet()
         }
@@ -152,28 +155,28 @@ class NativeUIProjection(
         check(android.os.Looper.myLooper() == android.os.Looper.getMainLooper())
         require(updatePlacement == null || captureMode == CaptureMode.VIEW) { "Placement handoff requires VIEW capture mode" }
         require(projectionSelector.isNotBlank())
-        require(WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER) &&
-            WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) { "WebView document-start messaging is required" }
         val config = JSONObject().put("runtime", if (runtime == Runtime.CORDOVA) "cordova" else "capacitor").put("id", id).put("plugin", plugin).put("projectionSelector", projectionSelector)
             .put("receiveListeners", receiveListeners.configuration()).put("failedFallback", failedFallback.value).put("captureMode", if (captureMode == CaptureMode.VIEW) "view" else "composited")
         if (updatePlacement != null) config.put("placementHandoff", true)
         val runtime = webView.context.assets.open("native-ui-engine.js").bufferedReader().use { it.readText() }
         val source = "if (!globalThis.CapacitorNativeUIEngineRuntime) { $runtime } CapacitorNativeUIEngineRuntime.start($config).catch(console.error);"
-        install(webView, allowedOrigins)
-        registrations.getValue(webView)[id] = java.lang.ref.WeakReference(this)
-        var installedScript: ScriptHandler? = null
-        try {
-            val created = WebViewCompat.addDocumentStartJavaScript(webView, source, allowedOrigins)
-            installedScript = created
-            // Also support initialization after the current page has loaded.
-            evaluate(source)
-            script = created
-        } catch (error: Exception) {
-            installedScript?.remove()
-            registrations[webView]?.remove(id)
-            snapshots.close()
-            throw error
-        }
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+            install(webView, allowedOrigins)
+            registrations.getValue(webView)[id] = java.lang.ref.WeakReference(this)
+            var installedScript: ScriptHandler? = null
+            try {
+                val created = WebViewCompat.addDocumentStartJavaScript(webView, source, allowedOrigins)
+                installedScript = created
+                // Also support initialization after the current page has loaded.
+                evaluate(source)
+                script = created
+            } catch (error: Exception) {
+                installedScript?.remove()
+                registrations[webView]?.remove(id)
+                snapshots.close()
+                throw error
+            }
+        } else throw UnsupportedOperationException("WebView document-start scripts are required")
         stopInteraction = NativeUIWindowInteraction.observe(window) { active ->
             windowInteracting = active
             snapshots.interaction(active)
@@ -421,6 +424,8 @@ class NativeUIProjection(
         suspended = false; destination = "native"; notificationDestination = "native"; connected = true
         evaluate("globalThis.CapacitorNativeUIEngineRuntime?.show('$id')")
     }
+    // A ScriptHandler exists only after constructor validation of DOCUMENT_START_SCRIPT.
+    @SuppressLint("RequiresFeature")
     override fun close() {
         if (closed) return
         closed = true

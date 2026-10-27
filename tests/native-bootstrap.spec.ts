@@ -28,7 +28,7 @@ test('injected runtime retains the existing Capacitor object and disposes a pend
         throw new Error('Must not register or wrap a plugin');
       },
       convertFileSrc: () => 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="120" height="40"/>'),
-      addListener: (_plugin: string, name: string, fn: Function) => {
+      addListener: (_plugin: string, name: string, fn: (event: unknown) => void) => {
         w.events[name] = fn;
         return {
           remove: () => {
@@ -113,4 +113,67 @@ test('Cordova notifications use the existing session without Capacitor subscript
     w.CapacitorNativeUIEngineRuntime.notify('channel', 'shown', { slot: 'first' });
   });
   expect(await page.evaluate(() => (window as any).messages.length === (window as any).count)).toBe(true);
+});
+
+test('a delayed old stop cannot remove a restarted session interaction listener', async ({ page }) => {
+  await page.setContent('<div id="slot" style="width:120px;height:40px"></div>');
+  await page.evaluate(() => {
+    const w = window as any;
+    w.messages = [];
+    w.listeners = [];
+    w.Capacitor = {
+      addListener: (_plugin: string, _name: string, listener: (event: unknown) => void) => {
+        w.listeners.push(listener);
+        const first = w.listeners.length === 1;
+        return {
+          remove: () =>
+            first
+              ? new Promise<void>((resolve) => {
+                  w.finishOldRemoval = resolve;
+                })
+              : undefined,
+        };
+      },
+    };
+    w.channel = {
+      postMessage: (raw: string) => {
+        const message = JSON.parse(raw);
+        w.messages.push(message.request);
+        queueMicrotask(() =>
+          w.CapacitorNativeUIEngineRuntime.receive(
+            'channel',
+            message.key,
+            message.request.action === 'connect' ? { destination: 'native' } : {},
+          ),
+        );
+      },
+    };
+  });
+  await page.addScriptTag({ content: runtime });
+  await page.evaluate(async () => {
+    const w = window as any;
+    w.config = { id: 'channel', plugin: 'Fixture', projectionSelector: '#slot', receiveListeners: { update: ['updated'] } };
+    await w.CapacitorNativeUIEngineRuntime.start(w.config);
+  });
+  const preparations = () => page.evaluate(() => (window as any).messages.filter((message: any) => message.action === 'prepare').length);
+  await expect.poll(preparations).toBe(1);
+  await page.evaluate(async () => {
+    const w = window as any;
+    w.oldStop = w.CapacitorNativeUIEngineRuntime.stop('channel');
+    await w.CapacitorNativeUIEngineRuntime.start(w.config);
+  });
+  await expect.poll(preparations).toBe(2);
+  await page.evaluate(async () => {
+    const w = window as any;
+    w.finishOldRemoval();
+    await w.oldStop;
+    w.CapacitorNativeUIEngineRuntime.receive('channel', null, { active: true });
+    w.listeners.at(-1)({});
+  });
+  // Capture is deferred during touch even after the previous owner's teardown completes.
+  await page.waitForTimeout(100);
+  expect(await preparations()).toBe(2);
+  await page.evaluate(() => (window as any).CapacitorNativeUIEngineRuntime.receive('channel', null, { active: false }));
+  await expect.poll(preparations).toBe(3);
+  await page.evaluate(() => (window as any).CapacitorNativeUIEngineRuntime.stop('channel'));
 });

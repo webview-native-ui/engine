@@ -9,6 +9,7 @@ version = new groovy.json.JsonSlurper().parse(file('../package.json')).version
 android {
     namespace 'dev.rdlabo.capacitor.nativeuiengine'
     compileSdk 36
+    lint { warningsAsErrors = true }
     defaultConfig {
         minSdk 23
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
