@@ -4,6 +4,10 @@
 
 _Visually, through seamless native-to-Web projection._
 
+![Conceptual view of a Web overlay above a native surface and WebView content](docs/assets/hero.png)
+
+_Conceptual view. Native appearance is projected into the Web layer during overlay presentation._
+
 Build WebView apps where native controls and Web content share the same scrolling screens, transitions and overlays.
 
 ## Beyond the WebView boundary
