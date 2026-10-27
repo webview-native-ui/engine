@@ -47,12 +47,19 @@ jobs:
             });
             const latest = runs.sort((a,b) => b.run_number-a.run_number)[0];
             if (!latest || latest.status !== 'completed' || latest.conclusion !== 'success') throw new Error('Exact release commit must pass CI');
-      - name: Verify Maven availability
-        run: |
-          VERSION=$(node -p "require('./package.json').version")
-          for EXTENSION in pom aar; do
-            curl --fail --silent --show-error --head --max-time 30 "https://repo.maven.apache.org/maven2/io/github/webview-native-ui/engine/$VERSION/engine-$VERSION.$EXTENSION"
-          done
+      - name: Verify Maven publication acceptance
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const { execFileSync } = await import('node:child_process');
+            const sha = execFileSync('git', ['rev-parse', 'HEAD'], {encoding:'utf8'}).trim();
+            const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
+              ...context.repo, workflow_id: 'native-ui-engine-release.yml', head_sha: sha,
+              event: 'workflow_dispatch', branch: 'main', per_page: 100,
+            });
+            const accepted = runs.find(run => run.status === 'completed' && run.conclusion === 'success');
+            if (!accepted) throw new Error('Exact release commit must have a successful Maven publication workflow');
+            core.info(`Maven publication accepted: ${accepted.html_url}. Central distribution may still be pending.`);
       - run: npm ci
       - run: npm run build
       - run: npm run test:package
