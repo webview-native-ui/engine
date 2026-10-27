@@ -59,7 +59,18 @@ jobs:
       - run: node --test scripts/native-ui-engine-release/npm-artifact.test.mjs
       - name: Check existing npm artifact
         id: artifact
-        run: node scripts/native-ui-engine-release/npm-artifact.mjs
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const { readFileSync } = await import('node:fs');
+            const { execFileSync } = await import('node:child_process');
+            const { pathToFileURL } = await import('node:url');
+            const { existingArtifactMatches } = await import(pathToFileURL(`${process.cwd()}/scripts/native-ui-engine-release/npm-artifact.mjs`));
+            const { name, version } = JSON.parse(readFileSync('package.json', 'utf8'));
+            const [packed] = JSON.parse(execFileSync('npm', ['pack', '--json'], { encoding: 'utf8' }));
+            const exists = await existingArtifactMatches({ name, version, local: readFileSync(packed.filename) });
+            core.info(exists ? 'Identical npm package already published; skipping upload' : 'npm version is available');
+            core.setOutput('exists', exists);
       - name: Publish npm
         if: steps.artifact.outputs.exists != 'true'
         run: |

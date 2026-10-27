@@ -18,7 +18,7 @@ jobs:
       - run: npm ci
       - run: npm run build
       - name: Verify checked-in native runtime matches source
-        run: git diff --exit-code -- ios/Sources/WebViewNativeUIEngine/Resources/native-ui-engine.js
+        run: git diff --exit-code -- runtime/native-ui-engine.js ios/Sources/WebViewNativeUIEngine/Resources/native-ui-engine.js
       - run: npm run lint
       - run: npm run test:release
       - run: npm run test:package
@@ -40,7 +40,24 @@ jobs:
           xcrun simctl boot "$DEVICE" || true
           xcrun simctl bootstatus "$DEVICE" -b
           xcodebuild -scheme WebViewNativeUIEngine -destination "platform=iOS Simulator,id=$DEVICE" CODE_SIGNING_ALLOWED=NO test
-      - run: bash scripts/verify-pods.sh
+      - name: Verify npm-distributed CocoaPod
+        run: |
+          set -euo pipefail
+          ENGINE_PODS_TEMP=$(mktemp -d)
+          trap 'rm -rf "$ENGINE_PODS_TEMP"' EXIT
+          archive=$(npm pack . --ignore-scripts --json --pack-destination "$ENGINE_PODS_TEMP" | node -pe 'JSON.parse(require("fs").readFileSync(0,"utf8"))[0].filename')
+          mkdir -p "$ENGINE_PODS_TEMP/engine" "$ENGINE_PODS_TEMP/app"
+          tar -xzf "$ENGINE_PODS_TEMP/$archive" --strip-components=1 -C "$ENGINE_PODS_TEMP/engine"
+          cat > "$ENGINE_PODS_TEMP/app/Podfile" <<'RUBY'
+          platform :ios, '15.0'
+          install! 'cocoapods', :integrate_targets => false
+          use_frameworks!
+          target 'App' do
+            pod 'WebViewNativeUIEngine', :path => '../engine'
+          end
+          RUBY
+          pod install --project-directory="$ENGINE_PODS_TEMP/app"
+          xcodebuild -project "$ENGINE_PODS_TEMP/app/Pods/Pods.xcodeproj" -scheme WebViewNativeUIEngine -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
       - run: npm run test:cordova -- ios "$CORDOVA_SIMULATOR"
   android:
     runs-on: ubuntu-latest

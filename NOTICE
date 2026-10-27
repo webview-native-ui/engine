@@ -8,7 +8,7 @@ Original history remains available in that repository.
 This package extracts and adapts native UI infrastructure from
 ionic-theme-ios27 / @rdlabo/capacitor-native-ui. It is an adapted library,
 not an unmodified copy of those projects. New work and modifications in
-this engine are licensed under Zlib (see LICENSE).
+this engine are licensed under MIT (see LICENSE).
 
 The upstream MIT notice is retained below for the portions derived from
 those projects. This does not withdraw rights previously granted under MIT.

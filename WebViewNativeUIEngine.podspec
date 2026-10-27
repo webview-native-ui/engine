@@ -5,7 +5,7 @@ Pod::Spec.new do |s|
  s.version = package['version']
  s.summary = 'Native UI infrastructure for Capacitor and Cordova plugin maintainers.'
  s.homepage = 'https://github.com/webview-native-ui/engine'
- s.license = { :type => 'Zlib', :file => 'LICENSE' }
+ s.license = { :type => 'MIT', :file => 'LICENSE' }
  s.preserve_paths = 'LICENSE', 'NOTICE'
  s.author = { 'rdlabo' => 'sakakibara@rdlabo.jp' }
  s.source = { :git => 'https://github.com/webview-native-ui/engine.git', :tag => "v#{s.version}" }

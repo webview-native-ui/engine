@@ -34,7 +34,7 @@ afterEvaluate {
                     name = 'WebView Native UI Engine'
                     description = 'Native UI placement and Web projection for Capacitor and Cordova plugin maintainers.'
                     url = 'https://github.com/webview-native-ui/engine'
-                    licenses { license { name = 'Zlib'; url = 'https://opensource.org/license/zlib' } }
+                    licenses { license { name = 'MIT'; url = 'https://opensource.org/license/mit' } }
                     developers { developer { id = 'rdlabo'; name = 'rdlabo'; url = 'https://github.com/rdlabo' } }
                     scm {
                         url = 'https://github.com/webview-native-ui/engine'
@@ -86,4 +86,4 @@ tasks.withType(Jar).configureEach {
     }
 }
 
-android.sourceSets.main.assets.srcDir('../ios/Sources/WebViewNativeUIEngine/Resources')
+android.sourceSets.main.assets.srcDir('../runtime')

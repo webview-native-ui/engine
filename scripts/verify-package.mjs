@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 const directory = mkdtempSync(join(tmpdir(), 'engine-package-'));
@@ -10,9 +10,14 @@ try {
   );
   const archive = join(directory, packed.filename);
   const manifest = JSON.parse(execFileSync('tar', ['-xOf', archive, 'package/package.json'], { encoding: 'utf8' }));
+  assert.deepEqual(
+    execFileSync('tar', ['-xOf', archive, 'package/ios/Sources/WebViewNativeUIEngine/Resources/native-ui-engine.js']),
+    readFileSync('runtime/native-ui-engine.js'),
+    'The shipped Swift runtime must match the shared native runtime',
+  );
   assert.equal(manifest.name, '@webview-native-ui/engine');
   assert.equal(manifest.capacitor, undefined);
-  assert.equal(manifest.license, 'Zlib');
+  assert.equal(manifest.license, 'MIT');
   const files = new Set(packed.files.map((file) => file.path));
   for (const file of [
     'LICENSE',

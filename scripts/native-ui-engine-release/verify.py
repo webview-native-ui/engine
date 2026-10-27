@@ -44,11 +44,12 @@ with tempfile.TemporaryDirectory(prefix='engine-central-test-') as home:
             for suffix in ['-sources.jar', '-javadoc.jar', '.aar']:
                 with zipfile.ZipFile(BytesIO(bundle.read(base + suffix))) as artifact:
                     if suffix == '.aar':
+                        assert artifact.read('assets/native-ui-engine.js') == (root / 'runtime/native-ui-engine.js').read_bytes()
                         artifact = zipfile.ZipFile(BytesIO(artifact.read('classes.jar')))
                     for notice in ['LICENSE', 'NOTICE']:
                         assert artifact.read('META-INF/webview-native-ui-engine/' + notice) == (release.parent / notice).read_bytes()
-            assert b'<name>Zlib</name>' in bundle.read(base + '.pom')
-        print('Verified all five artifact signatures/checksums and Zlib/upstream notices.')
+            assert b'<name>MIT</name>' in bundle.read(base + '.pom')
+        print('Verified all five artifact signatures/checksums and MIT/upstream notices.')
     finally:
         # The test-key bundle must never be mistaken for a real release candidate.
         archive.unlink(missing_ok=True)
