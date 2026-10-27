@@ -22,6 +22,7 @@ const boot = async (
   unavailable = false,
   captureMode: 'view' | 'composited' = 'composited',
   placementHandoff = false,
+  nativeDragHandoff = false,
 ) => {
   await page.setContent(present ? '<div id="slot" style="width:120px;height:40px"><button>Fallback</button></div>' : '<main></main>');
   await page.evaluate(() => {
@@ -32,7 +33,7 @@ const boot = async (
   await page.addScriptTag({ content: bundle });
   await page.addScriptTag({ content: placementBundle });
   await page.evaluate(
-    async ({ projectionSelector, failedFallback, unavailable, captureMode, placementHandoff }) => {
+    async ({ projectionSelector, failedFallback, unavailable, captureMode, placementHandoff, nativeDragHandoff }) => {
       const w = window as any;
       w.calls = [];
       w.events = {};
@@ -41,6 +42,7 @@ const boot = async (
       w.pendingCover = [];
       w.pendingPrepare = [];
       w.pendingHide = [];
+      w.pendingRelease = [];
       w.session = await w.sessionEngine.startNativeSession(
         {
           id: 'surface',
@@ -49,6 +51,7 @@ const boot = async (
           failedFallback,
           captureMode,
           placementHandoff,
+          nativeDragHandoff,
           receiveListeners: {
             update: ['updated'],
             projection: { native: ['shown'], web: ['moving'], none: ['hidden'] },
@@ -73,6 +76,8 @@ const boot = async (
             if (request.action === 'cover' && w.failCover) return { shown: false };
             if (request.action === 'prepare')
               return { token: 'pixels', parts: [{ ids: ['view'], url: 'file:///pixels.png', x: 8, y: 8, width: 120, height: 40 }] };
+            if (request.action === 'release' && w.nativeCoverUnclaimed && !request.placement) return { requiresPlacement: true };
+            if (request.action === 'release' && w.holdRelease) return new Promise((resolve) => w.pendingRelease.push(resolve));
             if (request.action === 'release' && w.failRelease) throw new Error('Native release failed');
             if (request.action === 'visibility' && w.failVisibility) throw new Error('Native recovery failed');
             if (request.action === 'resume' && w.failResume) throw new Error('Native restore failed');
@@ -80,7 +85,10 @@ const boot = async (
             if (request.action === 'cover' || request.action === 'restore') return { shown: true };
             return {};
           },
-          listen: async () => ({ remove() {} }),
+          listen: async (listener: (event: any) => void) => {
+            w.interaction = listener;
+            return { remove() {} };
+          },
         },
         {
           addListener: async (name: string, callback: (event: unknown) => void) => {
@@ -94,7 +102,7 @@ const boot = async (
         },
       );
     },
-    { projectionSelector, failedFallback, unavailable, captureMode, placementHandoff },
+    { projectionSelector, failedFallback, unavailable, captureMode, placementHandoff, nativeDragHandoff },
   );
 };
 
@@ -602,8 +610,8 @@ test('scroll with a prepared image still restores through the native placement a
   expect(calls.some((c: any) => c.action === 'resume')).toBe(true);
 });
 
-const bindPlacement = async (page: import('@playwright/test').Page, enabled = true) => {
-  await boot(page, true, '#slot', 'native', false, 'view', enabled);
+const bindPlacement = async (page: import('@playwright/test').Page, enabled = true, early = false) => {
+  await boot(page, true, '#slot', 'native', false, 'view', enabled, early);
   await expect(page.locator('#slot')).toHaveAttribute('data-native-ui-snapshot', /.+/);
   await page.evaluate(() => {
     const w = window as any;
@@ -837,3 +845,79 @@ for (const next of ['scroll', 'web'] as const) {
     await expect.poll(() => page.evaluate(() => (window as any).binding.projected), { intervals: [10] }).toBe(true);
   });
 }
+
+test('native drag adopts prepared pixels without waiting for cover and restores without a scroll event', async ({ page }) => {
+  await bindPlacement(page, true, true);
+  await page.evaluate(() => {
+    const w = window as any;
+    w.holdCover = true;
+    w.holdResume = true;
+    w.interaction({ active: true, precovered: 'pixels' });
+  });
+  await expect.poll(() => page.evaluate(() => (window as any).pendingCover.length)).toBe(1);
+  expect(await page.evaluate(() => (window as any).binding.projected)).toBe(true);
+  await page.evaluate(() => (window as any).pendingCover.shift()({ shown: true }));
+  await page.waitForTimeout(150);
+  expect(await page.evaluate(() => (window as any).pendingResume.length)).toBe(0);
+  await page.evaluate(() => (window as any).interaction({ active: false }));
+  await expect.poll(() => page.evaluate(() => (window as any).pendingResume.length)).toBe(1);
+  expect(await page.evaluate(() => (window as any).measureCount)).toBe(1);
+  await page.evaluate(() => (window as any).pendingResume.shift()({}));
+  await expect.poll(() => page.evaluate(() => (window as any).binding.projected)).toBe(false);
+});
+
+test('native drag without a retained cache reconciles placement and returns native ownership', async ({ page }) => {
+  await bindPlacement(page, true, true);
+  await page.evaluate(async () => {
+    const w = window as any;
+    w.noCapture = true;
+    document.querySelector<HTMLElement>('#slot')!.style.width = '130px';
+  });
+  await expect(page.locator('#slot')).not.toHaveAttribute('data-native-ui-snapshot');
+  await page.evaluate(() => (window as any).interaction({ active: true, precovered: 'pixels' }));
+  await expect.poll(() => page.evaluate(() => (window as any).calls.some((c: any) => c.action === 'visibility' && c.placement))).toBe(true);
+  await expect.poll(() => page.evaluate(() => (window as any).binding.projected)).toBe(false);
+});
+
+test('idle image retirement waits for early native cover reconciliation, including repeated invalidation', async ({ page }) => {
+  await bindPlacement(page, true, true);
+  await page.evaluate(() => {
+    const w = window as any;
+    w.noCapture = true;
+    w.nativeCoverUnclaimed = true;
+    w.holdRelease = true;
+    document.querySelector<HTMLElement>('#slot')!.style.width = '130px';
+  });
+  await expect.poll(() => page.evaluate(() => (window as any).pendingRelease.length)).toBe(1);
+  expect(await page.evaluate(() => (window as any).measureCount)).toBe(1);
+  await expect(page.locator('#slot')).toHaveAttribute('data-native-ui-snapshot-visible', '');
+  await page.evaluate(() => {
+    document.querySelector<HTMLElement>('#slot')!.style.width = '140px';
+  });
+  await page.waitForTimeout(150);
+  await expect(page.locator('#slot')).toHaveAttribute('data-native-ui-snapshot-visible', '');
+  await page.evaluate(() => (window as any).pendingRelease.shift()({}));
+  await expect(page.locator('#slot')).not.toHaveAttribute('data-native-ui-snapshot');
+});
+
+test('native hide retires a pending idle image immediately and cannot clear its successor', async ({ page }) => {
+  await bindPlacement(page, true, true);
+  await page.evaluate(() => {
+    const w = window as any;
+    w.holdRelease = true;
+    w.noCapture = true;
+    document.querySelector<HTMLElement>('#slot')!.style.width = '130px';
+  });
+  await expect.poll(() => page.evaluate(() => (window as any).pendingRelease.length)).toBe(1);
+  await page.evaluate(() => (window as any).session.hide());
+  await expect(page.locator('#slot')).not.toHaveAttribute('data-native-ui-snapshot');
+  await page.evaluate(() => {
+    const w = window as any;
+    w.noCapture = false;
+    w.holdRelease = false;
+    w.session.show();
+  });
+  await expect(page.locator('#slot')).toHaveAttribute('data-native-ui-snapshot', /.+/);
+  await page.evaluate(() => (window as any).pendingRelease.shift()({}));
+  await expect(page.locator('#slot')).toHaveAttribute('data-native-ui-snapshot', /.+/);
+});

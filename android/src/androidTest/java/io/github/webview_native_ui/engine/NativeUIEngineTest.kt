@@ -349,6 +349,124 @@ class NativeUIEngineTest {
   }} finally {main{activity.finish()}}
  }
 
+ @Test fun dragObservationPreservesTapsAndRunsBeforeTheConsumingMove() {
+  val activity=activity()
+  try {main {
+   val window=activity.window;val original=window.callback
+   var moves=0;var drags=0;var otherDrags=0
+   window.callback=object:android.view.Window.Callback by original {
+    override fun dispatchTouchEvent(event:android.view.MotionEvent):Boolean {
+     if(event.actionMasked==android.view.MotionEvent.ACTION_MOVE) {
+      moves++
+      if(moves==2) {assertEquals(1,drags);assertEquals(1,otherDrags)}
+     }
+     return true
+    }
+   }
+   val stop=NativeUIWindowInteraction.observe(window,drag={drags++}){}
+   val stopOther=NativeUIWindowInteraction.observe(window,drag={otherDrags++}){}
+   fun touch(action:Int,y:Float) {
+    val now=android.os.SystemClock.uptimeMillis()
+    val event=android.view.MotionEvent.obtain(now,now,action,10f,y,0)
+    assertTrue(window.callback.dispatchTouchEvent(event));event.recycle()
+   }
+   touch(android.view.MotionEvent.ACTION_DOWN,10f)
+   touch(android.view.MotionEvent.ACTION_UP,10f)
+   assertEquals(0,drags)
+   touch(android.view.MotionEvent.ACTION_DOWN,10f)
+   touch(android.view.MotionEvent.ACTION_MOVE,11f)
+   assertEquals(0,drags)
+   touch(android.view.MotionEvent.ACTION_MOVE,210f)
+   touch(android.view.MotionEvent.ACTION_MOVE,310f)
+   assertEquals(1,drags);assertEquals(1,otherDrags)
+   touch(android.view.MotionEvent.ACTION_CANCEL,310f)
+   stop();stopOther();window.callback=original
+  }} finally {main{activity.finish()}}
+ }
+ @Test fun onlyReadyViewPixelsInTheDraggedScrollRegionCanCoverEarly() {
+  org.junit.Assume.assumeTrue(android.os.Build.VERSION.SDK_INT >= 26)
+  val activity=activity();lateinit var registration:NativeUIProjection;lateinit var native:View
+  var capturable=true
+  var clicks=0
+  val receive=NativeUIProjection::class.java.getDeclaredMethod("receive",JSONObject::class.java).apply{isAccessible=true}
+  val drag=NativeUIProjection::class.java.getDeclaredMethod("coverBeforeScroll",NativeUIWindowInteraction.Drag::class.java).apply{isAccessible=true}
+  val idField=NativeUIProjection::class.java.getDeclaredField("id").apply{isAccessible=true}
+  val capturedField=NativeUIProjection::class.java.getDeclaredField("captured").apply{isAccessible=true}
+  var seq=0
+  fun request(action:String, configure:(JSONObject)->Unit={}) {
+   val payload=JSONObject().put("action",action);configure(payload)
+   receive.invoke(registration,JSONObject().put("key","${idField.get(registration)}:fixture:${++seq}").put("request",payload))
+  }
+  try {
+   val stubReady=CountDownLatch(1)
+   main {activity.web.evaluateJavascript("globalThis.WebViewNativeUIEngineRuntime={start:async()=>{},receive:()=>{},stop:()=>{}}") {stubReady.countDown()}}
+   assertTrue(stubReady.await(3,TimeUnit.SECONDS))
+   main {
+    native=View(activity);native.setBackgroundColor(Color.RED);native.setOnClickListener{clicks++}
+    activity.root.addView(native,FrameLayout.LayoutParams(100,80).apply{leftMargin=80;topMargin=100})
+    registration=NativeUIProjection(activity.window,activity.web,"Fixture","#missing",
+     failedFallback=NativeUIProjection.FailedFallback.NATIVE,captureMode=NativeUIProjection.CaptureMode.VIEW,
+     updatePlacement={},canCapture={capturable},view={native})
+    registration.awaitWebDraw={_,current,done->done(current())}
+   }
+   instrumentation.waitForIdleSync()
+   main {
+    request("connect")
+    val viewport=JSONObject().put("x",0).put("y",0).put("width",activity.web.width).put("height",activity.web.height)
+    request("track") {it.put("viewportWidth",activity.web.width).put("gesture",JSONObject()
+     .put("viewport",viewport).put("clip",viewport).put("offsetX",0).put("offsetY",100)
+     .put("rangeX",0).put("rangeY",activity.web.height*2))}
+    val origin=IntArray(2);activity.web.getLocationOnScreen(origin)
+    val vertical=NativeUIWindowInteraction.Drag(origin[0]+5f,origin[1]+200f,0f,-100f)
+    drag.invoke(registration,vertical)
+    assertEquals("Unprepared ads stay native",View.VISIBLE,native.visibility)
+    request("prepare") {it.put("ids",org.json.JSONArray().put("view")).put("viewportWidth",activity.web.width).put("revision",0)}
+   }
+   var token:String?=null
+   val deadline=System.currentTimeMillis()+10000
+   while(token==null && System.currentTimeMillis()<deadline) {
+    main {token=(capturedField.get(registration) as Map<*,*>).keys.firstOrNull() as? String}
+    if(token==null) Thread.sleep(20)
+   }
+   assertNotNull("Fixture pixels were not captured",token)
+   main {
+    val origin=IntArray(2);activity.web.getLocationOnScreen(origin)
+    drag.invoke(registration,NativeUIWindowInteraction.Drag(origin[0]+5f,origin[1]+200f,0f,-100f))
+    assertEquals("Decoded/drawn acknowledgement is required",View.VISIBLE,native.visibility)
+    request("prepared") {it.put("token",token)}
+    val location=IntArray(2);native.getLocationInWindow(location)
+    val now=android.os.SystemClock.uptimeMillis()
+    for(action in listOf(android.view.MotionEvent.ACTION_DOWN,android.view.MotionEvent.ACTION_UP)) {
+     val event=android.view.MotionEvent.obtain(now,now+10,action,location[0]+20f,location[1]+20f,0)
+     activity.window.callback.dispatchTouchEvent(event);event.recycle()
+    }
+   }
+   instrumentation.waitForIdleSync()
+   main {assertEquals("Prepared pixels must preserve the real native click",1,clicks)}
+   main {
+    val origin=IntArray(2);activity.web.getLocationOnScreen(origin)
+    val vertical=NativeUIWindowInteraction.Drag(origin[0]+5f,origin[1]+200f,0f,-100f)
+    capturable=false;drag.invoke(registration,vertical)
+    assertEquals(View.VISIBLE,native.visibility);capturable=true
+    drag.invoke(registration,vertical.copy(dx=-100f,dy=0f))
+    assertEquals("Horizontal motion cannot cover a vertical-only scroller",View.VISIBLE,native.visibility)
+    drag.invoke(registration,vertical.copy(downX=origin[0]-10f))
+    assertEquals(View.VISIBLE,native.visibility)
+    val location=IntArray(2);native.getLocationOnScreen(location)
+    drag.invoke(registration,vertical.copy(downX=location[0]+5f,downY=location[1]+5f))
+    assertEquals("A native input target retains its gesture",View.VISIBLE,native.visibility)
+    drag.invoke(registration,vertical)
+    assertEquals(View.INVISIBLE,native.visibility);assertTrue(registration.isProjecting)
+    request("release") {it.put("token",token)}
+    assertEquals("An unclaimed drag needs placement before retiring pixels",View.INVISIBLE,native.visibility)
+    request("release") {it.put("token",token).put("placement",JSONObject())}
+    assertEquals(View.VISIBLE,native.visibility);assertFalse(registration.isProjecting)
+    drag.invoke(registration,vertical)
+    assertEquals("Released tokens cannot hide the source",View.VISIBLE,native.visibility)
+   }
+  } finally {main{registration.close();activity.finish()}}
+ }
+
  @Test fun compositedCaptureRejectsPlacementHandoff() {
   val activity=activity()
   try {main {

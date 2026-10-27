@@ -134,6 +134,51 @@ class NativeUIProjection(
     private data class Anchor(val native: RectF, val image: RectF)
     private val anchors = mutableMapOf<String, Map<String, Anchor>>()
     private val webReadyTokens = mutableSetOf<String>()
+    private var latestReadyToken: String? = null
+    private var unclaimedDragToken: String? = null
+    private var dragScroll: JSONObject? = null
+    private var dragScale = 1f
+    // This path only starts from settled native ownership, never during a return.
+    private fun coverBeforeScroll(drag: NativeUIWindowInteraction.Drag) {
+        if (closed || suspended || !visible || destination != "native" ||
+            notificationDestination?.let { it != "native" } == true ||
+            captureMode != CaptureMode.VIEW || updatePlacement == null || isProjecting) return
+        val token = latestReadyToken ?: return
+        if (token !in webReadyTokens || snapshots.hidesNativeViews(token)) return
+        val scroll = dragScroll ?: return
+        val viewport = scroll.optJSONObject("viewport") ?: return
+        val origin = IntArray(2); webView.getLocationOnScreen(origin)
+        val x = (drag.downX - origin[0]) / dragScale
+        val y = (drag.downY - origin[1]) / dragScale
+        fun contains(rect: JSONObject) = x >= rect.optDouble("x") && y >= rect.optDouble("y") &&
+            x < rect.optDouble("x") + rect.optDouble("width") && y < rect.optDouble("y") + rect.optDouble("height")
+        if (x < 0 || y < 0 || x >= webView.width / dragScale || y >= webView.height / dragScale || !contains(viewport)) return
+        val vertical = kotlin.math.abs(drag.dy) > kotlin.math.abs(drag.dx)
+        val delta = if (vertical) drag.dy else drag.dx
+        val offset = scroll.optDouble(if (vertical) "offsetY" else "offsetX")
+        val remaining = scroll.optDouble(if (vertical) "rangeY" else "rangeX") - offset
+        if (!offset.isFinite() || !remaining.isFinite() || offset < 0 || remaining < 0) return
+        if ((delta > 0 && offset <= 0) || (delta < 0 && remaining <= 0)) return
+        val selected = captured[token] ?: return
+        val current = views()
+        if (selected.isEmpty() || selected.any { (id, view) -> current[id] !== view || !view.isShown || view.isLayoutRequested } || !canCapture()) return
+        // Native controls own gestures that start on them. Do not alter their input target.
+        if (selected.any { (id, view) ->
+            val anchor = anchors[token]?.get(id)?.native
+            anchor == null || kotlin.math.abs(anchor.width() - view.width) >= 0.1f ||
+                kotlin.math.abs(anchor.height() - view.height) >= 0.1f || view.scaleX != 1f || view.scaleY != 1f
+        }) return
+        val location = IntArray(2)
+        if (selected.values.any { view ->
+            view.getLocationOnScreen(location)
+            drag.downX >= location[0] && drag.downX < location[0] + view.width &&
+                drag.downY >= location[1] && drag.downY < location[1] + view.height
+        }) return
+        if (!snapshots.coverView(token, window, webView, selected.values.distinct())) return
+        isProjecting = true
+        unclaimedDragToken = token
+        reply(null, JSONObject().put("active", true).put("precovered", token))
+    }
     private val captured = mutableMapOf<String, Map<String, View>>()
     private var destination = "native"
     private var connected = false
@@ -149,6 +194,8 @@ class NativeUIProjection(
     private val stopInteraction: () -> Unit
     private var windowInteracting = false
     private fun resetSnapshots() {
+        latestReadyToken = null
+        unclaimedDragToken = null
         snapshots.reset()
         snapshots.interaction(windowInteracting)
     }
@@ -159,7 +206,7 @@ class NativeUIProjection(
         require(captureDelayMs >= 0) { "captureDelayMs must be nonnegative" }
         val config = JSONObject().put("runtime", if (runtime == Runtime.CORDOVA) "cordova" else "capacitor").put("id", id).put("plugin", plugin).put("projectionSelector", projectionSelector)
             .put("captureDelayMs", captureDelayMs).put("receiveListeners", receiveListeners.configuration()).put("failedFallback", failedFallback.value).put("captureMode", if (captureMode == CaptureMode.VIEW) "view" else "composited")
-        if (updatePlacement != null) config.put("placementHandoff", true)
+        if (updatePlacement != null) config.put("placementHandoff", true).put("nativeDragHandoff", true)
         val runtime = webView.context.assets.open("native-ui-engine.js").bufferedReader().use { it.readText() }
         val source = "if (!globalThis.WebViewNativeUIEngineRuntime) { $runtime } WebViewNativeUIEngineRuntime.start($config).catch(console.error);"
         if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
@@ -179,7 +226,7 @@ class NativeUIProjection(
                 throw error
             }
         } else throw UnsupportedOperationException("WebView document-start scripts are required")
-        stopInteraction = NativeUIWindowInteraction.observe(window) { active ->
+        stopInteraction = NativeUIWindowInteraction.observe(window, drag = ::coverBeforeScroll) { active ->
             windowInteracting = active
             snapshots.interaction(active)
             reply(null, JSONObject().put("active", active))
@@ -250,7 +297,12 @@ class NativeUIProjection(
                 request.optString("destination").takeIf { it in listOf("native", "web", "none") }?.let { destination = it; connected = true }
                 complete(JSONObject())
             }
-            "track" -> complete(JSONObject().put("tracked", false))
+            "track" -> {
+                val width = request.optDouble("viewportWidth")
+                dragScroll = if (width.isFinite() && width > 0) request.optJSONObject("gesture") else null
+                if (dragScroll != null) dragScale = (webView.width / width).toFloat()
+                complete(JSONObject().put("tracked", false))
+            }
             "prepare" -> {
                 val ids = request.optJSONArray("ids")?.let { array -> (0 until array.length()).map { array.optString(it) } } ?: emptyList()
                 val selected = views().filterKeys { it in ids }
@@ -280,7 +332,7 @@ class NativeUIProjection(
             }
             "prepared" -> {
                 awaitWebDraw(webView, { !closed && !suspended && visible && captured.containsKey(token) }) { ready ->
-                    if (ready) webReadyTokens.add(token)
+                    if (ready) { webReadyTokens.add(token); latestReadyToken = token }
                     complete(JSONObject())
                 }
             }
@@ -290,7 +342,7 @@ class NativeUIProjection(
                 val valid = visible && canCapture() && selected.isNotEmpty() && selected.all { (id, view) -> current[id] === view }
                 restoreAccepted = true
                 if (captureMode == CaptureMode.VIEW && valid) {
-                    fun coverView() = snapshots.coverView(token, window, webView, selected.values.distinct()).also { if (it) isProjecting = true }
+                    fun coverView() = snapshots.coverView(token, window, webView, selected.values.distinct()).also { if (it) { isProjecting = true; unclaimedDragToken = null } }
                     if (token in webReadyTokens) complete(JSONObject().put("shown", coverView()))
                     else {
                         val current = { !closed && generation == coverGeneration && !suspended && visible &&
@@ -351,27 +403,9 @@ class NativeUIProjection(
                 if (!restoreAccepted || suspended) { reply(key, JSONObject(), "Native UI geometry changed or hidden"); return }
                 prepareNativeReveal()
                 snapshots.restoreViews(); snapshots.finishCovering()
-                val root = window.decorView
-                val observer = root.viewTreeObserver
-                lateinit var listener: ViewTreeObserver.OnDrawListener
-                var done = false
-                val finish = Runnable {
-                    if (!done) {
-                        done = true
-                        if (observer.isAlive) observer.removeOnDrawListener(listener)
-                        complete(JSONObject())
-                    }
-                }
-                listener = ViewTreeObserver.OnDrawListener { root.postOnAnimation { root.post(finish) } }
-                observer.addOnDrawListener(listener)
-                root.invalidate()
-                // A detached window must not report successful drawing.
-                root.postDelayed({ if (!done) {
-                    done = true
-                    if (observer.isAlive) observer.removeOnDrawListener(listener)
-                    reply(key, JSONObject(), "Native UI did not draw")
-                } }, 250)
+                afterNativeDraw({ complete(JSONObject()) }, { reply(key, JSONObject(), "Native UI did not draw") })
             }
+
             "visibility" -> {
                 coverGeneration++
                 visible = request.optBoolean("visible") && !suspended
@@ -388,10 +422,46 @@ class NativeUIProjection(
                 if (ready) complete(JSONObject()) else reply(key, JSONObject(), "Web image did not draw")
             }
             "restored" -> { snapshots.retireCopy(token, false); complete(JSONObject()) }
-            "release" -> { if (ownsHiddenToken()) { if (!applyPlacement()) return; prepareNativeReveal() }; snapshots.release(token); webReadyTokens.remove(token); captured.remove(token); anchors.remove(token); complete(JSONObject()) }
+            "release" -> {
+                val revealing = ownsHiddenToken()
+                if (revealing) {
+                    if (unclaimedDragToken == token && request.optJSONObject("placement") == null) {
+                        complete(JSONObject().put("requiresPlacement", true)); return
+                    }
+                    if (!applyPlacement()) return
+                    prepareNativeReveal()
+                }
+                if (unclaimedDragToken == token) unclaimedDragToken = null
+                snapshots.release(token); webReadyTokens.remove(token)
+                if (latestReadyToken == token) latestReadyToken = null
+                captured.remove(token); anchors.remove(token)
+                if (revealing) afterNativeDraw({ complete(JSONObject()) }, { reply(key, JSONObject(), "Native UI did not draw") })
+                else complete(JSONObject())
+            }
             "reset" -> { coverGeneration++; if (!suspended && visible && !applyPlacement()) return; prepareNativeReveal(); resetSnapshots(); webReadyTokens.clear(); captured.clear(); anchors.clear(); complete(JSONObject()) }
             else -> complete(JSONObject())
         }
+    }
+    private fun afterNativeDraw(complete: () -> Unit, failed: () -> Unit) {
+        val root = window.decorView
+        val observer = root.viewTreeObserver
+        lateinit var listener: android.view.ViewTreeObserver.OnDrawListener
+        var done = false
+        val finish = Runnable {
+            if (!done) {
+                done = true
+                if (observer.isAlive) observer.removeOnDrawListener(listener)
+                complete()
+            }
+        }
+        listener = android.view.ViewTreeObserver.OnDrawListener { root.postOnAnimation { root.post(finish) } }
+        observer.addOnDrawListener(listener)
+        root.invalidate()
+        root.postDelayed({ if (!done) {
+            done = true
+            if (observer.isAlive) observer.removeOnDrawListener(listener)
+            failed()
+        } }, 250)
     }
     private fun reply(key: String?, value: JSONObject, error: String? = null) {
         if (closed) return

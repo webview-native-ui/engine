@@ -318,6 +318,20 @@ This opt-in does not change registrations without `updatePlacement`. Android rej
 `updatePlacement` unless `captureMode = CaptureMode.VIEW`; live video and other ineligible captures
 continue native placement tracking under `failedFallback = NATIVE`.
 
+### Android drag entry for prepared opaque views
+
+For VIEW registrations with `updatePlacement`, Android can hide a settled native
+view before WebView consumes the first drag MOVE. It requires drawn prepared
+pixels, a current source/size, and a valid scroll region/direction. Native-targeted
+gestures, taps, unsupported captures and programmatic scrolling retain their
+existing paths. The Web session adopts the native cover and holds it through the
+gesture before using the usual final-placement/draw acknowledgement on return.
+
+If cache retirement races the native cover notification, the underlay stays until
+native release acknowledgement. Native can request a fresh placement and confirm
+its draw before allowing those pixels to disappear. Explicit native hide/teardown
+still retires the Web proxy immediately. See [implementation and verification](android-scroll-entry.md).
+
 ## Capture timing
 
 `captureDelayMs` is an optional registration setting shared by Capacitor and Cordova.

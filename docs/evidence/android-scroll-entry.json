@@ -1,0 +1,252 @@
+{
+  "platform": "Android emulator-5580 / API 36.1",
+  "method": "Same instrumented APK, early path disabled/enabled by a temporary log-tag gate; 8 swipes with 2 native ads per run. No parallel builds or tests during recording.",
+  "apkSha256": "d1dcfa680db62fb5611465f037cf529b62052960657bc0246b348d2b3130875f",
+  "runs": {
+    "final-baseline": {
+      "samples": [
+        {
+          "gesture": 1,
+          "path": "bridge-hide",
+          "hideAfterDragMs": 86,
+          "drawAfterDragMs": 94
+        },
+        {
+          "gesture": 1,
+          "path": "bridge-hide",
+          "hideAfterDragMs": 90,
+          "drawAfterDragMs": 94
+        },
+        {
+          "gesture": 2,
+          "path": "bridge-hide",
+          "hideAfterDragMs": 17,
+          "drawAfterDragMs": 34
+        },
+        {
+          "gesture": 2,
+          "path": "bridge-hide",
+          "hideAfterDragMs": 34,
+          "drawAfterDragMs": 101
+        },
+        {
+          "gesture": 3,
+          "path": "bridge-hide",
+          "hideAfterDragMs": 19,
+          "drawAfterDragMs": 34
+        },
+        {
+          "gesture": 3,
+          "path": "bridge-hide",
+          "hideAfterDragMs": 36,
+          "drawAfterDragMs": 84
+        },
+        {
+          "gesture": 4,
+          "path": "bridge-hide",
+          "hideAfterDragMs": 19,
+          "drawAfterDragMs": 35
+        },
+        {
+          "gesture": 4,
+          "path": "bridge-hide",
+          "hideAfterDragMs": 36,
+          "drawAfterDragMs": 51
+        },
+        {
+          "gesture": 5,
+          "path": "bridge-hide",
+          "hideAfterDragMs": 19,
+          "drawAfterDragMs": 35
+        },
+        {
+          "gesture": 5,
+          "path": "bridge-hide",
+          "hideAfterDragMs": 36,
+          "drawAfterDragMs": 81
+        },
+        {
+          "gesture": 6,
+          "path": "bridge-hide",
+          "hideAfterDragMs": 22,
+          "drawAfterDragMs": 36
+        },
+        {
+          "gesture": 6,
+          "path": "bridge-hide",
+          "hideAfterDragMs": 23,
+          "drawAfterDragMs": 36
+        },
+        {
+          "gesture": 7,
+          "path": "bridge-hide",
+          "hideAfterDragMs": 20,
+          "drawAfterDragMs": 41
+        },
+        {
+          "gesture": 7,
+          "path": "bridge-hide",
+          "hideAfterDragMs": 21,
+          "drawAfterDragMs": 41
+        },
+        {
+          "gesture": 8,
+          "path": "bridge-hide",
+          "hideAfterDragMs": 20,
+          "drawAfterDragMs": 35
+        },
+        {
+          "gesture": 8,
+          "path": "bridge-hide",
+          "hideAfterDragMs": 36,
+          "drawAfterDragMs": 118
+        }
+      ],
+      "hideMedianMs": 22.5,
+      "hideMaxMs": 90,
+      "recordedFrameAnalysis": {
+        "frames": 204,
+        "eligible": 204,
+        "minimumPixels": 577,
+        "blankRuns": []
+      }
+    },
+    "final-enabled": {
+      "samples": [
+        {
+          "gesture": 1,
+          "path": "early-hide",
+          "hideAfterDragMs": 3,
+          "drawAfterDragMs": 9
+        },
+        {
+          "gesture": 1,
+          "path": "early-hide",
+          "hideAfterDragMs": 4,
+          "drawAfterDragMs": 9
+        },
+        {
+          "gesture": 2,
+          "path": "early-hide",
+          "hideAfterDragMs": 1,
+          "drawAfterDragMs": 3
+        },
+        {
+          "gesture": 2,
+          "path": "early-hide",
+          "hideAfterDragMs": 2,
+          "drawAfterDragMs": 3
+        },
+        {
+          "gesture": 3,
+          "path": "early-hide",
+          "hideAfterDragMs": 1,
+          "drawAfterDragMs": 2
+        },
+        {
+          "gesture": 3,
+          "path": "early-hide",
+          "hideAfterDragMs": 2,
+          "drawAfterDragMs": 2
+        },
+        {
+          "gesture": 4,
+          "path": "early-hide",
+          "hideAfterDragMs": 0,
+          "drawAfterDragMs": 1
+        },
+        {
+          "gesture": 4,
+          "path": "early-hide",
+          "hideAfterDragMs": 0,
+          "drawAfterDragMs": 1
+        },
+        {
+          "gesture": 5,
+          "path": "early-hide",
+          "hideAfterDragMs": 1,
+          "drawAfterDragMs": 2
+        },
+        {
+          "gesture": 5,
+          "path": "early-hide",
+          "hideAfterDragMs": 1,
+          "drawAfterDragMs": 2
+        },
+        {
+          "gesture": 6,
+          "path": "early-hide",
+          "hideAfterDragMs": 1,
+          "drawAfterDragMs": 2
+        },
+        {
+          "gesture": 6,
+          "path": "early-hide",
+          "hideAfterDragMs": 1,
+          "drawAfterDragMs": 2
+        },
+        {
+          "gesture": 7,
+          "path": "early-hide",
+          "hideAfterDragMs": 1,
+          "drawAfterDragMs": 5
+        },
+        {
+          "gesture": 7,
+          "path": "early-hide",
+          "hideAfterDragMs": 4,
+          "drawAfterDragMs": 5
+        },
+        {
+          "gesture": 8,
+          "path": "early-hide",
+          "hideAfterDragMs": 0,
+          "drawAfterDragMs": 2
+        },
+        {
+          "gesture": 8,
+          "path": "early-hide",
+          "hideAfterDragMs": 1,
+          "drawAfterDragMs": 2
+        }
+      ],
+      "hideMedianMs": 1.0,
+      "hideMaxMs": 4,
+      "recordedFrameAnalysis": {
+        "frames": 223,
+        "eligible": 214,
+        "minimumPixels": 437,
+        "blankRuns": []
+      }
+    }
+  },
+  "limitations": [
+    "Native View.INVISIBLE / UI draw callback timings, not physical display-frame timing.",
+    "Single sequential pair with different served test creatives, not a CPU/memory or occurrence-rate benchmark.",
+    "Empty-frame heuristic cannot detect all overlap.",
+    "Final clean build removes instrumentation and makes explicit native hide/teardown retire pending pixels immediately; normal entry path is unchanged."
+  ],
+  "rawEvidenceRoot": "/private/tmp/admob-native-entry-proof",
+  "cleanAcceptance": {
+    "apkSha256": "32cbdc9da915ee01470dd2fd17df9629edf23d457a3b3d23cf3d7dd1a07f4a1a",
+    "normal": {
+      "eligibleFrames": 200,
+      "blankCandidates": 0
+    },
+    "bothPrepared": {
+      "frames": 226,
+      "eligibleFrames": 219,
+      "blankCandidates": 0,
+      "initialPngFiles": 2,
+      "newDecodedImageUrls": 0,
+      "finalFileProbe": "cache directory absent; not an allocation benchmark"
+    },
+    "multipleAds": {
+      "eligibleFramesPerAd": 65,
+      "blankCandidates": 0,
+      "bridgeErrors": 0,
+      "scenarios": ["mixed capture availability", "reload one ad", "detach one ad", "pause both"]
+    },
+    "scrollSpeedBenchmark": false
+  }
+}
