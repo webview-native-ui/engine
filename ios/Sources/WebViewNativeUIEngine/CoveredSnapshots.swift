@@ -1,5 +1,6 @@
 import UIKit
 import CoreImage
+import ImageIO
 
 /// Immutable, locally served images of controls that will be covered by a Web overlay.
 /// Native interaction invalidates in-flight captures before Web receives the activation.
@@ -116,9 +117,16 @@ public final class NativeUICoveredSnapshots {
                     guard let pixels = crop.image.cgImage,
                           let png = imageContext.pngRepresentation(of: CIImage(cgImage: pixels), format: .RGBA16,
                             colorSpace: outputSpace, options: [:]) else { throw CocoaError(.fileWriteUnknown) }
+                    // Native entry/return copies must use the same encoded pixels as Web,
+                    // including gamut clipping performed by integer PNG conversion.
+                    guard let source = CGImageSourceCreateWithData(png as CFData, nil),
+                          let decoded = CGImageSourceCreateImageAtIndex(source, 0,
+                            [kCGImageSourceShouldCacheImmediately: true] as CFDictionary)
+                    else { throw CocoaError(.fileWriteUnknown) }
+                    let image = UIImage(cgImage: decoded, scale: scale, orientation: .up)
                     let file = directory.appendingPathComponent("\(token)-\(index).png")
                     try png.write(to: file, options: .atomic)
-                    parts.append(Part(ids: crop.ids, frame: crop.frame, image: crop.image, file: file))
+                    parts.append(Part(ids: crop.ids, frame: crop.frame, image: image, file: file))
                 }
             } catch {
                 parts.forEach { try? FileManager.default.removeItem(at: $0.file) }

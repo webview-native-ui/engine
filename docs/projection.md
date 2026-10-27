@@ -343,8 +343,10 @@ changing content has no guaranteed settled snapshot.
 
 Prepared window snapshots use an extended Display P3 Float16 bitmap during capture
 and are encoded as 16-bit Display P3 PNGs on a background queue. The Web projection
-displays the prepared image directly, without a Canvas or WebGPU conversion. Encoding
-stays outside the overlay handoff; consumers do not need a new setting or dependency.
+displays the prepared image directly, without a Canvas or WebGPU conversion. Native
+entry and return copies also use the decoded PNG, so both sides share the same
+prepared pixels after color conversion. Encoding and decoding
+stay outside the overlay handoff; consumers do not need a new setting or dependency.
 
 This reduces color loss in wide-gamut content but does not guarantee identical Liquid
 Glass appearance: native compositing and conversion to integer PNG can still change

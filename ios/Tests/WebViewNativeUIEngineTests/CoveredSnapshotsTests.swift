@@ -69,8 +69,51 @@ final class NativeUICoveredSnapshotsTests: XCTestCase {
             XCTAssertGreaterThan(rgba[channel], 240)
             XCTAssertLessThan(rgba[2 - channel], 10, "Capture must keep top red and bottom blue at the requested crop")
         }
+        XCTAssertTrue(snapshots.cover(token, in: view, views: []))
+        let copy = try XCTUnwrap(window.subviews.compactMap { $0 as? UIImageView }.first?.image?.cgImage)
+        XCTAssertFalse(copy.bitmapInfo.contains(.floatComponents), "Native handoff must use encoded PNG pixels, not the pre-conversion Float16 crop")
+        XCTAssertEqual(copy.bitsPerComponent, image.bitsPerComponent)
+        XCTAssertEqual(copy.colorSpace?.name, image.colorSpace?.name)
+        XCTAssertEqual(copy.dataProvider?.data as Data?, image.dataProvider?.data as Data?,
+                       "Native and Web handoff copies must share the same decoded PNG pixels")
         snapshots.release(token)
         XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+    }
+
+    @MainActor func testCaptureRetainsSubEightBitColorDifferences() async throws {
+        let owner = UIViewController()
+        let window = SnapshotTestWindow(frame: UIScreen.main.bounds)
+        window.precisionPattern = true
+        window.rootViewController = owner
+        window.makeKeyAndVisible()
+        let view = owner.view!
+        view.frame = window.bounds
+        window.layoutIfNeeded()
+        let snapshots = NativeUICoveredSnapshots()
+        defer { snapshots.reset(); window.isHidden = true }
+        let result: [String: Any] = await withCheckedContinuation { continuation in
+            snapshots.prepare(frames: { ["control": CGRect(x: 20, y: 80, width: 48, height: 48)] },
+                              in: view, viewportWidth: view.bounds.width) { continuation.resume(returning: $0) }
+        }
+        let parts = try XCTUnwrap(result["parts"] as? [[String: Any]])
+        let path = try XCTUnwrap(parts.first?["url"] as? String)
+        let image = try XCTUnwrap(UIImage(contentsOfFile: try XCTUnwrap(URL(string: path)).path)?.cgImage)
+        var samples: [Float] = []
+        for fraction in [0.25, 0.75] {
+            let sample = try XCTUnwrap(image.cropping(to: CGRect(x: Int(Double(image.width) * fraction), y: image.height / 2, width: 1, height: 1)))
+            var rgba = [Float](repeating: 0, count: 4)
+            try rgba.withUnsafeMutableBytes { bytes in
+                let context = try XCTUnwrap(CGContext(data: bytes.baseAddress, width: 1, height: 1,
+                    bitsPerComponent: 32, bytesPerRow: 16, space: CGColorSpace(name: CGColorSpace.extendedDisplayP3)!,
+                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.floatComponents.rawValue | CGBitmapInfo.byteOrder32Little.rawValue))
+                context.draw(sample, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+            }
+            samples.append(rgba[0])
+        }
+        // Both input values round to 128/255 at 8-bit precision.
+        XCTAssertEqual(samples[0], 0.5003, accuracy: 0.0003)
+        XCTAssertEqual(samples[1], 0.5008, accuracy: 0.0003)
+        XCTAssertGreaterThan(samples[1] - samples[0], 0.0002)
     }
 
     @MainActor func testMovingModalCaptureAndReturnDoNotReplaceBackgroundOwnership() async throws {
@@ -172,6 +215,7 @@ final class NativeUICoveredSnapshotsTests: XCTestCase {
 // pixels here; actual UIKit capture is also verified in hosted device integration tests.
 final class SnapshotTestWindow: UIWindow {
     var pattern = false
+    var precisionPattern = false
     override func drawHierarchy(in rect: CGRect, afterScreenUpdates: Bool) -> Bool {
         UIColor.white.setFill()
         UIRectFill(rect)
@@ -180,6 +224,14 @@ final class SnapshotTestWindow: UIWindow {
             UIRectFill(CGRect(x: 8, y: 68, width: 72, height: 36))
             UIColor.blue.setFill()
             UIRectFill(CGRect(x: 8, y: 104, width: 72, height: 36))
+        }
+        if precisionPattern {
+            let context = UIGraphicsGetCurrentContext()!
+            let space = CGColorSpace(name: CGColorSpace.extendedDisplayP3)!
+            for (x, red) in [(8.0, 0.5003), (44.0, 0.5008)] {
+                context.setFillColor(CGColor(colorSpace: space, components: [red, 0.25, 0.25, 1])!)
+                context.fill(CGRect(x: x, y: 68, width: 36, height: 72))
+            }
         }
         return true
     }
