@@ -21,7 +21,6 @@ try {
   const files = new Set(packed.files.map((file) => file.path));
   for (const file of [
     'LICENSE',
-    'NOTICE',
     'README.md',
     'WebViewNativeUIEngine.podspec',
     'ios/Sources/WebViewNativeUIEngine/Resources/native-ui-engine.js',
@@ -31,7 +30,7 @@ try {
     for (const path of Object.values(entry)) assert(files.has(path.replace(/^\.\//, '')), path);
   assert(!files.has('Package.swift'), 'SwiftPM resolves from Git');
   assert(![...files].some((file) => /^(tests|android|node_modules)\//.test(file)));
-  console.log('npm archive: exports, native resources and notices verified');
+  console.log('npm archive: exports, native resources and license verified');
 } finally {
   rmSync(directory, { recursive: true, force: true });
 }

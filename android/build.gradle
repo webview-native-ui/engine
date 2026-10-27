@@ -73,16 +73,16 @@ tasks.register('centralBundle', Zip) {
     }
 }
 
-// Keep the package notices in binary and source distributions without duplicate source files.
+// Keep the package license in binary and source distributions without duplicate source files.
 def licenseResources = tasks.register('prepareLicenseResources', Sync) {
-    from('..') { include 'LICENSE', 'NOTICE' }
+    from('..') { include 'LICENSE' }
     into(layout.buildDirectory.dir('generated/license-resources/META-INF/webview-native-ui-engine'))
 }
 android.sourceSets.main.resources.srcDir(layout.buildDirectory.dir('generated/license-resources'))
 tasks.matching { it.name.startsWith('process') && it.name.endsWith('JavaRes') }.configureEach { dependsOn licenseResources }
 tasks.withType(Jar).configureEach {
     if (name in ['sourceReleaseJar', 'javaDocReleaseJar']) {
-        from('..') { include 'LICENSE', 'NOTICE'; into 'META-INF/webview-native-ui-engine' }
+        from('..') { include 'LICENSE'; into 'META-INF/webview-native-ui-engine' }
     }
 }
 

@@ -6,7 +6,7 @@ Pod::Spec.new do |s|
  s.summary = 'Native UI infrastructure for Capacitor and Cordova plugin maintainers.'
  s.homepage = 'https://github.com/webview-native-ui/engine'
  s.license = { :type => 'MIT', :file => 'LICENSE' }
- s.preserve_paths = 'LICENSE', 'NOTICE'
+ s.preserve_paths = 'LICENSE'
  s.author = { 'rdlabo' => 'sakakibara@rdlabo.jp' }
  s.source = { :git => 'https://github.com/webview-native-ui/engine.git', :tag => "v#{s.version}" }
  s.resource_bundles = { 'WebViewNativeUIEngine' => ['ios/Sources/WebViewNativeUIEngine/Resources/*.js'] }

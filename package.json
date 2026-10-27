@@ -24,7 +24,6 @@
     "WebViewNativeUIEngine.podspec",
     "README.md",
     "LICENSE",
-    "NOTICE",
     "docs"
   ],
   "scripts": {
