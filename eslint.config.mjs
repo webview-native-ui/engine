@@ -15,6 +15,7 @@ export default [
       'test-results/**',
       'playwright-report/**',
       'ios/Sources/WebViewNativeUIEngine/Resources/native-ui-engine.js',
+      'runtime/native-ui-engine.js',
     ],
   },
   {

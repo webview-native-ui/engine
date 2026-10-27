@@ -8,6 +8,8 @@ The public entry points are `src/index.ts` and `src/ionic.ts`, with shared contr
 - `src/projection/`: image handoff, projection ownership, events and styles.
 - `src/dom/`: geometry, scrolling, visibility and overlay coordination.
 
+`npm run build` bundles `src/native/bootstrap.ts` into `runtime/native-ui-engine.js`, the shared WebView runtime. Android packages this file directly as an asset. The build also copies it into `ios/Sources/WebViewNativeUIEngine/Resources` because SwiftPM requires resources inside the target directory. Both generated files are committed so native consumers do not need Node.js. Edit the TypeScript source, not either generated file; CI checks regeneration and verifies the runtime included in npm and Maven archives.
+
 Browser tests mirror these groups under `tests/`. `tests/cordova/` contains the real native consumer fixture.
 
 Use Node.js 24, matching CI. From this repository:
@@ -24,6 +26,8 @@ xcodebuild -scheme WebViewNativeUIEngine -destination 'platform=iOS Simulator,id
 Lint combines strict TypeScript checking, the standard ESLint/TypeScript recommended rules, and typed Promise checks for `src`. Scripts and tests receive syntax-level linting; Prettier owns formatting. `npm run format` applies formatting only. Bridge payloads and test doubles may use explicit `any`; production boundary validation remains necessary. An explicit `void` marks background work, but does not handle a rejected Promise. Android uses `lintRelease` with warnings treated as errors in CI; Swift is compiled and tested on an iOS simulator.
 
 The engine is versioned independently of its consumers. Publish order is the native Maven artifact → npm engine; consumers upgrade separately. npm releases verify that the matching POM and AAR exist on Maven Central before publication. No publication is performed by build or test commands. Tests cover plain DOM, fractional/RTL geometry, stale ACKs, image ownership and native WKWebView scroll tracking; consumer tests remain responsible for Ionic/SDK integration.
+
+CI-only setup, packaging commands and GitHub outputs are defined in `.github/workflows/`. Scripts retain the runtime build, reusable consumer/package verification, and tested publication logic (Central state handling and npm artifact comparison).
 
 ## Maven publication
 

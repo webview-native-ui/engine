@@ -75,4 +75,24 @@ jobs:
         env:
           CENTRAL_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
           CENTRAL_PASSWORD: ${{ secrets.CENTRAL_PASSWORD }}
-        run: node scripts/native-ui-engine-release/publish.mjs
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+        with:
+          script: |
+            const { readFile } = await import('node:fs/promises');
+            const { pathToFileURL } = await import('node:url');
+            const { publishBundle } = await import(pathToFileURL(`${process.cwd()}/scripts/native-ui-engine-release/publish.mjs`));
+            const { CENTRAL_USERNAME, CENTRAL_PASSWORD } = process.env;
+            if (!CENTRAL_USERNAME || !CENTRAL_PASSWORD) throw new Error('Central user token secrets are required');
+            const version = JSON.parse(await readFile('package.json', 'utf8')).version;
+            const name = `engine-${version}`;
+            const token = Buffer.from(`${CENTRAL_USERNAME}:${CENTRAL_PASSWORD}`).toString('base64');
+            core.setSecret(token);
+            await publishBundle({
+              bundle: await readFile(`android/build/distributions/${name}-central.zip`),
+              name,
+              token,
+              record: async message => {
+                core.info(message);
+                await core.summary.addRaw(`${message}\n`).write();
+              },
+            });

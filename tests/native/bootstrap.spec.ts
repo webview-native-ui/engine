@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { buildSync } from 'esbuild';
-const runtime = readFileSync('ios/Sources/WebViewNativeUIEngine/Resources/native-ui-engine.js', 'utf8');
+const runtime = readFileSync('runtime/native-ui-engine.js', 'utf8');
 
 test('the bundled native runtime matches the TypeScript source', () => {
   const expected = buildSync({

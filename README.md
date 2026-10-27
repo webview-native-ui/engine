@@ -49,4 +49,4 @@ The current API is pre-1.0. Use matching, pinned Engine versions across npm and 
 
 ## License
 
-[Zlib](LICENSE). Commercial use, modification and redistribution are permitted with the license's notice and attribution requirements. [NOTICE](NOTICE) preserves upstream MIT notices; the Engine's license does not change the licenses of applications or plugins that depend on it.
+[MIT](LICENSE). Commercial use, modification and redistribution are permitted with the license's notice and attribution requirements. The Engine's license does not change the licenses of applications or plugins that depend on it.

@@ -34,7 +34,7 @@ afterEvaluate {
                     name = 'WebView Native UI Engine'
                     description = 'Native UI placement and Web projection for Capacitor and Cordova plugin maintainers.'
                     url = 'https://github.com/webview-native-ui/engine'
-                    licenses { license { name = 'Zlib'; url = 'https://opensource.org/license/zlib' } }
+                    licenses { license { name = 'MIT'; url = 'https://opensource.org/license/mit' } }
                     developers { developer { id = 'rdlabo'; name = 'rdlabo'; url = 'https://github.com/rdlabo' } }
                     scm {
                         url = 'https://github.com/webview-native-ui/engine'
@@ -73,17 +73,17 @@ tasks.register('centralBundle', Zip) {
     }
 }
 
-// Keep the package notices in binary and source distributions without duplicate source files.
+// Keep the package license in binary and source distributions without duplicate source files.
 def licenseResources = tasks.register('prepareLicenseResources', Sync) {
-    from('..') { include 'LICENSE', 'NOTICE' }
+    from('..') { include 'LICENSE' }
     into(layout.buildDirectory.dir('generated/license-resources/META-INF/webview-native-ui-engine'))
 }
 android.sourceSets.main.resources.srcDir(layout.buildDirectory.dir('generated/license-resources'))
 tasks.matching { it.name.startsWith('process') && it.name.endsWith('JavaRes') }.configureEach { dependsOn licenseResources }
 tasks.withType(Jar).configureEach {
     if (name in ['sourceReleaseJar', 'javaDocReleaseJar']) {
-        from('..') { include 'LICENSE', 'NOTICE'; into 'META-INF/webview-native-ui-engine' }
+        from('..') { include 'LICENSE'; into 'META-INF/webview-native-ui-engine' }
     }
 }
 
-android.sourceSets.main.assets.srcDir('../ios/Sources/WebViewNativeUIEngine/Resources')
+android.sourceSets.main.assets.srcDir('../runtime')
