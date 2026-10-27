@@ -17,6 +17,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+      - name: Verify checked-in native runtime matches source
+        run: git diff --exit-code -- ios/Sources/CapacitorNativeUIEngine/Resources/native-ui-engine.js
       - run: npm run lint
       - run: npm run test:release
       - run: npm run test:package

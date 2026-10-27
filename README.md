@@ -1,6 +1,6 @@
 # Capacitor Native UI Engine
 
-`@rdlabo/capacitor-native-ui-engine` is infrastructure **for Capacitor plugin maintainers**. It is a library dependency that renders no controls, registers no application-facing Capacitor plugin, and requires no Ionic or Angular runtime. Its native registration owns a scoped internal WebView channel.
+`@rdlabo/capacitor-native-ui-engine` is infrastructure **for Capacitor and Cordova plugin maintainers**. It is a library dependency that renders no controls, registers no application-facing Capacitor plugin, and requires no Ionic or Angular runtime. Its native registration owns a scoped internal WebView channel.
 
 The engine associates existing DOM and native views, tracks supported scrolling, prepares native images before interaction, and manages image handoff and native restoration. The consuming plugin creates, attaches, positions and sizes its native views, provides the corresponding DOM, and reports presentation events. Registration does not lay out a native view from the DOM or resize it when the DOM changes. Existing renderers can also use the low-level APIs with their own ordered transport.
 
@@ -137,9 +137,9 @@ Make the corresponding changes in `android/src/main/java/<your-package>/ExampleP
 +    private var projection: NativeUIProjection? = null
 
      override fun load() {
-+        NativeUIProjection.install(bridge.webView)
          // Existing code creates and attaches nativeView here.
 +        projection = runCatching {
++            NativeUIProjection.install(bridge.webView)
 +            NativeUIProjection(
 +                window = activity.window,
 +                webView = bridge.webView,
@@ -183,7 +183,9 @@ Make the corresponding changes in `android/src/main/java/<your-package>/ExampleP
 ```
 
 On Android, call `NativeUIProjection.install(bridge.webView)` in plugin `load()`,
-before the first navigation, even when SDK views arrive later. Registrations then
+before the first navigation, even when SDK views arrive later. Include installation
+in the same error boundary as registration; if it fails, keep the existing Web
+fallback and do not retry installation after navigation. Registrations then
 share that main-frame, origin-restricted channel; they do not install new message
 listeners into a loaded WebView. This avoids a WebView native crash reproduced when
 registering an asynchronously loaded AdMob view. The registration constructor can

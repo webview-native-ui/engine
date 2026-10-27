@@ -148,6 +148,38 @@ final class NativeUIProjectionTests: XCTestCase {
         try await wait(web, "document.querySelector('#slot')?.getAttributeNames().some(n=>n.startsWith('data-native-ui-session-') && document.querySelector('#slot').getAttribute(n)==='native') === true")
         XCTAssertFalse(native.isHidden, "Reconnection must use the latest native notification")
     }
+    @MainActor func testCordovaNotificationsAndTeardownDoNotReachUntrustedNavigation() async throws {
+        let configuration = WKWebViewConfiguration()
+        configuration.setURLSchemeHandler(ProjectionFixture(), forURLScheme: "capacitor")
+        configuration.userContentController.addUserScript(WKUserScript(source: """
+          window.calls = [];
+          window.CapacitorNativeUIEngineRuntime = {
+            start: async () => {},
+            notify: (...args) => calls.push(args),
+            receive: (...args) => calls.push(args),
+            stop: (...args) => calls.push(args)
+          };
+        """, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        let web = WKWebView(frame: .zero, configuration: configuration)
+        let registration = try NativeUIProjection(webView: web, plugin: "Fixture", projectionSelector: "#slot",
+            receiveListeners: .init(update: ["updated"]), runtime: .cordova, view: { nil })
+        defer { registration.destroy() }
+        web.load(URLRequest(url: URL(string: "capacitor://localhost/fixture")!))
+        try await wait(web, "location.host === 'localhost' && typeof calls !== 'undefined'")
+        registration.receive("updated", data: ["value": "private"])
+        try await wait(web, "calls.length === 1")
+        web.load(URLRequest(url: URL(string: "capacitor://untrusted.example/fixture")!))
+        try await wait(web, "location.host === 'untrusted.example' && typeof calls !== 'undefined'")
+        registration.receive("updated", data: ["value": "private"])
+        // receive dispatches onto the main queue; drain it before the ordered WebKit check.
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            DispatchQueue.main.async { continuation.resume() }
+        }
+        registration.destroy()
+        let calls = try await web.evaluateJavaScript("calls.length") as? Int
+        XCTAssertEqual(calls, 0, "Native data and lifecycle messages must obey the allowed origin after navigation")
+    }
+
     @MainActor private func wait(_ web: WKWebView, _ expression: String, timeout: TimeInterval = 8) async throws {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {

@@ -33,6 +33,7 @@ public final class NativeUIProjection: NSObject, WKScriptMessageHandler {
     private var masks: [String: CAShapeLayer] = [:]
     private let id = "nativeUI" + UUID().uuidString.replacingOccurrences(of: "-", with: "")
     private let origins: Set<String>
+    private let allowedOriginsJSON: String
     private let canCapture: () -> Bool
     private let runtime: Runtime
     private let receiveListeners: ReceiveListeners
@@ -69,6 +70,7 @@ public final class NativeUIProjection: NSObject, WKScriptMessageHandler {
          failedFallback: FailedFallback = .web, runtime: Runtime = .capacitor,
          canCapture: @escaping () -> Bool = { true }, snapshots: NativeUICoveredSnapshots,
          view: @escaping () -> UIView?) throws {
+        self.allowedOriginsJSON = String(data: try JSONSerialization.data(withJSONObject: Array(allowedOrigins)), encoding: .utf8)!
         self.runtime = runtime
         self.snapshots = snapshots
         self.receiveListeners = receiveListeners
@@ -80,14 +82,14 @@ public final class NativeUIProjection: NSObject, WKScriptMessageHandler {
         let config: [String: Any] = ["id": id, "plugin": plugin, "projectionSelector": projectionSelector,
                                      "receiveListeners": receiveListeners.configuration, "failedFallback": failedFallback.rawValue, "runtime": runtime.rawValue]
         let json = String(data: try JSONSerialization.data(withJSONObject: config), encoding: .utf8)!
-        let allowed = String(data: try JSONSerialization.data(withJSONObject: Array(allowedOrigins)), encoding: .utf8)!
+        let allowed = allowedOriginsJSON
         let runtime = try Self.runtime()
-        let source = "if (\(allowed).includes(location.origin)) { if (!globalThis.CapacitorNativeUIEngineRuntime) { \(runtime) } CapacitorNativeUIEngineRuntime.start(\(json)).catch(console.error); }"
-        let script = WKUserScript(source: source, injectionTime: .atDocumentEnd, forMainFrameOnly: true)
+        let source = "if (!globalThis.CapacitorNativeUIEngineRuntime) { \(runtime) } CapacitorNativeUIEngineRuntime.start(\(json)).catch(console.error);"
+        let script = WKUserScript(source: "if (\(allowed).includes(location.origin)) { \(source) }", injectionTime: .atDocumentEnd, forMainFrameOnly: true)
         self.script = script
         webView.configuration.userContentController.add(WeakProjectionHandler(self), name: id)
         webView.configuration.userContentController.addUserScript(script)
-        webView.evaluateJavaScript(source, completionHandler: nil)
+        evaluate(source)
     }
     /// Observe the plugin's existing notification before forwarding it to Capacitor.
     /// Cordova also forwards notifications to the Engine session, never to application listeners.
@@ -112,8 +114,12 @@ public final class NativeUIProjection: NSObject, WKScriptMessageHandler {
               let args = String(data: json, encoding: .utf8) else { return }
         DispatchQueue.main.async { [weak self] in
             guard let self, !self.closed else { return }
-            self.webView?.evaluateJavaScript("globalThis.CapacitorNativeUIEngineRuntime?.notify(...\(args))", completionHandler: nil)
+            self.evaluate("globalThis.CapacitorNativeUIEngineRuntime?.notify(...\(args))")
         }
+    }
+    // Check in the executing document: a native URL check can race navigation.
+    private func evaluate(_ source: String) {
+        webView?.evaluateJavaScript("if (\(allowedOriginsJSON).includes(location.origin)) { \(source) }", completionHandler: nil)
     }
     private enum ProjectionError: Error { case missingWebView, invalidConfiguration, missingRuntime }
     private static func runtime() throws -> String {
@@ -275,14 +281,14 @@ public final class NativeUIProjection: NSObject, WKScriptMessageHandler {
         guard !closed else { return }
         let values: [Any] = [id, key as Any? ?? NSNull(), value, error as Any? ?? NSNull()]
         guard let data = try? JSONSerialization.data(withJSONObject: values), let json = String(data: data, encoding: .utf8) else { return }
-        webView?.evaluateJavaScript("globalThis.CapacitorNativeUIEngineRuntime?.receive(...\(json))", completionHandler: nil)
+        evaluate("globalThis.CapacitorNativeUIEngineRuntime?.receive(...\(json))")
     }
     /// Call with the plugin's teardown. Does not destroy the renderer's views or DOM.
     deinit { destroy() }
     public func destroy() {
         guard !closed else { return }
         closed = true
-        webView?.evaluateJavaScript("globalThis.CapacitorNativeUIEngineRuntime?.stop('\(id)')", completionHandler: nil)
+        evaluate("globalThis.CapacitorNativeUIEngineRuntime?.stop('\(id)')")
         if let controller = webView?.configuration.userContentController {
             controller.removeScriptMessageHandler(forName: id)
             let remaining = controller.userScripts.filter { $0 !== script }

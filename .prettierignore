@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.build/
+.swiftpm/
+android/.gradle/
+android/build/
+android/.kotlin/
+playwright-report/
+test-results/
+ios/Sources/CapacitorNativeUIEngine/Resources/native-ui-engine.js

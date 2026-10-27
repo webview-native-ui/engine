@@ -67,22 +67,26 @@ class ExamplePlugin : CordovaPlugin() {
 
     override fun pluginInitialize() {
         val web = webView.view as WebView
-        // One origin-restricted channel per WebView, shared with later registrations.
-        NativeUIProjection.install(web)
-        projection = NativeUIProjection(
-            window = cordova.activity.window,
-            webView = web,
-            plugin = serviceName,
-            projectionSelector = "#player",
-            receiveListeners = NativeUIProjection.ReceiveListeners(
-                update = listOf("contentChanged"),
-                projection = NativeUIProjection.ReceiveListeners.Projection(
-                    native = listOf("shown"), web = listOf("covered"), none = listOf("hidden")
-                )
-            ),
-            runtime = NativeUIProjection.Runtime.CORDOVA,
-            view = { nativeView }
-        )
+        projection = runCatching {
+            // One origin-restricted channel per WebView, shared with later registrations.
+            NativeUIProjection.install(web)
+            NativeUIProjection(
+                window = cordova.activity.window,
+                webView = web,
+                plugin = serviceName,
+                projectionSelector = "#player",
+                receiveListeners = NativeUIProjection.ReceiveListeners(
+                    update = listOf("contentChanged"),
+                    projection = NativeUIProjection.ReceiveListeners.Projection(
+                        native = listOf("shown"), web = listOf("covered"), none = listOf("hidden")
+                    )
+                ),
+                runtime = NativeUIProjection.Runtime.CORDOVA,
+                view = { nativeView }
+            )
+        }.onFailure {
+            android.util.Log.e(javaClass.simpleName, "Native UI projection unavailable", it)
+        }.getOrNull()
     }
 
     override fun getPathHandler() = CordovaPluginPathHandler { path ->
@@ -107,7 +111,7 @@ The defaults support Cordova's `https://localhost` and `http://localhost`. If th
 
 Keep the registration for the WebView lifetime. Engine reconnects after a document reload and clears the old document's image state. If the plugin destroys its native UI in `onReset`, update its view provider and emit the appropriate destination; do not leave a registration pointing at a destroyed view. Dispose registrations when the plugin/WebView is destroyed.
 
-Capacitor registrations retain their existing default. Explicit `runtime: cordova` also avoids accidental Capacitor event subscriptions when a Cordova plugin runs inside a Capacitor app. Ionic overlay observation remains optional and shared through `enableSupportIonicOverlays`; plain Cordova apps need not enable it.
+Capacitor registrations retain their existing default. The Cordova integration requires the standard Cordova WebView resource handler. Running a Cordova plugin inside a Capacitor app is not covered by this integration; the host must use the Capacitor integration instead. Ionic overlay observation remains optional and shared through `enableSupportIonicOverlays`; plain Cordova apps need not enable it.
 
 The integration fixture uses Cordova CLI 13, cordova-ios 8.1.1 and cordova-android 15.1.0 with their standard WebViews. It checks actual PNG handoff, native restoration and hidden-state retention across document reload, not merely JS bridge mocks. Older Cordova releases and custom WebView engines require separate verification.
 

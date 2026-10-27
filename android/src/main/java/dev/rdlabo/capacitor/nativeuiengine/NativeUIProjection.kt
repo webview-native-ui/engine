@@ -32,35 +32,6 @@ class NativeUIProjection(
     view: () -> View?
 ) : AutoCloseable {
     enum class Runtime { CAPACITOR, CORDOVA }
-    /** Preserve the pre-placement-handoff constructor, including Kotlin default arguments. */
-    constructor(
-        window: Window,
-        webView: WebView,
-        plugin: String,
-        projectionSelector: String,
-        receiveListeners: ReceiveListeners = ReceiveListeners(),
-        allowedOrigins: Set<String> = setOf("https://localhost", "http://localhost"),
-        failedFallback: FailedFallback,
-        captureMode: CaptureMode = CaptureMode.COMPOSITED,
-        canCapture: () -> Boolean = { true },
-        beforeNativeReveal: () -> Unit = {},
-        view: () -> View?
-    ) : this(window, webView, plugin, projectionSelector, receiveListeners, allowedOrigins,
-        failedFallback, captureMode, canCapture, beforeNativeReveal, null, Runtime.CAPACITOR, view)
-
-    /** Preserve the original source and JVM constructor contracts for existing plugin binaries. */
-    constructor(
-        window: Window,
-        webView: WebView,
-        plugin: String,
-        projectionSelector: String,
-        receiveListeners: ReceiveListeners = ReceiveListeners(),
-        allowedOrigins: Set<String> = setOf("https://localhost", "http://localhost"),
-        canCapture: () -> Boolean = { true },
-        view: () -> View?
-    ) : this(window, webView, plugin, projectionSelector, receiveListeners, allowedOrigins,
-        FailedFallback.WEB, CaptureMode.COMPOSITED, canCapture, {}, null, Runtime.CAPACITOR, view)
-
     /** True only after an opaque VIEW handoff hid native pixels. Main-thread access only. */
     var isProjecting: Boolean = false
         private set
@@ -131,9 +102,14 @@ class NativeUIProjection(
         if (runtime == Runtime.CORDOVA && (matches.isNotEmpty() || eventName in receiveListeners.update)) {
             val args = JSONArray().put(id).put(eventName).put(data ?: JSONObject()).toString()
             webView.post {
-                if (!closed) webView.evaluateJavascript("globalThis.CapacitorNativeUIEngineRuntime?.notify(...$args)", null)
+                if (!closed) evaluate("globalThis.CapacitorNativeUIEngineRuntime?.notify(...$args)")
             }
         }
+    }
+    private val allowedOriginsJSON = JSONArray(allowedOrigins).toString()
+    // Check in the executing document: a native URL check can race navigation.
+    private fun evaluate(source: String, complete: android.webkit.ValueCallback<String>? = null) {
+        webView.evaluateJavascript("if ($allowedOriginsJSON.includes(location.origin)) { $source }", complete)
     }
     private val sourceView = view
     private fun views() = sourceView()?.let { mapOf("view" to it) } ?: emptyMap()
@@ -190,8 +166,7 @@ class NativeUIProjection(
             val created = WebViewCompat.addDocumentStartJavaScript(webView, source, allowedOrigins)
             installedScript = created
             // Also support initialization after the current page has loaded.
-            val allowed = JSONArray(allowedOrigins)
-            webView.evaluateJavascript("if ($allowed.includes(location.origin)) { $source }", null)
+            evaluate(source)
             script = created
         } catch (error: Exception) {
             installedScript?.remove()
@@ -423,7 +398,7 @@ class NativeUIProjection(
             }
         }
         val args = JSONArray().put(id).put(key ?: JSONObject.NULL).put(value).put(error ?: JSONObject.NULL)
-        webView.evaluateJavascript("globalThis.CapacitorNativeUIEngineRuntime?.receive(...$args)", null)
+        evaluate("globalThis.CapacitorNativeUIEngineRuntime?.receive(...$args)")
     }
     /** Hide pixels immediately; completion confirms the Web proxy has also been retired. */
     fun hide(complete: (Boolean) -> Unit = {}) {
@@ -436,7 +411,7 @@ class NativeUIProjection(
         var done = false
         val timeout = Runnable { if (!done) { done = true; complete(false) } }
         webView.postDelayed(timeout, 5000)
-        webView.evaluateJavascript("globalThis.CapacitorNativeUIEngineRuntime?.hide('$id') === true") { result ->
+        evaluate("globalThis.CapacitorNativeUIEngineRuntime?.hide('$id') === true") { result ->
             if (!done) { done = true; webView.removeCallbacks(timeout); complete(result == "true") }
         }
     }
@@ -444,7 +419,7 @@ class NativeUIProjection(
     fun show() {
         check(android.os.Looper.myLooper() == android.os.Looper.getMainLooper())
         suspended = false; destination = "native"; notificationDestination = "native"; connected = true
-        webView.evaluateJavascript("globalThis.CapacitorNativeUIEngineRuntime?.show('$id')", null)
+        evaluate("globalThis.CapacitorNativeUIEngineRuntime?.show('$id')")
     }
     override fun close() {
         if (closed) return
@@ -452,7 +427,7 @@ class NativeUIProjection(
         isProjecting = false
         coverGeneration++
         stopInteraction()
-        webView.evaluateJavascript("globalThis.CapacitorNativeUIEngineRuntime?.stop('$id')", null)
+        evaluate("globalThis.CapacitorNativeUIEngineRuntime?.stop('$id')")
         script.remove()
         registrations[webView]?.remove(id)
         snapshots.close(); webReadyTokens.clear(); captured.clear(); anchors.clear()

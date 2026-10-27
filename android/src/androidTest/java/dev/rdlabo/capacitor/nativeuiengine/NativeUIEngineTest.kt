@@ -32,14 +32,39 @@ class NativeUIEngineTest {
   assertTrue("Web fixture did not finish loading",ready)
   return activity
  }
- @Test fun originalProjectionConstructorBinaryContractsRemainAvailable() {
-  val parameters=arrayOf(
-   android.view.Window::class.java, android.webkit.WebView::class.java,
-   String::class.java, String::class.java, NativeUIProjection.ReceiveListeners::class.java,
-   Set::class.java, kotlin.jvm.functions.Function0::class.java, kotlin.jvm.functions.Function0::class.java)
-  NativeUIProjection::class.java.getConstructor(*parameters)
-  NativeUIProjection::class.java.getConstructor(*parameters, Int::class.javaPrimitiveType,
-   Class.forName("kotlin.jvm.internal.DefaultConstructorMarker"))
+ @Test fun cordovaNotificationsAndLifecycleDoNotReachUntrustedNavigation() {
+  org.junit.Assume.assumeTrue(androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.DOCUMENT_START_SCRIPT))
+  val activity=activity();var registration:NativeUIProjection?=null
+  fun js(source:String):String {
+   val done=CountDownLatch(1);var result=""
+   main{activity.web.evaluateJavascript(source){result=it;done.countDown()}}
+   assertTrue(done.await(5,TimeUnit.SECONDS));return result
+  }
+  fun waitFor(source:String) {
+   val deadline=System.currentTimeMillis()+5000
+   while(System.currentTimeMillis()<deadline){if(js(source)=="true")return;Thread.sleep(20)}
+   fail("Timed out: $source")
+  }
+  val spy="window.calls=[];window.CapacitorNativeUIEngineRuntime={start:async()=>{},notify:(...a)=>calls.push(a),receive:(...a)=>calls.push(a),hide:(...a)=>{calls.push(a);return true},show:(...a)=>calls.push(a),stop:(...a)=>calls.push(a)}"
+  try {
+   js(spy)
+   main{registration=NativeUIProjection(activity.window,activity.web,"Fixture","#slot",
+    receiveListeners=NativeUIProjection.ReceiveListeners(update=listOf("updated")),
+    runtime=NativeUIProjection.Runtime.CORDOVA,view={null})}
+   main{registration!!.receive("updated",JSONObject().put("value","private"))}
+   waitFor("calls.some(args=>args[1]==='updated' && args[2].value==='private')")
+   val allowed=CountDownLatch(1);var accepted=false
+   main{registration!!.hide{accepted=it;allowed.countDown()}}
+   assertTrue(allowed.await(5,TimeUnit.SECONDS));assertTrue(accepted)
+   main{activity.web.loadDataWithBaseURL("https://untrusted.example","<body><script>$spy</script></body>","text/html","utf-8",null)}
+   waitFor("location.host==='untrusted.example' && typeof calls!=='undefined'")
+   main{registration!!.receive("updated",JSONObject().put("value","private"))}
+   assertEquals("0",js("calls.length"))
+   val denied=CountDownLatch(1);accepted=true
+   main{registration!!.hide{accepted=it;denied.countDown()};registration!!.show();registration!!.close()}
+   assertTrue(denied.await(5,TimeUnit.SECONDS));assertFalse(accepted)
+   assertEquals("0",js("calls.length"))
+  } finally {main{registration?.close();activity.finish()}}
  }
  @Test fun placementChangesPositionWithoutResettingDimensionsAndClipsInput() {
   val activity=activity()
