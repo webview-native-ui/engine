@@ -1,6 +1,10 @@
 # WebView Native UI Engine
 
-**Bring native UI into the freedom of the Web.** Build WebView apps where native controls and Web content share the same scrolling screens, transitions and overlays.
+**Bring Web UI above the native layer.**
+
+_Visually, through seamless native-to-Web projection._
+
+Build WebView apps where native controls and Web content share the same scrolling screens, transitions and overlays.
 
 ## Beyond the WebView boundary
 
