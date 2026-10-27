@@ -1,6 +1,6 @@
 import XCTest
 import WebKit
-@testable import CapacitorNativeUIEngine
+@testable import WebViewNativeUIEngine
 
 final class NativeUIProjectionTests: XCTestCase {
     @MainActor func testMissingWebViewThrowsDuringInitialization() {
@@ -153,7 +153,7 @@ final class NativeUIProjectionTests: XCTestCase {
         configuration.setURLSchemeHandler(ProjectionFixture(), forURLScheme: "capacitor")
         configuration.userContentController.addUserScript(WKUserScript(source: """
           window.calls = [];
-          window.CapacitorNativeUIEngineRuntime = {
+          window.WebViewNativeUIEngineRuntime = {
             start: async () => {},
             notify: (...args) => calls.push(args),
             receive: (...args) => calls.push(args),

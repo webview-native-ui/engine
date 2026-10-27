@@ -1,6 +1,6 @@
 import XCTest
 import UIKit
-@testable import CapacitorNativeUIEngine
+@testable import WebViewNativeUIEngine
 
 final class NativeUICoveredSnapshotsTests: XCTestCase {
     @MainActor func testMovingModalCaptureAndReturnDoNotReplaceBackgroundOwnership() async throws {

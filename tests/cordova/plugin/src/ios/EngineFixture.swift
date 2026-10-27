@@ -1,6 +1,6 @@
 import Cordova
 import WebKit
-import CapacitorNativeUIEngine
+import WebViewNativeUIEngine
 
 @objc(EngineFixture)
 final class EngineFixture: CDVPlugin {

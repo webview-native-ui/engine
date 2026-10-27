@@ -5,7 +5,7 @@ import android.view.View
 import android.webkit.WebView
 import android.widget.FrameLayout
 import android.widget.TextView
-import dev.rdlabo.capacitor.nativeuiengine.NativeUIProjection
+import io.github.webview_native_ui.engine.NativeUIProjection
 import org.apache.cordova.*
 import org.json.JSONArray
 import org.json.JSONObject

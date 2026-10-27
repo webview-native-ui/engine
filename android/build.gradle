@@ -4,10 +4,10 @@ plugins {
     id 'maven-publish'
 }
 
-group = 'io.github.rdlabo'
+group = 'io.github.webview-native-ui'
 version = new groovy.json.JsonSlurper().parse(file('../package.json')).version
 android {
-    namespace 'dev.rdlabo.capacitor.nativeuiengine'
+    namespace 'io.github.webview_native_ui.engine'
     compileSdk 36
     lint { warningsAsErrors = true }
     defaultConfig {
@@ -29,17 +29,17 @@ afterEvaluate {
         publications {
             release(MavenPublication) {
                 from components.release
-                artifactId = 'native-ui-engine'
+                artifactId = 'engine'
                 pom {
-                    name = 'Capacitor Native UI Engine'
-                    description = 'Native UI placement and Web projection for Capacitor plugin maintainers.'
-                    url = 'https://github.com/rdlabo-dev/capacitor-native-ui-engine'
+                    name = 'WebView Native UI Engine'
+                    description = 'Native UI placement and Web projection for Capacitor and Cordova plugin maintainers.'
+                    url = 'https://github.com/webview-native-ui/engine'
                     licenses { license { name = 'Zlib'; url = 'https://opensource.org/license/zlib' } }
                     developers { developer { id = 'rdlabo'; name = 'rdlabo'; url = 'https://github.com/rdlabo' } }
                     scm {
-                        url = 'https://github.com/rdlabo-dev/capacitor-native-ui-engine'
-                        connection = 'scm:git:https://github.com/rdlabo-dev/capacitor-native-ui-engine.git'
-                        developerConnection = 'scm:git:ssh://git@github.com/rdlabo-dev/capacitor-native-ui-engine.git'
+                        url = 'https://github.com/webview-native-ui/engine'
+                        connection = 'scm:git:https://github.com/webview-native-ui/engine.git'
+                        developerConnection = 'scm:git:ssh://git@github.com/webview-native-ui/engine.git'
                     }
                 }
             }
@@ -61,10 +61,10 @@ if (providers.gradleProperty('signRelease').isPresent()) {
 tasks.register('centralBundle', Zip) {
     dependsOn 'publishReleasePublicationToVerificationRepository'
     from(layout.buildDirectory.dir('maven')) {
-        include "io/github/rdlabo/native-ui-engine/${project.version}/**"
+        include "io/github/webview-native-ui/engine/${project.version}/**"
         exclude '**/maven-metadata*'
     }
-    archiveFileName = "native-ui-engine-${project.version}-central.zip"
+    archiveFileName = "engine-${project.version}-central.zip"
     destinationDirectory = layout.buildDirectory.dir('distributions')
     doFirst {
         if (!providers.gradleProperty('signRelease').isPresent()) {
@@ -76,14 +76,14 @@ tasks.register('centralBundle', Zip) {
 // Keep the package notices in binary and source distributions without duplicate source files.
 def licenseResources = tasks.register('prepareLicenseResources', Sync) {
     from('..') { include 'LICENSE', 'NOTICE' }
-    into(layout.buildDirectory.dir('generated/license-resources/META-INF/capacitor-native-ui-engine'))
+    into(layout.buildDirectory.dir('generated/license-resources/META-INF/webview-native-ui-engine'))
 }
 android.sourceSets.main.resources.srcDir(layout.buildDirectory.dir('generated/license-resources'))
 tasks.matching { it.name.startsWith('process') && it.name.endsWith('JavaRes') }.configureEach { dependsOn licenseResources }
 tasks.withType(Jar).configureEach {
     if (name in ['sourceReleaseJar', 'javaDocReleaseJar']) {
-        from('..') { include 'LICENSE', 'NOTICE'; into 'META-INF/capacitor-native-ui-engine' }
+        from('..') { include 'LICENSE', 'NOTICE'; into 'META-INF/webview-native-ui-engine' }
     }
 }
 
-android.sourceSets.main.assets.srcDir('../ios/Sources/CapacitorNativeUIEngine/Resources')
+android.sourceSets.main.assets.srcDir('../ios/Sources/WebViewNativeUIEngine/Resources')

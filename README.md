@@ -1,6 +1,6 @@
-# Capacitor Native UI Engine
+# WebView Native UI Engine
 
-`@rdlabo/capacitor-native-ui-engine` is infrastructure **for Capacitor and Cordova plugin maintainers**. It is a library dependency that renders no controls, registers no application-facing Capacitor plugin, and requires no Ionic or Angular runtime. Its native registration owns a scoped internal WebView channel.
+`@webview-native-ui/engine` is infrastructure **for Capacitor and Cordova plugin maintainers**. It is a library dependency that renders no controls, registers no application-facing Capacitor plugin, and requires no Ionic or Angular runtime. Its native registration owns a scoped internal WebView channel.
 
 The engine associates existing DOM and native views, tracks supported scrolling, prepares native images before interaction, and manages image handoff and native restoration. The consuming plugin creates, attaches, positions and sizes its native views, provides the corresponding DOM, and reports presentation events. Registration does not lay out a native view from the DOM or resize it when the DOM changes. Existing renderers can also use the low-level APIs with their own ordered transport.
 
@@ -57,7 +57,7 @@ Use the existing **`jsName`**, not `identifier`: Capacitor uses `jsName` for JS 
 ```diff
  import Capacitor
  import UIKit
-+import CapacitorNativeUIEngine
++import WebViewNativeUIEngine
 
  @objc(ExamplePlugin)
  public class ExamplePlugin: CAPPlugin, CAPBridgedPlugin {
@@ -128,8 +128,8 @@ Make the corresponding changes in `android/src/main/java/<your-package>/ExampleP
  import com.getcapacitor.annotation.CapacitorPlugin
 +import android.util.Log
 +import com.getcapacitor.JSObject
-+import dev.rdlabo.capacitor.nativeuiengine.NativeUIProjection
-+import dev.rdlabo.capacitor.nativeuiengine.NativeUIProjection.ReceiveListeners
++import io.github.webview_native_ui.engine.NativeUIProjection
++import io.github.webview_native_ui.engine.NativeUIProjection.ReceiveListeners
 
  @CapacitorPlugin(name = "Example")
  class ExamplePlugin : Plugin() {
@@ -299,10 +299,10 @@ By default, the internal channel is limited to the main frame on Capacitor's loc
 
 ## Ionic overlay support (optional)
 
-For an Ionic application, call this once during application startup. When calling it directly from the application, install `@rdlabo/capacitor-native-ui-engine` as a direct application dependency:
+For an Ionic application, call this once during application startup. When calling it directly from the application, install `@webview-native-ui/engine` as a direct application dependency:
 
 ```ts
-import { enableSupportIonicOverlays } from '@rdlabo/capacitor-native-ui-engine/ionic';
+import { enableSupportIonicOverlays } from '@webview-native-ui/engine/ionic';
 
 enableSupportIonicOverlays();
 ```
@@ -341,7 +341,7 @@ The same Engine supports Cordova plugins without installing Capacitor. Select `r
 ## Install inside a plugin
 
 ```sh
-npm install @rdlabo/capacitor-native-ui-engine@2
+npm install --save-exact @webview-native-ui/engine@0.0.1
 ```
 
 The npm archive contains TypeScript declarations, ESM, Swift sources and a podspec. Native dependencies must also be declared by the consuming plugin; an npm dependency alone links neither the Swift library nor the Android AAR.
@@ -349,16 +349,16 @@ The npm archive contains TypeScript declarations, ESM, Swift sources and a podsp
 The primary native distribution is Swift Package Manager. Depend on the repository-root library from your plugin:
 
 ```swift
-.package(url: "https://github.com/rdlabo-dev/capacitor-native-ui-engine.git", from: "2.0.0")
+.package(url: "https://github.com/webview-native-ui/engine.git", exact: "0.0.1")
 // In the plugin target's dependencies:
-.product(name: "CapacitorNativeUIEngine", package: "capacitor-native-ui-engine")
+.product(name: "WebViewNativeUIEngine", package: "engine")
 ```
 
-Declare the supported major on each platform. Use `^2.0.0` for npm, `from: "2.0.0"` for SwiftPM, `2.+` for Gradle, and `~> 2.0` for CocoaPods. If your plugin requires an API added later in the major, raise that minimum accordingly. Applications should retain their dependency lockfiles for reproducible builds.
+The new coordinates start at `0.0.1`. While the API is pre-1.0, pin the same Engine release across npm, SwiftPM, Gradle and CocoaPods, and upgrade deliberately. Applications should retain their dependency lockfiles for reproducible builds.
 
-SwiftPM resolves this repository's `v2.x.x` tags. A standalone release tag must exist before consumers switch to this URL; old `ios27-v…` theme tags are not Engine versions. For unreleased integration tests, use a local checkout or an explicit tested commit.
+SwiftPM resolves this repository's version tags such as `v0.0.1`. A standalone release tag must exist before consumers switch to this URL; old `ios27-v…` theme tags are not Engine versions. For unreleased integration tests, use a local checkout or an explicit tested commit.
 
-`import CapacitorNativeUIEngine` requires no Capacitor registration. The npm companion supplies DOM measurement and Web image handoff; SwiftPM resolves the native dependency independently of npm hoisting.
+`import WebViewNativeUIEngine` requires no Capacitor registration. The npm companion supplies DOM measurement and Web image handoff; SwiftPM resolves the native dependency independently of npm hoisting.
 
 ### Android: add the Maven dependency
 
@@ -366,7 +366,7 @@ In the consuming plugin's `android/build.gradle`, add the Engine version matchin
 
 ```groovy
 dependencies {
-    implementation 'io.github.rdlabo:native-ui-engine:2.+'
+    implementation 'io.github.webview-native-ui:engine:0.0.1'
 }
 ```
 
@@ -388,20 +388,20 @@ If the build uses project-level repositories instead, add them to its existing `
 CocoaPods uses the Swift sources and podspec shipped in npm; no CocoaPods Trunk publication is required. The plugin maintainer declares the matching dependency in the plugin's podspec:
 
 ```ruby
-s.dependency 'CapacitorNativeUIEngine', '~> 2.0'
+s.dependency 'WebViewNativeUIEngine', '0.0.1'
 ```
 
 The maintainer must also document this one-time application setup. Install the matching engine version as a direct npm dependency, then add the local pod **inside the application's target, outside `def capacitor_pods`**, which Capacitor regenerates:
 
 ```sh
-npm install @rdlabo/capacitor-native-ui-engine@2
+npm install --save-exact @webview-native-ui/engine@0.0.1
 ```
 
 ```ruby
 # ios/App/Podfile; adjust the path for a different native project layout.
 target 'App' do
   capacitor_pods
-  pod 'CapacitorNativeUIEngine', :path => '../../node_modules/@rdlabo/capacitor-native-ui-engine'
+  pod 'WebViewNativeUIEngine', :path => '../../node_modules/@webview-native-ui/engine'
 end
 ```
 
@@ -412,7 +412,7 @@ Run `npx cap sync ios` and rebuild. Keep the direct engine version aligned with 
 A scope binds one existing Web fallback element for its lifetime. Obtain that element from your plugin's DOM; the engine does not create a replacement host or choose a page, stacking order or z-index. A different fallback element requires a new scope. Its Document is derived from `element.ownerDocument`.
 
 ```ts
-import { createWebProjectionScope, createWebProjection } from '@rdlabo/capacitor-native-ui-engine';
+import { createWebProjectionScope, createWebProjection } from '@webview-native-ui/engine';
 
 const fallback = container.querySelector<HTMLElement>('[data-web-fallback]');
 if (!fallback) throw new Error('Web fallback is missing');
@@ -536,7 +536,7 @@ npm run build
 npm run lint
 npx playwright install chromium
 npm test
-xcodebuild -scheme CapacitorNativeUIEngine -destination 'platform=iOS Simulator,id=<booted simulator UUID>' test
+xcodebuild -scheme WebViewNativeUIEngine -destination 'platform=iOS Simulator,id=<booted simulator UUID>' test
 ```
 
 Lint combines strict TypeScript checking, the standard ESLint/TypeScript recommended rules, and typed Promise checks for `src`. Scripts and tests receive syntax-level linting; Prettier owns formatting. `npm run format` applies formatting only. Bridge payloads and test doubles may use explicit `any`; production boundary validation remains necessary. An explicit `void` marks background work, but does not handle a rejected Promise. Android uses `lintRelease` with warnings treated as errors in CI; Swift is compiled and tested on an iOS simulator.
@@ -545,7 +545,7 @@ The engine is versioned independently of its consumers. Publish order is the nat
 
 ## Android library
 
-Android uses a Gradle Android library, distributed as an AAR through Maven rather than Capacitor plugin registration. The publication coordinates are `io.github.rdlabo:native-ui-engine:<version>`. Build and verify the local Maven publication with:
+Android uses a Gradle Android library, distributed as an AAR through Maven rather than Capacitor plugin registration. The publication coordinates are `io.github.webview-native-ui:engine:<version>`. Build and verify the local Maven publication with:
 
 ```sh
 android/gradlew -p android testDebugUnitTest assembleRelease connectedDebugAndroidTest publishReleasePublicationToVerificationRepository
@@ -607,9 +607,9 @@ For local packaging verification, run `python3 scripts/native-ui-engine-release/
 
 ## Maintainer release setup
 
-This repository starts from the merged Engine implementation at [ionic-theme-ios27 `b218d8b`](https://github.com/rdlabo-dev/ionic-theme-ios27/commit/b218d8bfe0c87c02addc668fee9c7aa333489486). Extraction preserves the merged implementation; Cordova host support is developed in this repository. The package version is retained during migration; the next publication must use a new, unused version.
+This repository starts from the merged Engine implementation at [ionic-theme-ios27 `b218d8b`](https://github.com/rdlabo-dev/ionic-theme-ios27/commit/b218d8bfe0c87c02addc668fee9c7aa333489486). Extraction preserves the merged implementation; Cordova host support is developed in this repository. The renamed package starts at version `0.0.1`. Publish the same version for npm, SwiftPM and Maven; do not reuse the old package coordinates.
 
-Configure npm trusted publishing for `rdlabo-dev/capacitor-native-ui-engine`, workflow `release.yml`, and provision the Maven secrets above in this repository. Credentials are not copied by moving source files.
+Before the first release, create the npm organization `webview-native-ui` and verify the Maven Central namespace `io.github.webview-native-ui`. Configure npm trusted publishing for `webview-native-ui/engine`, workflow `release.yml`, and provision the Maven secrets above in this repository. Credentials are not copied by moving source files.
 
 1. Prepare the next version and release notes on `main`; use `npm run release` to create a standard `vX.Y.Z` tag/GitHub release. Keep the GitHub release as a draft until Maven is downloadable.
 2. After that main commit passes CI, dispatch `native-ui-engine-release.yml` with the exact package version.

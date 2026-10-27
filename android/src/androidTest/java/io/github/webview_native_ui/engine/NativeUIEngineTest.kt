@@ -1,4 +1,4 @@
-package dev.rdlabo.capacitor.nativeuiengine
+package io.github.webview_native_ui.engine
 import android.content.Intent
 import android.graphics.BitmapFactory
 import android.graphics.Color
@@ -45,7 +45,7 @@ class NativeUIEngineTest {
    while(System.currentTimeMillis()<deadline){if(js(source)=="true")return;Thread.sleep(20)}
    fail("Timed out: $source")
   }
-  val spy="window.calls=[];window.CapacitorNativeUIEngineRuntime={start:async()=>{},notify:(...a)=>calls.push(a),receive:(...a)=>calls.push(a),hide:(...a)=>{calls.push(a);return true},show:(...a)=>calls.push(a),stop:(...a)=>calls.push(a)}"
+  val spy="window.calls=[];window.WebViewNativeUIEngineRuntime={start:async()=>{},notify:(...a)=>calls.push(a),receive:(...a)=>calls.push(a),hide:(...a)=>{calls.push(a);return true},show:(...a)=>calls.push(a),stop:(...a)=>calls.push(a)}"
   try {
    js(spy)
    main{registration=NativeUIProjection(activity.window,activity.web,"Fixture","#slot",
@@ -506,7 +506,7 @@ class NativeUIEngineTest {
 
    if(authoritativePlacement) js("""
     // The plugin's latest placement is newer than the image return frame.
-    document.querySelector('#slot')[Symbol.for('capacitor-native-ui-engine.projection-placement')]={
+    document.querySelector('#slot')[Symbol.for('webview-native-ui-engine.projection-placement')]={
       projected:false,invalidate(){},measure(){return {y:parseFloat(document.querySelector('#slot').style.top)+20,viewportWidth:innerWidth}}
     }
    """.trimIndent())

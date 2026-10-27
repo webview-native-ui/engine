@@ -18,7 +18,7 @@ jobs:
       - run: npm ci
       - run: npm run build
       - name: Verify checked-in native runtime matches source
-        run: git diff --exit-code -- ios/Sources/CapacitorNativeUIEngine/Resources/native-ui-engine.js
+        run: git diff --exit-code -- ios/Sources/WebViewNativeUIEngine/Resources/native-ui-engine.js
       - run: npm run lint
       - run: npm run test:release
       - run: npm run test:package
@@ -39,7 +39,7 @@ jobs:
           echo "CORDOVA_SIMULATOR=$DEVICE" >> "$GITHUB_ENV"
           xcrun simctl boot "$DEVICE" || true
           xcrun simctl bootstatus "$DEVICE" -b
-          xcodebuild -scheme CapacitorNativeUIEngine -destination "platform=iOS Simulator,id=$DEVICE" CODE_SIGNING_ALLOWED=NO test
+          xcodebuild -scheme WebViewNativeUIEngine -destination "platform=iOS Simulator,id=$DEVICE" CODE_SIGNING_ALLOWED=NO test
       - run: bash scripts/verify-pods.sh
       - run: npm run test:cordova -- ios "$CORDOVA_SIMULATOR"
   android:

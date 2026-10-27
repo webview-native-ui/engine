@@ -1,6 +1,6 @@
 import XCTest
 import WebKit
-@testable import CapacitorNativeUIEngine
+@testable import WebViewNativeUIEngine
 
 final class NativeUIScrollTrackerTests: XCTestCase {
     private func node(_ id: String = "counter", y: Double = 400) throws -> NativeUIScrollNode {

@@ -10,7 +10,7 @@ try {
   );
   const archive = join(directory, packed.filename);
   const manifest = JSON.parse(execFileSync('tar', ['-xOf', archive, 'package/package.json'], { encoding: 'utf8' }));
-  assert.equal(manifest.name, '@rdlabo/capacitor-native-ui-engine');
+  assert.equal(manifest.name, '@webview-native-ui/engine');
   assert.equal(manifest.capacitor, undefined);
   assert.equal(manifest.license, 'Zlib');
   const files = new Set(packed.files.map((file) => file.path));
@@ -18,8 +18,8 @@ try {
     'LICENSE',
     'NOTICE',
     'README.md',
-    'CapacitorNativeUIEngine.podspec',
-    'ios/Sources/CapacitorNativeUIEngine/Resources/native-ui-engine.js',
+    'WebViewNativeUIEngine.podspec',
+    'ios/Sources/WebViewNativeUIEngine/Resources/native-ui-engine.js',
   ])
     assert(files.has(file), file);
   for (const entry of Object.values(manifest.exports))

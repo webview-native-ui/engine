@@ -1,12 +1,12 @@
 {
-  "name": "@rdlabo/capacitor-native-ui-engine",
-  "version": "2.0.3",
+  "name": "@webview-native-ui/engine",
+  "version": "0.0.1",
   "description": "Native UI placement, scroll tracking, and Web projection for Capacitor and Cordova plugin maintainers.",
   "type": "module",
   "license": "Zlib",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/rdlabo-dev/capacitor-native-ui-engine.git"
+    "url": "git+https://github.com/webview-native-ui/engine.git"
   },
   "exports": {
     ".": {
@@ -21,7 +21,7 @@
   "files": [
     "dist",
     "ios/Sources",
-    "CapacitorNativeUIEngine.podspec",
+    "WebViewNativeUIEngine.podspec",
     "README.md",
     "LICENSE",
     "NOTICE",

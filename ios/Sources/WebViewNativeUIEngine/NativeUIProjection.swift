@@ -84,7 +84,7 @@ public final class NativeUIProjection: NSObject, WKScriptMessageHandler {
         let json = String(data: try JSONSerialization.data(withJSONObject: config), encoding: .utf8)!
         let allowed = allowedOriginsJSON
         let runtime = try Self.runtime()
-        let source = "if (!globalThis.CapacitorNativeUIEngineRuntime) { \(runtime) } CapacitorNativeUIEngineRuntime.start(\(json)).catch(console.error);"
+        let source = "if (!globalThis.WebViewNativeUIEngineRuntime) { \(runtime) } WebViewNativeUIEngineRuntime.start(\(json)).catch(console.error);"
         let script = WKUserScript(source: "if (\(allowed).includes(location.origin)) { \(source) }", injectionTime: .atDocumentEnd, forMainFrameOnly: true)
         self.script = script
         webView.configuration.userContentController.add(WeakProjectionHandler(self), name: id)
@@ -114,7 +114,7 @@ public final class NativeUIProjection: NSObject, WKScriptMessageHandler {
               let args = String(data: json, encoding: .utf8) else { return }
         DispatchQueue.main.async { [weak self] in
             guard let self, !self.closed else { return }
-            self.evaluate("globalThis.CapacitorNativeUIEngineRuntime?.notify(...\(args))")
+            self.evaluate("globalThis.WebViewNativeUIEngineRuntime?.notify(...\(args))")
         }
     }
     // Check in the executing document: a native URL check can race navigation.
@@ -127,7 +127,7 @@ public final class NativeUIProjection: NSObject, WKScriptMessageHandler {
         let bundle = Bundle.module
         #else
         let containing = Bundle(for: NativeUIProjection.self)
-        let bundle = containing.url(forResource: "CapacitorNativeUIEngine", withExtension: "bundle").flatMap(Bundle.init(url:)) ?? containing
+        let bundle = containing.url(forResource: "WebViewNativeUIEngine", withExtension: "bundle").flatMap(Bundle.init(url:)) ?? containing
         #endif
         guard let url = bundle.url(forResource: "native-ui-engine", withExtension: "js") else { throw ProjectionError.missingRuntime }
         return try String(contentsOf: url, encoding: .utf8)
@@ -281,14 +281,14 @@ public final class NativeUIProjection: NSObject, WKScriptMessageHandler {
         guard !closed else { return }
         let values: [Any] = [id, key as Any? ?? NSNull(), value, error as Any? ?? NSNull()]
         guard let data = try? JSONSerialization.data(withJSONObject: values), let json = String(data: data, encoding: .utf8) else { return }
-        evaluate("globalThis.CapacitorNativeUIEngineRuntime?.receive(...\(json))")
+        evaluate("globalThis.WebViewNativeUIEngineRuntime?.receive(...\(json))")
     }
     /// Call with the plugin's teardown. Does not destroy the renderer's views or DOM.
     deinit { destroy() }
     public func destroy() {
         guard !closed else { return }
         closed = true
-        evaluate("globalThis.CapacitorNativeUIEngineRuntime?.stop('\(id)')")
+        evaluate("globalThis.WebViewNativeUIEngineRuntime?.stop('\(id)')")
         if let controller = webView?.configuration.userContentController {
             controller.removeScriptMessageHandler(forName: id)
             let remaining = controller.userScripts.filter { $0 !== script }

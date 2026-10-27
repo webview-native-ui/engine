@@ -34,7 +34,7 @@ export const usesOverlayBackdrop = (element: HTMLElement, breakpoint?: number): 
   return height === undefined || height > (overlay.backdropBreakpoint ?? 0);
 };
 
-const key = Symbol.for('@rdlabo/capacitor-native-ui-engine/overlays/v1');
+const key = Symbol.for('@webview-native-ui/engine/overlays/v1');
 const createCoordinator = (doc: Document) => {
   const active = new Set<HTMLElement>();
   const native = new Set<HTMLElement>();

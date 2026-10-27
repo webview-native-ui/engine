@@ -7,4 +7,4 @@ android/build/
 android/.kotlin/
 playwright-report/
 test-results/
-ios/Sources/CapacitorNativeUIEngine/Resources/native-ui-engine.js
+ios/Sources/WebViewNativeUIEngine/Resources/native-ui-engine.js

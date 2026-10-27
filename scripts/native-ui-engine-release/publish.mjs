@@ -43,7 +43,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const { CENTRAL_USERNAME, CENTRAL_PASSWORD, GITHUB_STEP_SUMMARY } = process.env;
   if (!CENTRAL_USERNAME || !CENTRAL_PASSWORD) throw new Error('Central user token secrets are required');
   const version = JSON.parse(await readFile('package.json', 'utf8')).version;
-  const name = `native-ui-engine-${version}`;
+  const name = `engine-${version}`;
   const bundle = await readFile(`android/build/distributions/${name}-central.zip`);
   const token = Buffer.from(`${CENTRAL_USERNAME}:${CENTRAL_PASSWORD}`).toString('base64');
   await publishBundle({

@@ -12,7 +12,7 @@ root = Path(__file__).resolve().parents[2]
 version = json.loads((root / 'package.json').read_text())['version']
 release = root / 'android'
 gradle = [str(release / 'gradlew'), '-p', str(release), '--console=plain']
-archive = release / f'build/distributions/native-ui-engine-{version}-central.zip'
+archive = release / f'build/distributions/engine-{version}-central.zip'
 
 with tempfile.TemporaryDirectory(prefix='engine-central-test-') as home:
     gpg = ['gpg', '--homedir', home, '--batch', '--pinentry-mode', 'loopback', '--passphrase', '']
@@ -24,7 +24,7 @@ with tempfile.TemporaryDirectory(prefix='engine-central-test-') as home:
     env = dict(os.environ, MAVEN_SIGNING_KEY=key, MAVEN_SIGNING_PASSWORD='')
     try:
         subprocess.run(gradle + ['-PsignRelease', 'centralBundle'], cwd=root, env=env, check=True)
-        base = f'io/github/rdlabo/native-ui-engine/{version}/native-ui-engine-{version}'
+        base = f'io/github/webview-native-ui/engine/{version}/engine-{version}'
         required = [base + suffix for suffix in
                     ['.aar', '.pom', '.module', '-sources.jar', '-javadoc.jar']]
         with zipfile.ZipFile(archive) as bundle:
@@ -46,7 +46,7 @@ with tempfile.TemporaryDirectory(prefix='engine-central-test-') as home:
                     if suffix == '.aar':
                         artifact = zipfile.ZipFile(BytesIO(artifact.read('classes.jar')))
                     for notice in ['LICENSE', 'NOTICE']:
-                        assert artifact.read('META-INF/capacitor-native-ui-engine/' + notice) == (release.parent / notice).read_bytes()
+                        assert artifact.read('META-INF/webview-native-ui-engine/' + notice) == (release.parent / notice).read_bytes()
             assert b'<name>Zlib</name>' in bundle.read(base + '.pom')
         print('Verified all five artifact signatures/checksums and Zlib/upstream notices.')
     finally:

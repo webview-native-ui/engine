@@ -14,7 +14,7 @@ export default [
       'android/.kotlin/**',
       'test-results/**',
       'playwright-report/**',
-      'ios/Sources/CapacitorNativeUIEngine/Resources/native-ui-engine.js',
+      'ios/Sources/WebViewNativeUIEngine/Resources/native-ui-engine.js',
     ],
   },
   {

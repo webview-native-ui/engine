@@ -11,7 +11,7 @@ Use the same SwiftPM dependency described in the main README. In a Cordova Swift
 ```swift
 import Cordova
 import WebKit
-import CapacitorNativeUIEngine
+import WebViewNativeUIEngine
 
 @objc(ExamplePlugin)
 class ExamplePlugin: CDVPlugin {

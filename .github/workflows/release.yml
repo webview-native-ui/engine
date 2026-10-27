@@ -45,7 +45,7 @@ jobs:
         run: |
           VERSION=$(node -p "require('./package.json').version")
           for EXTENSION in pom aar; do
-            curl --fail --silent --show-error --head --max-time 30 "https://repo.maven.apache.org/maven2/io/github/rdlabo/native-ui-engine/$VERSION/native-ui-engine-$VERSION.$EXTENSION"
+            curl --fail --silent --show-error --head --max-time 30 "https://repo.maven.apache.org/maven2/io/github/webview-native-ui/engine/$VERSION/engine-$VERSION.$EXTENSION"
           done
       - run: npm install -g npm@latest
       - run: npm ci

@@ -11,8 +11,8 @@ platform :ios, '15.0'
 install! 'cocoapods', :integrate_targets => false
 use_frameworks!
 target 'App' do
-  pod 'CapacitorNativeUIEngine', :path => '../engine'
+  pod 'WebViewNativeUIEngine', :path => '../engine'
 end
 RUBY
 pod install --project-directory="$ENGINE_PODS_TEMP/app"
-xcodebuild -project "$ENGINE_PODS_TEMP/app/Pods/Pods.xcodeproj" -scheme CapacitorNativeUIEngine -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
+xcodebuild -project "$ENGINE_PODS_TEMP/app/Pods/Pods.xcodeproj" -scheme WebViewNativeUIEngine -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build

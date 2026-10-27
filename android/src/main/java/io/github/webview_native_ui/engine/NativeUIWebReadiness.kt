@@ -1,4 +1,4 @@
-package dev.rdlabo.capacitor.nativeuiengine
+package io.github.webview_native_ui.engine
 
 import android.os.Handler
 import android.os.Looper

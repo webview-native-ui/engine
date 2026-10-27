@@ -10,7 +10,7 @@ interface PlacementState {
   measure(): Record<string, unknown>;
 }
 // The injected runtime and a plugin's bundled helper share the binding.
-const placementKey = Symbol.for('capacitor-native-ui-engine.projection-placement');
+const placementKey = Symbol.for('webview-native-ui-engine.projection-placement');
 type PlacementElement = HTMLElement & { [placementKey]?: PlacementState };
 export const bindProjectionPlacement = (
   element: HTMLElement,

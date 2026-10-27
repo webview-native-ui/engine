@@ -1,4 +1,4 @@
-package dev.rdlabo.capacitor.nativeuiengine
+package io.github.webview_native_ui.engine
 
 import android.annotation.SuppressLint
 import android.graphics.RectF
@@ -105,7 +105,7 @@ class NativeUIProjection(
         if (runtime == Runtime.CORDOVA && (matches.isNotEmpty() || eventName in receiveListeners.update)) {
             val args = JSONArray().put(id).put(eventName).put(data ?: JSONObject()).toString()
             webView.post {
-                if (!closed) evaluate("globalThis.CapacitorNativeUIEngineRuntime?.notify(...$args)")
+                if (!closed) evaluate("globalThis.WebViewNativeUIEngineRuntime?.notify(...$args)")
             }
         }
     }
@@ -159,7 +159,7 @@ class NativeUIProjection(
             .put("receiveListeners", receiveListeners.configuration()).put("failedFallback", failedFallback.value).put("captureMode", if (captureMode == CaptureMode.VIEW) "view" else "composited")
         if (updatePlacement != null) config.put("placementHandoff", true)
         val runtime = webView.context.assets.open("native-ui-engine.js").bufferedReader().use { it.readText() }
-        val source = "if (!globalThis.CapacitorNativeUIEngineRuntime) { $runtime } CapacitorNativeUIEngineRuntime.start($config).catch(console.error);"
+        val source = "if (!globalThis.WebViewNativeUIEngineRuntime) { $runtime } WebViewNativeUIEngineRuntime.start($config).catch(console.error);"
         if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
             install(webView, allowedOrigins)
             registrations.getValue(webView)[id] = java.lang.ref.WeakReference(this)
@@ -401,7 +401,7 @@ class NativeUIProjection(
             }
         }
         val args = JSONArray().put(id).put(key ?: JSONObject.NULL).put(value).put(error ?: JSONObject.NULL)
-        evaluate("globalThis.CapacitorNativeUIEngineRuntime?.receive(...$args)")
+        evaluate("globalThis.WebViewNativeUIEngineRuntime?.receive(...$args)")
     }
     /** Hide pixels immediately; completion confirms the Web proxy has also been retired. */
     fun hide(complete: (Boolean) -> Unit = {}) {
@@ -414,7 +414,7 @@ class NativeUIProjection(
         var done = false
         val timeout = Runnable { if (!done) { done = true; complete(false) } }
         webView.postDelayed(timeout, 5000)
-        evaluate("globalThis.CapacitorNativeUIEngineRuntime?.hide('$id') === true") { result ->
+        evaluate("globalThis.WebViewNativeUIEngineRuntime?.hide('$id') === true") { result ->
             if (!done) { done = true; webView.removeCallbacks(timeout); complete(result == "true") }
         }
     }
@@ -422,7 +422,7 @@ class NativeUIProjection(
     fun show() {
         check(android.os.Looper.myLooper() == android.os.Looper.getMainLooper())
         suspended = false; destination = "native"; notificationDestination = "native"; connected = true
-        evaluate("globalThis.CapacitorNativeUIEngineRuntime?.show('$id')")
+        evaluate("globalThis.WebViewNativeUIEngineRuntime?.show('$id')")
     }
     // A ScriptHandler exists only after constructor validation of DOCUMENT_START_SCRIPT.
     @SuppressLint("RequiresFeature")
@@ -432,7 +432,7 @@ class NativeUIProjection(
         isProjecting = false
         coverGeneration++
         stopInteraction()
-        evaluate("globalThis.CapacitorNativeUIEngineRuntime?.stop('$id')")
+        evaluate("globalThis.WebViewNativeUIEngineRuntime?.stop('$id')")
         script.remove()
         registrations[webView]?.remove(id)
         snapshots.close(); webReadyTokens.clear(); captured.clear(); anchors.clear()
