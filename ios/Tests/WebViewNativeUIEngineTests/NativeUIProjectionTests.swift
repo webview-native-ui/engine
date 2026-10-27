@@ -96,9 +96,9 @@ final class NativeUIProjectionTests: XCTestCase {
         owner.view.addSubview(button)
         let registration = try NativeUIProjection(webView: web, plugin: "Fixture", projectionSelector: "#slot",
             receiveListeners: .init(projection: .init(native: ["shown"], web: ["moving"])),
-            // A hostless XCTest process has no compositor surface. Keep the capture,
-            // file transport and handoff real, replacing only the screen replica.
-            snapshots: NativeUICoveredSnapshots(snapshotView: { $0 }), view: { button })
+            // SnapshotTestWindow supplies deterministic pixels in hostless XCTest.
+            // Capture, file transport and handoff use the production path.
+            snapshots: NativeUICoveredSnapshots(), view: { button })
         defer { registration.destroy(); window.isHidden = true }
         web.load(URLRequest(url: URL(string: "capacitor://localhost/fixture")!))
         for _ in 0..<3 {

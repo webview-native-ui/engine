@@ -14,13 +14,7 @@ public final class NativeUICoveredSnapshots {
         let webFrame: CGRect
         let parts: [Part]
     }
-    private let snapshotView: (UIWindow) -> UIView
-    public convenience init() {
-        self.init(snapshotView: { $0.screen.snapshotView(afterScreenUpdates: false) })
-    }
-    init(snapshotView: @escaping (UIWindow) -> UIView) {
-        self.snapshotView = snapshotView
-    }
+    public init() {}
     private var captures: [String: Capture] = [:]
     private var restoration: (token: String, views: [UIImageView], entry: Bool)?
     private var hiddenControls: (token: String, restore: [() -> Void])?
@@ -89,15 +83,13 @@ public final class NativeUICoveredSnapshots {
         let format = UIGraphicsImageRendererFormat()
         format.scale = scale
         format.opaque = true
-        // Render the compositor's frozen screen, not UIKit's reconstruction of
-        // the hierarchy: the latter loses Liquid Glass background refraction.
-        // The replica remains detached and never changes visible UI or input.
-        let replica = snapshotView(window)
-        let screenBounds = window.convert(bounds, to: window.screen.coordinateSpace)
+        // Rasterize the visible window directly. A screen snapshot is a display
+        // replica, not a bitmap source; drawing that replica can succeed with
+        // black pixels on physical devices.
         var drawn = false
         let image = UIGraphicsImageRenderer(size: bounds.size, format: format).image { context in
-            context.cgContext.translateBy(x: -screenBounds.minX, y: -screenBounds.minY)
-            drawn = replica.drawHierarchy(in: window.screen.bounds, afterScreenUpdates: true)
+            context.cgContext.translateBy(x: -bounds.minX, y: -bounds.minY)
+            drawn = window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
         }
         guard drawn, let pixels = image.cgImage else { complete([:]); return }
         let token = UUID().uuidString

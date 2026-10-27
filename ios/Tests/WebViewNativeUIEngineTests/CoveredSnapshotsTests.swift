@@ -3,6 +3,37 @@ import UIKit
 @testable import WebViewNativeUIEngine
 
 final class NativeUICoveredSnapshotsTests: XCTestCase {
+    @MainActor func testPreparedImageContainsVisibleWindowPixels() async throws {
+        let owner = UIViewController()
+        let window = SnapshotTestWindow(frame: UIScreen.main.bounds)
+        window.rootViewController = owner
+        window.makeKeyAndVisible()
+        let view = owner.view!
+        view.frame = window.bounds
+        window.layoutIfNeeded()
+        let snapshots = NativeUICoveredSnapshots()
+        defer { snapshots.reset(); window.isHidden = true }
+        let result: [String: Any] = await withCheckedContinuation { continuation in
+            snapshots.prepare(frames: { ["control": CGRect(x: 20, y: 80, width: 48, height: 48)] },
+                              in: view, viewportWidth: view.bounds.width) { continuation.resume(returning: $0) }
+        }
+        let parts = try XCTUnwrap(result["parts"] as? [[String: Any]])
+        let path = try XCTUnwrap(parts.first?["url"] as? String)
+        let url = try XCTUnwrap(URL(string: path))
+        let image = try XCTUnwrap(UIImage(contentsOfFile: url.path)?.cgImage)
+        var pixel = [UInt8](repeating: 0, count: 4)
+        let drawn = pixel.withUnsafeMutableBytes { bytes -> Bool in
+            guard let context = CGContext(data: bytes.baseAddress, width: 1, height: 1,
+                bitsPerComponent: 8, bytesPerRow: 4, space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+            context.draw(image, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+            return true
+        }
+        XCTAssertTrue(drawn)
+        XCTAssertTrue(pixel.prefix(3).allSatisfy { $0 > 240 },
+                      "A successful preparation must contain the white window pixels, not a black display replica")
+    }
+
     @MainActor func testMovingModalCaptureAndReturnDoNotReplaceBackgroundOwnership() async throws {
         let owner = UIViewController()
         let window = SnapshotTestWindow(frame: UIScreen.main.bounds)
@@ -11,7 +42,7 @@ final class NativeUICoveredSnapshotsTests: XCTestCase {
         let view = owner.view!
         view.frame = window.bounds
         window.layoutIfNeeded()
-        let snapshots = NativeUICoveredSnapshots(snapshotView: { $0 })
+        let snapshots = NativeUICoveredSnapshots()
         defer { snapshots.reset(); window.isHidden = true }
         func capture(_ id: String) async -> [String: Any] {
             await withCheckedContinuation { continuation in
@@ -53,7 +84,7 @@ final class NativeUICoveredSnapshotsTests: XCTestCase {
         view.backgroundColor = .white
         view.frame = window.bounds
         window.layoutIfNeeded()
-        let snapshots = NativeUICoveredSnapshots(snapshotView: { $0 })
+        let snapshots = NativeUICoveredSnapshots()
         defer { snapshots.reset(); window.isHidden = true }
         let capture: [String: Any] = await withCheckedContinuation { continuation in
             snapshots.prepare(frames: { ["button": CGRect(x: 20, y: 80, width: 60, height: 44)] },
@@ -99,7 +130,7 @@ final class NativeUICoveredSnapshotsTests: XCTestCase {
 }
 
 // Swift package tests have no hosted application scene. Supply deterministic
-// pixels here; actual UIKit capture is exercised by the simulator handoff test.
+// pixels here; actual UIKit capture is also verified in hosted device integration tests.
 final class SnapshotTestWindow: UIWindow {
     override func drawHierarchy(in rect: CGRect, afterScreenUpdates: Bool) -> Bool {
         UIColor.white.setFill()
