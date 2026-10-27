@@ -160,10 +160,13 @@ final class NativeUIProjectionTests: XCTestCase {
             stop: (...args) => calls.push(args)
           };
         """, injectionTime: .atDocumentStart, forMainFrameOnly: true))
-        let web = WKWebView(frame: .zero, configuration: configuration)
+        let window = UIWindow(frame: UIScreen.main.bounds)
+        let owner = UIViewController(); window.rootViewController = owner; window.makeKeyAndVisible()
+        let web = WKWebView(frame: window.bounds, configuration: configuration)
+        owner.view.addSubview(web)
         let registration = try NativeUIProjection(webView: web, plugin: "Fixture", projectionSelector: "#slot",
             receiveListeners: .init(update: ["updated"]), runtime: .cordova, view: { nil })
-        defer { registration.destroy() }
+        defer { registration.destroy(); window.isHidden = true }
         web.load(URLRequest(url: URL(string: "capacitor://localhost/fixture")!))
         try await wait(web, "location.host === 'localhost' && typeof calls !== 'undefined'")
         registration.receive("updated", data: ["value": "private"])

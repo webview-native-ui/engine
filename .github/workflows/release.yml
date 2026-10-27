@@ -51,7 +51,12 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm run test:package
+      - run: node --test scripts/native-ui-engine-release/npm-artifact.test.mjs
+      - name: Check existing npm artifact
+        id: artifact
+        run: node scripts/native-ui-engine-release/npm-artifact.mjs
       - name: Publish npm
+        if: steps.artifact.outputs.exists != 'true'
         run: |
           TAG=$(node -p "require('./package.json').version.includes('-') ? 'next' : 'latest'")
           npm publish --provenance --access public --tag "$TAG"
