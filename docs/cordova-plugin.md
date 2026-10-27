@@ -188,3 +188,11 @@ npm run test:cordova -- android emulator-5554
 ```
 
 The script creates a disposable app, uses local SwiftPM/Maven Engine artifacts, and records the application result in the printed temporary directory. It never publishes to npm or Maven. Android requires JDK 21+, SDK 36 and `ANDROID_HOME`; iOS requires Xcode.
+
+## Animated native controls
+
+Native appearance updates prepare replacement images after a 50 ms debounce by default.
+If your control continues animating after its update notification, set `captureDelayMs`
+on the native registration (Swift: `captureDelayMs: 600`; Kotlin: `captureDelayMs = 600`).
+This changes background image preparation, not overlay presentation timing.
+See [capture timing](projection.md#capture-timing) for the cache behavior and measured guidance.
