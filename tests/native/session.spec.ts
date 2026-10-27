@@ -1,14 +1,14 @@
 import { expect, test } from '@playwright/test';
 import { buildSync } from 'esbuild';
 const bundle = buildSync({
-  entryPoints: ['src/native-session.ts'],
+  entryPoints: ['src/native/session.ts'],
   bundle: true,
   format: 'iife',
   globalName: 'sessionEngine',
   write: false,
 }).outputFiles[0].text;
 const placementBundle = buildSync({
-  entryPoints: ['src/projection-placement.ts'],
+  entryPoints: ['src/projection/placement.ts'],
   bundle: true,
   format: 'iife',
   globalName: 'placementEngine',
@@ -273,7 +273,7 @@ for (const destination of ['shown', 'hidden']) {
 }
 
 const ionicBundle = buildSync({
-  stdin: { contents: "export * from './src/ionic'; export * from './src/overlays';", resolveDir: process.cwd() },
+  stdin: { contents: "export * from './src/ionic'; export * from './src/dom/overlays';", resolveDir: process.cwd() },
   bundle: true,
   format: 'iife',
   globalName: 'ionicEngine',

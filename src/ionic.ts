@@ -1,5 +1,5 @@
-import { getOverlayCoordinator, type OverlayDefinition, type OverlayOptions } from './overlays.js';
-export type { OverlayOptions as IonicOverlayOptions } from './overlays.js';
+import { getOverlayCoordinator, type OverlayDefinition, type OverlayOptions } from './dom/overlays.js';
+export type { OverlayOptions as IonicOverlayOptions } from './dom/overlays.js';
 const defaults: readonly OverlayDefinition[] = [
   ...['Modal', 'Popover', 'Alert', 'ActionSheet', 'Loading', 'Picker', 'Toast'].map((name) => ({
     selector: `ion-${name.replace(/[A-Z]/g, (letter, index) => (index ? '-' : '') + letter.toLowerCase())}`,

@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import { buildSync } from 'esbuild';
 const bundle = (name: string) =>
   buildSync({
-    stdin: { contents: "export * from './src/ionic'; export * from './src/overlays';", resolveDir: process.cwd() },
+    stdin: { contents: "export * from './src/ionic'; export * from './src/dom/overlays';", resolveDir: process.cwd() },
     bundle: true,
     format: 'iife',
     globalName: name,

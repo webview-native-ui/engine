@@ -1,5 +1,5 @@
-import { startNativeSession, type NativeSessionConfiguration } from './native-session.js';
-import type { ListenerHandle } from './types.js';
+import { startNativeSession, type NativeSessionConfiguration } from './session.js';
+import type { ListenerHandle } from '../types.js';
 
 const sessions = new Map<string, { destroy(): Promise<void>; hide(): void; show(): void }>();
 const pending = new Map<string, { resolve(value: any): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> }>();

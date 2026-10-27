@@ -528,6 +528,14 @@ This uses WKWebView's internal overflow hierarchy without private class names. M
 
 ## Development
 
+The public entry points are `src/index.ts` and `src/ionic.ts`, with shared contracts in `src/types.ts`. Implementation is grouped by responsibility:
+
+- `src/native/`: bridge transport, native sessions, startup and resource URLs.
+- `src/projection/`: image handoff, projection ownership, events and styles.
+- `src/dom/`: geometry, scrolling, visibility and overlay coordination.
+
+Browser tests mirror these groups under `tests/`. `tests/cordova/` contains the real native consumer fixture.
+
 Use Node.js 24, matching CI. From this repository:
 
 ```sh

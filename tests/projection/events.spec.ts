@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { bindProjectionEvents } from '../src/projection-events.js';
+import { bindProjectionEvents } from '../../src/projection/events.js';
 
 test('shared notification subscribes once and delivers destination with update atomically', async () => {
   const callbacks = new Map<string, (event: unknown) => void>();

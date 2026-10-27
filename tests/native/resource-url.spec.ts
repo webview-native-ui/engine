@@ -1,7 +1,12 @@
 import { test, expect } from '@playwright/test';
 import { buildSync } from 'esbuild';
-const runtime = buildSync({ entryPoints: ['src/runtime.ts'], bundle: true, format: 'iife', globalName: 'URLRuntime', write: false })
-  .outputFiles[0].text;
+const runtime = buildSync({
+  entryPoints: ['src/native/resource-url.ts'],
+  bundle: true,
+  format: 'iife',
+  globalName: 'URLRuntime',
+  write: false,
+}).outputFiles[0].text;
 
 test('uses the existing host file server without registering either framework', async ({ page }) => {
   await page.addScriptTag({ content: runtime });

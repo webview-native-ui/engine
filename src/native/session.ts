@@ -1,11 +1,11 @@
-import { projectionPlacement } from './projection-placement.js';
-import { getOverlayCoordinator } from './overlays.js';
-import { readScrollPlacement } from './scroll-placement.js';
-import { projectionAncestors } from './geometry.js';
-import { createWebProjection, type WebProjection } from './web-projection.js';
-import { createWebProjectionScope } from './web-projection-scope.js';
-import { bindProjectionEvents, type ProjectionDestination } from './projection-events.js';
-import type { Frame, ScrollPlacement, ListenerHandle, WebProjectionRequest } from './types.js';
+import { projectionPlacement } from '../projection/placement.js';
+import { getOverlayCoordinator } from '../dom/overlays.js';
+import { readScrollPlacement } from '../dom/scroll-placement.js';
+import { projectionAncestors } from '../dom/geometry.js';
+import { createWebProjection, type WebProjection } from '../projection/web.js';
+import { createWebProjectionScope } from '../projection/scope.js';
+import { bindProjectionEvents, type ProjectionDestination } from '../projection/events.js';
+import type { Frame, ScrollPlacement, ListenerHandle, WebProjectionRequest } from '../types.js';
 
 /** Serialized by the native library. One registration owns one fixed fallback container. */
 export interface NativeSessionConfiguration {

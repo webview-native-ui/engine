@@ -1,5 +1,5 @@
-import type { ListenerHandle } from './types.js';
-import { boundedListener } from './bridge.js';
+import type { ListenerHandle } from '../types.js';
+import { boundedListener } from '../native/bridge.js';
 
 export type ProjectionDestination = 'native' | 'web' | 'none';
 

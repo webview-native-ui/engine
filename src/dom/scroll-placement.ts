@@ -1,4 +1,4 @@
-import type { ScrollPlacement as NativeUIScrollPlacement } from './types.js';
+import type { ScrollPlacement as NativeUIScrollPlacement } from '../types.js';
 type Identify = (element: HTMLElement) => string;
 import { projectionAncestors } from './geometry.js';
 const frame = ({ x, y, width, height }: DOMRect) => ({ x, y, width, height });

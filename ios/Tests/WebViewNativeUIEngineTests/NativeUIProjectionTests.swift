@@ -168,7 +168,9 @@ final class NativeUIProjectionTests: XCTestCase {
             receiveListeners: .init(update: ["updated"]), runtime: .cordova, view: { nil })
         defer { registration.destroy(); window.isHidden = true }
         web.load(URLRequest(url: URL(string: "capacitor://localhost/fixture")!))
-        try await wait(web, "location.host === 'localhost' && typeof calls !== 'undefined'")
+        // A cold CI simulator may need tens of seconds to launch WebKit processes.
+        // Keep this startup allowance separate from the notification assertions below.
+        try await wait(web, "location.host === 'localhost' && typeof calls !== 'undefined'", timeout: 60)
         registration.receive("updated", data: ["value": "private"])
         try await wait(web, "calls.length === 1")
         web.load(URLRequest(url: URL(string: "capacitor://untrusted.example/fixture")!))
