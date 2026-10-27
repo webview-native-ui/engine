@@ -1,26 +1,31 @@
 # WebView Native UI Engine
 
-**Keep native UI in step with Web content.** Add scrolling, Web-layer projection and native restoration to your Capacitor or Cordova plugin without building a separate handoff system for each platform.
+**Bring native UI into the freedom of the Web.** Build WebView apps where native controls and Web content share the same scrolling screens, transitions and overlays.
 
-## What you can build
+## Beyond the WebView boundary
 
-- **Native controls that coexist with Web modals and overlays.** Temporarily show the native surface's prepared image in the correct DOM layer, then restore the interactive native view when the overlay closes.
-- **Native surfaces inside scrolling Web content.** Use supported native scroll tracking on iOS, or a prepared image during motion, including on Android. Return to the live native view when motion settles.
-- **Consistent transitions without recreating native styling in CSS.** Prepared images preserve captured native pixels, including composited translucency, while the Web layer owns presentation.
+WebView apps combine the Web's flexible layouts with access to native platform capabilities. But native UI and the Web page live in separate rendering layers. A native control placed above the WebView does not automatically participate in DOM scrolling, clipping or stacking order. A Web modal cannot simply cover it with a higher `z-index`.
 
-These capabilities suit plugins with native toolbars, tab bars, players or eligible native SDK views. Your plugin keeps its controls, business actions and public API. The Engine handles the transition between the live native view and its Web presentation.
+Crossing that boundary takes more than a bridge call. It requires coordinating placement, appearance, input, rendering and restoration across two rendering systems on each platform. Rebuilding that coordination for every component makes otherwise useful designs expensive to deliver and maintain.
 
-## Approach
+WebView Native UI Engine makes that work reusable. It lets applications combine native UI with Web-driven screens and interactions, while sharing the machinery that moves presentation between the two layers. The goal is to expand what a WebView app can be built to do—and make that practical to ship.
 
-Associate a native view with an existing DOM container. Tell the Engine when the content changes and whether it belongs in **native**, **Web** or **neither** layer. It prepares images ahead of transitions and coordinates their replacement and restoration.
+## What this makes possible
 
-The DOM container determines where Web projection appears, including its placement in a modal or other layer. Your plugin creates and sizes both surfaces and keeps native placement current. Projected images are noninteractive; your plugin provides any interactive Web fallback.
+- **Native UI within Web-designed screens.** Combine native toolbars, tab bars, player controls and eligible SDK views with the application's DOM layout and navigation.
+- **Web overlays that coexist with native content.** Present modals and other overlays over native surfaces, then return to the interactive native UI when they close.
+- **Scrolling and transitions that retain native appearance.** Carry the native surface's captured appearance through Web-layer movement, without recreating its styling in CSS.
+- **Shared infrastructure across components and platforms.** Reuse the same projection and restoration lifecycle on iOS and Android instead of implementing it independently in every integration.
 
-Prepared images avoid capture work at transition start. If no valid image is available, the configured fallback applies. Captured content is a still image, so live video, unsupported capture and unusual layouts need a renderer-specific policy.
+## The approach
 
-## Add it to your plugin
+Use the live native view where it belongs, and a prepared visual projection in the DOM when the Web layer needs to own presentation. Restore the interactive native view when it can take over again. An existing DOM container gives the Web projection its place in the application's layout and layer structure.
 
-This is a dependency **for plugin authors**, not an application-facing plugin. It supports iOS and Android through the same Engine package and native libraries. Ionic and Angular are not required; Ionic overlay coordination is optional.
+The Engine coordinates this handoff; the integrating renderer still creates and positions its views. A projected image preserves appearance, not live interaction or video. Capture availability and layout support determine when a projection can be used, with an explicit fallback when it cannot. See [projection behavior](docs/projection.md) for the detailed contract and limits.
+
+## Integration
+
+Applications gain these capabilities through plugins that integrate the Engine. Capacitor and Cordova plugin authors add it as a library dependency while retaining their existing native controls and public APIs. The same Engine supports iOS and Android. Ionic and Angular are not required; Ionic overlay coordination is optional.
 
 - [Capacitor plugin guide](docs/capacitor-plugin.md) — install dependencies and add registration, events and teardown to your existing plugin.
 - [Cordova plugin guide](docs/cordova-plugin.md) — integrate the same Engine with Cordova's lifecycle and resource handler, without a Capacitor dependency.
