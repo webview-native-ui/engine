@@ -150,7 +150,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
   let paintFrame = 0;
   let presentation = 0;
   let cached: Prepared | undefined;
-  let retiring: { item: Prepared; done: Promise<void> } | undefined;
+  let retiring: object | undefined;
   let active: Prepared | undefined;
   let touching = false;
   let ending = false;
@@ -735,9 +735,9 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     if (nativeHidden || stopped) retiring = undefined;
     if (callbacks.retainPreparedUntilRelease && !active && !nativeHidden && !stopped) {
       if (previous) {
-        const pending = { item: previous, done: Promise.resolve() };
+        const pending = {};
         retiring = pending;
-        pending.done = bounded(call({ action: 'release', token: previous.data.token }))
+        void bounded(call({ action: 'release', token: previous.data.token }))
           .catch(() => {})
           .finally(() => {
             previous.images.forEach((image) => {
@@ -829,7 +829,6 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
       await Promise.allSettled([
         bounded(Promise.resolve().then(() => listener?.remove())),
         bounded(Promise.resolve().then(() => eventListener?.remove())),
-        retiring?.done,
       ]);
     },
   };

@@ -419,7 +419,7 @@ class NativeUIEngineTest {
     val origin=IntArray(2);activity.web.getLocationOnScreen(origin)
     val vertical=NativeUIWindowInteraction.Drag(origin[0]+5f,origin[1]+200f,0f,-100f)
     drag.invoke(registration,vertical)
-    assertEquals("Unprepared ads stay native",View.VISIBLE,native.visibility)
+    assertEquals("Unprepared views stay native",View.VISIBLE,native.visibility)
     request("prepare") {it.put("ids",org.json.JSONArray().put("view")).put("viewportWidth",activity.web.width).put("revision",0)}
    }
    var token:String?=null
@@ -455,6 +455,18 @@ class NativeUIEngineTest {
     val location=IntArray(2);native.getLocationOnScreen(location)
     drag.invoke(registration,vertical.copy(downX=location[0]+5f,downY=location[1]+5f))
     assertEquals("A native input target retains its gesture",View.VISIBLE,native.visibility)
+    native.rotation=45f
+    drag.invoke(registration,vertical)
+    assertEquals("Rotated native controls keep the existing input path",View.VISIBLE,native.visibility)
+    native.rotation=0f
+    activity.root.scaleX=2f
+    drag.invoke(registration,vertical)
+    assertEquals("Transformed native ancestors keep the existing input path",View.VISIBLE,native.visibility)
+    activity.root.scaleX=1f
+    activity.web.scaleY=2f
+    drag.invoke(registration,vertical)
+    assertEquals("Transformed WebView coordinates cannot start an early handoff",View.VISIBLE,native.visibility)
+    activity.web.scaleY=1f
     drag.invoke(registration,vertical)
     assertEquals(View.INVISIBLE,native.visibility);assertTrue(registration.isProjecting)
     request("release") {it.put("token",token)}

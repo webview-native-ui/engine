@@ -162,11 +162,17 @@ class NativeUIProjection(
         val selected = captured[token] ?: return
         val current = views()
         if (selected.isEmpty() || selected.any { (id, view) -> current[id] !== view || !view.isShown || view.isLayoutRequested } || !canCapture()) return
+        // Screen origin + unscaled bounds only describe translation-only hierarchies.
+        // Otherwise keep the existing path, including native-owned input gestures.
+        fun translationOnly(view: View) = generateSequence(view) { it.parent as? View }.all {
+            it.scaleX == 1f && it.scaleY == 1f && it.rotation == 0f && it.rotationX == 0f && it.rotationY == 0f
+        }
+        if (!translationOnly(webView) || selected.values.any { !translationOnly(it) }) return
         // Native controls own gestures that start on them. Do not alter their input target.
         if (selected.any { (id, view) ->
             val anchor = anchors[token]?.get(id)?.native
             anchor == null || kotlin.math.abs(anchor.width() - view.width) >= 0.1f ||
-                kotlin.math.abs(anchor.height() - view.height) >= 0.1f || view.scaleX != 1f || view.scaleY != 1f
+                kotlin.math.abs(anchor.height() - view.height) >= 0.1f
         }) return
         val location = IntArray(2)
         if (selected.values.any { view ->
