@@ -31,8 +31,10 @@ class NativeUIProjection(
     private val updatePlacement: ((JSONObject) -> Unit)? = null,
     private val runtime: Runtime = Runtime.CAPACITOR,
     captureDelayMs: Int = 50,
+    imagePlacement: ImagePlacement = ImagePlacement.PREVIOUS,
     view: () -> View?
 ) : AutoCloseable {
+    enum class ImagePlacement(val value: String) { PREVIOUS("previous"), CHILD("child") }
     enum class Runtime { CAPACITOR, CORDOVA }
     /** True only after an opaque VIEW handoff hid native pixels. Main-thread access only. */
     var isProjecting: Boolean = false
@@ -211,7 +213,7 @@ class NativeUIProjection(
         require(projectionSelector.isNotBlank())
         require(captureDelayMs >= 0) { "captureDelayMs must be nonnegative" }
         val config = JSONObject().put("runtime", if (runtime == Runtime.CORDOVA) "cordova" else "capacitor").put("id", id).put("plugin", plugin).put("projectionSelector", projectionSelector)
-            .put("captureDelayMs", captureDelayMs).put("receiveListeners", receiveListeners.configuration()).put("failedFallback", failedFallback.value).put("captureMode", if (captureMode == CaptureMode.VIEW) "view" else "composited")
+            .put("imagePlacement", imagePlacement.value).put("captureDelayMs", captureDelayMs).put("receiveListeners", receiveListeners.configuration()).put("failedFallback", failedFallback.value).put("captureMode", if (captureMode == CaptureMode.VIEW) "view" else "composited")
         if (updatePlacement != null) config.put("placementHandoff", true).put("nativeDragHandoff", true)
         val runtime = webView.context.assets.open("native-ui-engine.js").bufferedReader().use { it.readText() }
         val source = "if (!globalThis.WebViewNativeUIEngineRuntime) { $runtime } WebViewNativeUIEngineRuntime.start($config).catch(console.error);"

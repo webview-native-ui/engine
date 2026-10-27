@@ -9,7 +9,6 @@ import type {
 import type { WebProjectionScope } from './scope.js';
 import { bounded, boundedListener } from '../native/bridge.js';
 import { bindProjectionEvents, type ProjectionEvents, type ProjectionDestination } from './events.js';
-import { projectionAncestors } from '../dom/geometry.js';
 import { snapshotStyles } from './styles.js';
 
 export interface WebProjectionOptions {
@@ -62,42 +61,6 @@ const layout = (candidates: Candidate[], positionIndependent = false) =>
     ]),
   );
 
-// Native frames are viewport pixels; absolute children use the target's local
-// padding box. Keep the conversion independent of theme dimensions.
-const coordinateSpace = (target: HTMLElement, win: Window, style = win.getComputedStyle(target)) => {
-  const rect = target.getBoundingClientRect();
-  // offsetWidth/Height round fractional CSS sizes, which would introduce drift.
-  const borderBox = (size: string, sides: string[]) => {
-    const value = parseFloat(size);
-    return style.display !== 'inline' && Number.isFinite(value)
-      ? value +
-          (style.boxSizing === 'border-box' ? 0 : sides.reduce((sum, side) => sum + (parseFloat(style.getPropertyValue(side)) || 0), 0))
-      : NaN;
-  };
-  const width = borderBox(style.width, ['padding-left', 'padding-right', 'border-left-width', 'border-right-width']);
-  const height = borderBox(style.height, ['padding-top', 'padding-bottom', 'border-top-width', 'border-bottom-width']);
-  // Inline dimensions may be auto (or an ignored specified width). Native element
-  // projection excludes transformed ancestors; use CSS zoom, not rounded offsets.
-  let zoom = 1;
-  if (!(width > 0 && height > 0)) {
-    for (const element of [target, ...projectionAncestors(target)]) {
-      const value = (element === target ? style : win.getComputedStyle(element)).getPropertyValue('zoom');
-      zoom *= (parseFloat(value) || 1) / (value.endsWith('%') ? 100 : 1);
-    }
-  }
-  const scaleX = width > 0 ? rect.width / width : zoom;
-  const scaleY = height > 0 ? rect.height / height : zoom;
-  return {
-    x: rect.x,
-    y: rect.y,
-    scaleX: scaleX || 1,
-    scaleY: scaleY || 1,
-    left: (parseFloat(style.borderLeftWidth) || 0) - target.scrollLeft,
-    top: (parseFloat(style.borderTopWidth) || 0) - target.scrollTop,
-    position: style.position,
-  };
-};
-
 /** Images are prepared after accepted native updates, never on the overlay's critical path. */
 const createProjectionEngine = async (scope: WebProjectionScope, transport: WebProjectionTransport, callbacks: WebProjectionOptions) => {
   const captureDelayMs = callbacks.captureDelayMs ?? 50;
@@ -110,6 +73,16 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
   const imageIdentity = Array.from(win.crypto.getRandomValues(new Uint32Array(4)), (value) => value.toString(16)).join('-');
   const validSource = (source: HTMLElement) => source.isConnected && source.ownerDocument === doc;
   const validTarget = (target: HTMLElement | undefined): target is HTMLElement => !!target?.isConnected && target.ownerDocument === doc;
+  // Keep current, preparing and pending-release images leased; reuse idle DOM slots.
+  const imagePool = new Map<HTMLElement, HTMLImageElement[]>();
+  const leasedImages = new Set<HTMLImageElement>();
+  const retireImage = (image: HTMLImageElement) => {
+    leasedImages.delete(image);
+    image.style.setProperty('display', 'none', 'important');
+    image.removeAttribute('data-native-ui-projection-image');
+    image.removeAttribute('src');
+    pruneIdleImages();
+  };
   const call = transport.send.bind(transport);
   const imageMarker = 'data-native-ui-snapshot';
   const sourcesChangedEvent = `${scope.namespace}:sources-change`;
@@ -125,24 +98,18 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
         return [scopeIDs.get(candidate.scope), layout([candidate], !!callbacks.opaqueUnderlay)];
       }),
     );
-  const sheets = new Map<Document | ShadowRoot, { base: HTMLStyleElement; image: HTMLStyleElement }>();
+  const sheets = new Map<Document | ShadowRoot, HTMLStyleElement>();
   const rootFor = (element: HTMLElement) => {
     const root = element.getRootNode();
     return root.nodeType === 11 && 'host' in root ? (root as ShadowRoot) : doc;
   };
   const sheetFor = (root: Document | ShadowRoot) => {
-    let pair = sheets.get(root);
-    if (!pair) {
-      const base = doc.createElement('style'),
-        image = doc.createElement('style');
-      base.setAttribute('data-native-ui-snapshot-base', '');
-      image.setAttribute(imageMarker, '');
-      base.textContent = snapshotStyles;
-      (root.nodeType === 11 ? root : (root as Document).head).append(base, image);
-      pair = { base, image };
-      sheets.set(root, pair);
-    }
-    return pair.image;
+    if (sheets.has(root)) return;
+    const style = doc.createElement('style');
+    style.setAttribute('data-native-ui-snapshot-base', '');
+    style.textContent = snapshotStyles;
+    (root.nodeType === 11 ? root : (root as Document).head).append(style);
+    sheets.set(root, style);
   };
   const viewport = () => `${win.innerWidth}:${win.innerHeight}:${win.devicePixelRatio}`;
   let handoffPending = false;
@@ -163,11 +130,41 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
   let stopped = false;
   let flight = false;
   let latest: { revision: number; candidates: Candidate[] } | undefined;
+  const pruneIdleImages = () => {
+    const targets = new Set(latest?.candidates.map((candidate) => candidate.scope.element));
+    for (const [target, pool] of imagePool) {
+      if (!stopped && target.isConnected && targets.has(target)) {
+        if (active || ending || handoffPending) continue;
+        const limit = 2 * Math.max(1, cached?.scopes.filter((scope) => scope.element === target).length ?? 0);
+        let spare = Math.max(0, limit - pool.filter((image) => leasedImages.has(image)).length);
+        const retained = pool.filter((image) => leasedImages.has(image) || spare-- > 0);
+        for (const image of pool) if (!retained.includes(image)) image.remove();
+        imagePool.set(target, retained);
+        continue;
+      }
+      const retained = pool.filter((image) => leasedImages.has(image));
+      for (const image of pool) if (!leasedImages.has(image)) image.remove();
+      if (retained.length) imagePool.set(target, retained);
+      else imagePool.delete(target);
+    }
+    const liveRoots = new Set<Node>([
+      ...(latest?.candidates.map((candidate) => candidate.scope.element.getRootNode()) ?? []),
+      ...(active?.scopes.map((scope) => scope.element.getRootNode()) ?? []),
+      ...(cached?.scopes.map((scope) => scope.element.getRootNode()) ?? []),
+      ...[...leasedImages].map((image) => image.getRootNode()),
+    ]);
+    for (const [root, pair] of sheets)
+      if (root.nodeType === 11 && !liveRoots.has(root)) {
+        pair.remove();
+        sheets.delete(root);
+      }
+  };
   const pendingCleanup = new Set<() => void>();
   const cleanup = (action: 'release' | 'restored', token: string, afterPaint: boolean) => {
     const run = () => {
       if (!pendingCleanup.delete(run)) return;
       void call({ action, token }).catch(() => {});
+      if (action === 'restored') pruneIdleImages();
     };
     pendingCleanup.add(run);
     if (afterPaint && !stopped) win.requestAnimationFrame(() => win.requestAnimationFrame(run));
@@ -181,7 +178,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
   const dispose = (item: Prepared | undefined, afterPaint = false) => {
     if (!item || item === cached || item === active) return;
     item.images.forEach((image) => {
-      image.src = '';
+      retireImage(image);
     });
     cleanup('release', item.data.token, afterPaint);
   };
@@ -265,7 +262,18 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
       await bounded(
         Promise.all(
           result.parts.map(async (part) => {
-            const image = doc.createElement('img');
+            const target = selected.find((candidate) => part.ids.includes(candidate.control.id))!.scope.element;
+            let pool = imagePool.get(target);
+            if (!pool) {
+              pool = [];
+              imagePool.set(target, pool);
+            }
+            let image = pool.find((item) => !leasedImages.has(item));
+            if (!image) {
+              image = doc.createElement('img');
+              pool.push(image);
+            }
+            leasedImages.add(image);
             images.push(image);
             image.src = projectionURL(part.url);
             await image.decode();
@@ -318,7 +326,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     } finally {
       if (!adopted)
         images.forEach((image) => {
-          image.src = '';
+          retireImage(image);
         });
       if (result?.token && !adopted) void call({ action: 'release', token: result.token }).catch(() => {});
       flight = false;
@@ -354,6 +362,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     }
     if (latest?.revision !== revision) generation++;
     latest = { revision, candidates };
+    pruneIdleImages();
     if (cached?.revision !== revision || preparedVisualRevision !== visualRevision) schedule();
   };
   const changed = (scrollOwner?: EventTarget) => {
@@ -368,7 +377,6 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
       invalidate();
     if (active) {
       updateOffsets();
-      followBorderAnimation();
     }
     visualRevision++;
     generation++;
@@ -394,8 +402,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
   const detach = () => {
     presentation++;
     win.cancelAnimationFrame(paintFrame);
-    win.cancelAnimationFrame(offsetFrame);
-    offsetFrame = 0;
+    for (const element of offsets.keys()) element.style.setProperty('opacity', '0', 'important');
     offsets.clear();
     paintFrame = 0;
     handoffPending = false;
@@ -407,11 +414,12 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     });
     rendered.forEach(clearTarget);
     rendered.clear();
-    sheets.forEach(({ base, image }) => {
-      base.remove();
-      image.remove();
+    sheets.forEach((style, root) => {
+      if (stopped || (root.nodeType === 11 && !(root as ShadowRoot).host.isConnected)) {
+        style.remove();
+        sheets.delete(root);
+      }
     });
-    sheets.clear();
   };
   const abandon = (expected = active, afterPaint = ending) => {
     if (active !== expected) return;
@@ -433,7 +441,19 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
       return;
     }
     const image = active;
-    detach();
+    presentation++;
+    win.cancelAnimationFrame(paintFrame);
+    paintFrame = 0;
+    handoffPending = presented = false;
+    image.sources.forEach((source) => {
+      owners.delete(source);
+      visibleOwners.delete(source);
+    });
+    for (const target of rendered) {
+      target.removeAttribute('data-native-ui-snapshot-source');
+      target.toggleAttribute('data-native-ui-snapshot-visible', !!callbacks.opaqueUnderlay);
+    }
+    image.images.forEach((element) => element.style.setProperty('opacity', callbacks.opaqueUnderlay ? '1' : '0', 'important'));
     active = undefined;
     ending = false;
     win.clearTimeout(restoreTimeout);
@@ -447,7 +467,6 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
       preparedOwners.add(source);
       preparedSources.add(source);
     });
-    render();
     callbacks.wake();
   };
   const retireRestoration = () => {
@@ -457,37 +476,38 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
   const targetsFor = (image: Prepared) => image.scopes.map((scope) => (validTarget(scope.element) ? scope.element : undefined));
   const rendered = new Set<HTMLElement>();
   const preparedKeys = new Map<HTMLElement, string>();
-  const offsets = new Map<HTMLElement, { x: number; y: number; style: CSSStyleDeclaration }>();
-  let offsetFrame = 0;
+  const offsets = new Map<HTMLImageElement, { target: HTMLElement; child: boolean; frame: Frame; scale?: { x: number; y: number } }>();
   const updateOffsets = () => {
-    for (const [target, offset] of offsets) {
-      if (!target.isConnected) continue;
-      const style = win.getComputedStyle(target);
-      const left = `${offset.x - (parseFloat(style.borderLeftWidth) || 0) + target.scrollLeft}px`;
-      const top = `${offset.y - (parseFloat(style.borderTopWidth) || 0) + target.scrollTop}px`;
-      if (offset.style.left !== left) offset.style.setProperty('left', left, 'important');
-      if (offset.style.top !== top) offset.style.setProperty('top', top, 'important');
-    }
-  };
-  const followBorderAnimation = () => {
-    if (offsetFrame || !active) return;
-    const movingBorder = [...offsets.keys()].some((target) =>
-      target
-        .getAnimations?.()
-        .some(
-          (animation) =>
-            animation.playState === 'running' &&
-            (animation.effect as KeyframeEffect | null)
-              ?.getKeyframes()
-              .some((frame) => ['borderLeftWidth', 'borderTopWidth', 'borderWidth'].some((property) => property in frame)),
-        ),
-    );
-    if (movingBorder)
-      offsetFrame = win.requestAnimationFrame(() => {
-        offsetFrame = 0;
-        updateOffsets();
-        followBorderAnimation();
+    const writes: { element: HTMLImageElement; left: number; top: number; width: number; height: number }[] = [];
+    // Read all geometry before writing positions; never reset a painted image to zero to measure it.
+    for (const [element, placement] of offsets) {
+      const { target, child, frame } = placement;
+      if (!target.isConnected) {
+        element.remove();
+        continue;
+      }
+      const parent = child ? target : target.parentNode!;
+      if (element.parentNode !== parent) parent.insertBefore(element, child ? null : target);
+      const box = target.getBoundingClientRect();
+      const rect = element.getBoundingClientRect();
+      const width = parseFloat(element.style.width) || frame.width;
+      const height = parseFloat(element.style.height) || frame.height;
+      const sx = rect.width / width || 1,
+        sy = rect.height / height || 1;
+      const initial = placement.scale ?? (placement.scale = { x: sx, y: sy });
+      writes.push({
+        element,
+        left: (parseFloat(element.style.left) || 0) + (box.x + (frame.x * sx) / initial.x - rect.x) / sx,
+        top: (parseFloat(element.style.top) || 0) + (box.y + (frame.y * sy) / initial.y - rect.y) / sy,
+        width: frame.width / initial.x,
+        height: frame.height / initial.y,
       });
+    }
+    for (const { element, ...values } of writes)
+      for (const [property, value] of Object.entries(values)) {
+        const next = `${value}px`;
+        if (element.style.getPropertyValue(property) !== next) element.style.setProperty(property, next, 'important');
+      }
   };
   const render = () => {
     const image = active ?? cached;
@@ -510,6 +530,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
         target.setAttribute(imageMarker, key);
         target.setAttribute('data-native-ui-snapshot-source', '');
         target.toggleAttribute('data-native-ui-snapshot-visible', presented);
+        image.images[index].style.setProperty('opacity', presented ? '1' : '0', 'important');
         next.add(target);
       }
       for (const target of rendered) if (!next.has(target)) clearTarget(target);
@@ -517,84 +538,67 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
       next.forEach((target) => rendered.add(target));
       return;
     }
+    imagePool.forEach((pool) =>
+      pool.forEach((element) => {
+        if (!image.images.includes(element)) {
+          element.style.setProperty('display', 'none', 'important');
+          element.removeAttribute('data-native-ui-projection-image');
+        }
+      }),
+    );
     preparedKeys.clear();
     offsets.clear();
     rendered.forEach(clearTarget);
     rendered.clear();
-    // Reuse the image stylesheet. Presentation states belong to the runtime's
-    // permanent CSS, which survives cache replacement and image retirement.
-    const groups = new Map<HTMLStyleElement, { rules: string[]; positions: { target: HTMLElement; x: number; y: number }[] }>();
-
     for (const target of new Set(targets)) {
       if (!target) continue;
       rendered.add(target);
-      const sheet = sheetFor(rootFor(target));
-      let group = groups.get(sheet);
-      if (!group) {
-        group = { rules: [], positions: [] };
-        groups.set(sheet, group);
-      }
-      const { rules, positions } = group;
-      // A decoded clone stays concealed even if this cache is invalidated before
-      // the projection adapter publishes its next Native/Web ownership state.
-      if (target !== image.targets[targets.indexOf(target)] && !target.hasAttribute('data-native-ui-snapshot-prepared')) {
+      sheetFor(rootFor(target));
+      const indices = targets.flatMap((owner, index) => (owner === target ? [index] : []));
+      const key = `${imageIdentity}-${indices[0]}`;
+      target.setAttribute(imageMarker, key);
+      if (target !== image.targets[indices[0]]) {
         target.setAttribute('data-native-ui-snapshot-prepared', '');
         preparedTargets.add(target);
       }
-      target.toggleAttribute('data-native-ui-snapshot-visible', !!active || !!callbacks.opaqueUnderlay);
-      if (active) target.setAttribute('data-native-ui-snapshot-source', '');
-      const indices = targets.flatMap((owner, index) => (owner === target ? [index] : []));
-      const style = win.getComputedStyle(target);
-      {
-        const space = coordinateSpace(target, win, style);
-        indices.forEach((index) => {
-          const part = image.data.parts[index];
-          if (callbacks.opaqueUnderlay && image.frames[index]) return;
-          image.frames[index] = {
-            x: callbacks.opaqueUnderlay ? 0 : (part.x - space.x) / space.scaleX,
-            y: callbacks.opaqueUnderlay ? 0 : (part.y - space.y) / space.scaleY,
-            width: part.width / space.scaleX,
-            height: part.height / space.scaleY,
-          };
-        });
+      target.toggleAttribute('data-native-ui-snapshot-visible', !!callbacks.opaqueUnderlay);
+      const box = target.getBoundingClientRect();
+      const child = image.scopes[indices[0]].imagePlacement === 'child';
+      const parent = child ? target : target.parentNode!;
+      for (const index of [...indices].reverse()) {
+        const element = image.images[index];
+        const part = image.data.parts[index];
+        const frame = image.frames[index] ?? {
+          x: callbacks.opaqueUnderlay ? 0 : part.x - box.x,
+          y: callbacks.opaqueUnderlay ? 0 : part.y - box.y,
+          width: part.width,
+          height: part.height,
+        };
+        image.frames[index] = frame;
+        preparedKeys.set(image.targets[index], key);
+        element.inert = true;
+        element.setAttribute('aria-hidden', 'true');
+        element.setAttribute('data-native-ui-projection-image', key);
+        element.style.cssText =
+          'all:initial!important;position:absolute!important;display:block!important;visibility:visible!important;pointer-events:none!important;opacity:0!important;';
+        element.style.setProperty('width', `${frame.width}px`, 'important');
+        element.style.setProperty('height', `${frame.height}px`, 'important');
+        element.style.setProperty('left', '0px', 'important');
+        element.style.setProperty('top', '0px', 'important');
+        element.style.setProperty('z-index', win.getComputedStyle(target).zIndex, 'important');
+        element.style.setProperty('opacity', callbacks.opaqueUnderlay ? '1' : '0', 'important');
+        const slot = child ? null : target.getAttribute('slot');
+        if (slot !== null) element.setAttribute('slot', slot);
+        else element.removeAttribute('slot');
+        const anchor = child ? null : target;
+        if (element.parentNode !== parent || element.nextSibling !== anchor) parent.insertBefore(element, anchor);
+        offsets.set(element, { target, child, frame });
       }
-      const frames = indices.map((index) => image.frames[index]);
-      const x = Math.min(...frames.map((frame) => frame.x));
-      const y = Math.min(...frames.map((frame) => frame.y));
-      const right = Math.max(...frames.map((frame) => frame.x + frame.width));
-      const bottom = Math.max(...frames.map((frame) => frame.y + frame.height));
-      const left = (parseFloat(style.borderLeftWidth) || 0) - target.scrollLeft;
-      const top = (parseFloat(style.borderTopWidth) || 0) - target.scrollTop;
-      const key = `${imageIdentity}-${indices[0]}`;
-      indices.forEach((index) => preparedKeys.set(image.targets[index], key));
-      target.setAttribute(imageMarker, key);
-      rules.push(
-        `[${imageMarker}="${key}"][data-native-ui-snapshot-visible] { ${style.position === 'static' ? 'position:relative!important;' : ''} }`,
-      );
-      const backgrounds = indices.map((index) => {
-        const frame = image.frames[index];
-        return `url(${JSON.stringify(image.images[index].src)}) ${frame.x - x}px ${frame.y - y}px / ${frame.width}px ${frame.height}px no-repeat`;
-      });
-      const declaration = doc.createElement('span').style;
-      declaration.cssText = `left:${x - left}px;top:${y - top}px;width:${right - x}px;height:${bottom - y}px;background:${backgrounds.join(',')};`;
-      for (const property of Array.from(declaration))
-        declaration.setProperty(property, declaration.getPropertyValue(property), 'important');
-      // Outrank every manager's shared reset, even when another manager starts later.
-      rules.push(`[${imageMarker}="${key}"][${imageMarker}][${imageMarker}]::before { ${declaration.cssText} }`);
-      positions.push({ target, x, y });
     }
     image.parents = image.scopes.map((scope) => scope.element.parentNode);
-    for (const [sheet, { rules, positions }] of groups) {
-      sheet.textContent = rules.join('\n');
-      positions.forEach(({ target, x, y }, index) =>
-        offsets.set(target, {
-          x,
-          y,
-          style: (sheet.sheet!.cssRules[index * 2 + 1] as CSSStyleRule).style,
-        }),
-      );
-    }
+    updateOffsets();
   };
+
   const begin = () => {
     retireRestoration();
     if (stopped || destination === 'none' || active) return;
@@ -629,6 +633,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
       target.setAttribute('data-native-ui-snapshot-source', '');
       target.toggleAttribute('data-native-ui-snapshot-visible', presented);
     });
+    image.images.forEach((element) => element.style.setProperty('opacity', presented ? '1' : '0', 'important'));
     // Reconciliation may continue after one frame even if the optional bridge reply
     // is delayed. The ordered native transport processes cover before that update.
     paintFrame = win.requestAnimationFrame(() => {
@@ -652,7 +657,6 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
           image.sources.forEach((source) => visibleOwners.add(source));
           render();
           updateOffsets();
-          followBorderAnimation();
         }
         win.cancelAnimationFrame(paintFrame);
         paintFrame = win.requestAnimationFrame(() => {
@@ -680,6 +684,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
       return;
     }
     if (callbacks.blocked()) return;
+    updateOffsets();
     if (callbacks.transient) {
       const image = active;
       const targets = targetsFor(image);
@@ -688,15 +693,8 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
         return;
       }
       const parts = targets.map((target, index) => {
-        const space = coordinateSpace(target!, win);
-        const frame = image.frames[index];
-        return {
-          ...image.data.parts[index],
-          x: space.x + frame.x * space.scaleX,
-          y: space.y + frame.y * space.scaleY,
-          width: frame.width * space.scaleX,
-          height: frame.height * space.scaleY,
-        };
+        const rect = image.images[index].getBoundingClientRect();
+        return { ...image.data.parts[index], x: rect.x, y: rect.y, width: rect.width, height: rect.height };
       });
       if (
         parts.some((part, index) =>
@@ -741,7 +739,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
           .catch(() => {})
           .finally(() => {
             previous.images.forEach((image) => {
-              image.src = '';
+              retireImage(image);
             });
             if (retiring !== pending) return;
             retiring = undefined;
@@ -807,7 +805,6 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     changed,
     moved: () => {
       updateOffsets();
-      followBorderAnimation();
     },
     get token() {
       return ending ? undefined : active?.data.token;
@@ -826,6 +823,8 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     async destroy() {
       stopped = true;
       invalidate();
+      imagePool.forEach((pool) => pool.forEach((image) => image.remove()));
+      imagePool.clear();
       await Promise.allSettled([
         bounded(Promise.resolve().then(() => listener?.remove())),
         bounded(Promise.resolve().then(() => eventListener?.remove())),

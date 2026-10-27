@@ -277,3 +277,7 @@ If your control continues animating after its update notification, set `captureD
 on the native registration (Swift: `captureDelayMs: 600`; Kotlin: `captureDelayMs = 600`).
 This changes background image preparation, not overlay presentation timing.
 See [capture timing](projection.md#capture-timing) for the cache behavior and measured guidance.
+
+### Projection image placement
+
+Prepared images are inserted immediately before the fallback container by default. To keep the image inside a renderer-owned container, set `imagePlacement: .child` in Swift or `imagePlacement = NativeUIProjection.ImagePlacement.CHILD` in Kotlin. Both Capacitor and Cordova use the same option. Child placement inherits the container's clipping and visual effects; see [DOM and image placement requirements](projection.md#dom-and-native-surface-requirements).

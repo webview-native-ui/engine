@@ -25,6 +25,7 @@ const prepare = async (
   shared = false,
   events = false,
   captureDelayMs?: number,
+  imagePlacement?: 'previous' | 'child',
 ) => {
   await boot(page);
   if (shadow)
@@ -35,7 +36,7 @@ const prepare = async (
       (window as any).sourceRoot = host.shadowRoot;
     });
   await page.evaluate(
-    async ({ fail, proxy, shared, events, captureDelayMs }) => {
+    async ({ fail, proxy, shared, events, captureDelayMs, imagePlacement }) => {
       const w = window as any,
         source = (w.sourceRoot ?? document).querySelector('#source') as HTMLElement,
         owner = (w.sourceRoot ?? document).querySelector('#scroll') as HTMLElement;
@@ -60,6 +61,7 @@ const prepare = async (
       w.scope = w.engine.createWebProjectionScope(
         shared ? document.getElementById('projection-host') : proxy ? document.getElementById('proxy') : source,
         'test',
+        { imagePlacement },
       );
       w.source = {
         element: source,
@@ -129,7 +131,7 @@ const prepare = async (
       );
       w.manager.consider(1, [w.source]);
     },
-    { fail, proxy, shared, events, captureDelayMs },
+    { fail, proxy, shared, events, captureDelayMs, imagePlacement },
   );
   if (!fail)
     await expect(page.locator(shared ? '#projection-host' : proxy ? '#proxy' : '#source')).toHaveAttribute('data-native-ui-snapshot', /.+/);
@@ -139,7 +141,7 @@ test('prepared pixels appear without a new capture; only matching restore ACK re
   await prepare(page);
   await page.evaluate(() => (window as any).manager.begin());
   await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
-  expect(await page.evaluate(() => getComputedStyle(document.querySelector('#source')!, '::before').opacity)).toBe('1');
+  expect(await page.evaluate(() => getComputedStyle(document.querySelector('#source')!.previousElementSibling!).opacity)).toBe('1');
   expect(await page.evaluate(() => (window as any).calls.filter((c: any) => c.action === 'prepare').length)).toBe(1);
   await page.evaluate(() => {
     const w = window as any;
@@ -209,7 +211,7 @@ test('destruction releases only owned tokens, listeners and CSS', async ({ page 
         owners: w.manager.owners.length,
         reset: w.calls.some((c: any) => c.action === 'reset'),
         released: w.calls.some((c: any) => c.action === 'release'),
-        styles: document.querySelectorAll('style[data-native-ui-snapshot]').length,
+        styles: document.querySelectorAll('style[data-native-ui-snapshot-base]').length,
       };
     }),
   ).toEqual({ removed: true, owners: 0, reset: false, released: true, styles: 0 });
@@ -282,10 +284,10 @@ test('image presentation works inside a shadow tree and restores Web', async ({ 
   await prepare(page, false, true);
   await page.evaluate(() => (window as any).manager.begin());
   await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
-  expect(await page.evaluate(() => getComputedStyle((window as any).source.element, '::before').opacity)).toBe('1');
+  expect(await page.evaluate(() => getComputedStyle((window as any).source.element.previousElementSibling).opacity)).toBe('1');
   await page.evaluate(async () => (window as any).manager.destroy());
   await expect(page.locator('button')).toBeVisible();
-  expect(await page.evaluate(() => (window as any).sourceRoot.querySelectorAll('style[data-native-ui-snapshot]').length)).toBe(0);
+  expect(await page.evaluate(() => (window as any).sourceRoot.querySelectorAll('style[data-native-ui-snapshot-base]').length)).toBe(0);
 });
 
 test('identical native tokens stay isolated across plugin scopes and teardown', async ({ page }) => {
@@ -330,8 +332,8 @@ test('identical native tokens stay isolated across plugin scopes and teardown', 
         second = document.querySelector('#second')!;
       return {
         distinct: first.getAttribute('data-native-ui-snapshot') !== second.getAttribute('data-native-ui-snapshot'),
-        first: decodeURIComponent(getComputedStyle(first, '::before').backgroundImage).includes('fill="red"'),
-        second: decodeURIComponent(getComputedStyle(second, '::before').backgroundImage).includes('fill="blue"'),
+        first: decodeURIComponent((first.previousElementSibling as HTMLImageElement).src).includes('fill="red"'),
+        second: decodeURIComponent((second.previousElementSibling as HTMLImageElement).src).includes('fill="blue"'),
       };
     }),
   ).toEqual({ distinct: true, first: true, second: true });
@@ -345,7 +347,7 @@ test('identical native tokens stay isolated across plugin scopes and teardown', 
       return {
         owners: w.second.owners.length,
         removed: !!w.secondRemoved,
-        opacity: getComputedStyle(document.querySelector('#second')!, '::before').opacity,
+        opacity: getComputedStyle(document.querySelector('#second')!.previousElementSibling!).opacity,
       };
     }),
   ).toEqual({ owners: 1, removed: false, opacity: '1' });
@@ -835,5 +837,436 @@ for (const delay of [undefined, 300]) {
     await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
     await page.clock.runFor(interval * 2);
     expect(await captures()).toBe(2);
+  });
+}
+
+for (const property of ['padding', 'border', 'opacity', 'filter', 'transform'])
+  test(`sibling ignores fallback decoration ${property}`, async ({ page }) => {
+    await prepare(page);
+    const result = await page.evaluate((property) => {
+      const w = window as any,
+        target = w.scope.element,
+        img = document.querySelector('img[data-native-ui-projection-image]')!;
+      const before = img.getBoundingClientRect().toJSON();
+      target.style[property] = { padding: '15px', border: '5px solid red', opacity: '.2', filter: 'blur(3px)', transform: 'scale(.8)' }[
+        property
+      ];
+      // Entry must not rescale the prepared image to the fallback's transformed dimensions.
+      w.manager.begin();
+      const after = img.getBoundingClientRect().toJSON();
+      return {
+        before,
+        after,
+        style: { opacity: getComputedStyle(img).opacity, transform: getComputedStyle(img).transform, filter: getComputedStyle(img).filter },
+      };
+    }, property);
+    expect(result.after.width).toBe(result.before.width);
+    expect(result.after.height).toBe(result.before.height);
+    expect(result.style.transform).toBe('none');
+    expect(result.style.filter).toBe('none');
+  });
+test('sibling multiple parts retain overlap order and remove every node', async ({ page }) => {
+  await boot(page);
+  await page.evaluate(async () => {
+    const w = window as any,
+      source = document.querySelector('#source')!,
+      r = source.getBoundingClientRect();
+    w.manager = await w.engine.createWebProjection(
+      w.engine.createWebProjectionScope(source, 'parts'),
+      {
+        listen: async () => ({ remove() {} }),
+        send: async (req: any) =>
+          req.action === 'prepare'
+            ? {
+                token: 'parts',
+                parts: [
+                  { ids: ['a'], url: 'file:///red.png', x: r.x, y: r.y, width: 120, height: 40 },
+                  { ids: ['b'], url: 'file:///ad.png', x: r.x + 20, y: r.y, width: 120, height: 40 },
+                ],
+              }
+            : { shown: true },
+      },
+      { wake() {}, blocked: () => false, captureDelayMs: 0 },
+    );
+    w.manager.consider(
+      1,
+      ['a', 'b'].map((id) => ({ element: source, control: { id, x: r.x, y: r.y, width: 120, height: 40 } })),
+    );
+  });
+  await expect(page.locator('img[data-native-ui-projection-image]')).toHaveCount(2);
+  await page.evaluate(() => (window as any).manager.begin());
+  await expect(page.locator('img[data-native-ui-projection-image]').last()).toHaveCSS('opacity', '1');
+  expect(await page.locator('img[data-native-ui-projection-image]').last().getAttribute('src')).toContain('red');
+  await page.evaluate(() => (window as any).manager.destroy());
+  await expect(page.locator('img[data-native-ui-projection-image]')).toHaveCount(0);
+});
+test('sibling active reparenting keeps the image beside its target', async ({ page }) => {
+  await prepare(page);
+  await page.evaluate(() => (window as any).manager.begin());
+  await expect(page.locator('img[data-native-ui-projection-image]')).toHaveCSS('opacity', '1');
+  await page.evaluate(() => {
+    const w = window as any;
+    document.querySelector('#other')!.append(w.scope.element);
+    w.manager.moved();
+  });
+  expect(await page.evaluate(() => document.querySelector('img[data-native-ui-projection-image]')!.nextElementSibling?.id)).toBe('source');
+});
+for (const scenario of ['fractional-rtl', 'nested-scroll', 'parent-scale', 'slot'])
+  test(`sibling coordinates ${scenario}`, async ({ page }) => {
+    await boot(page);
+    await page.evaluate(async (scenario) => {
+      const w = window as any,
+        target = document.querySelector('#source') as HTMLElement,
+        parent = target.parentElement!;
+      parent.style.position = 'relative';
+      if (scenario === 'fractional-rtl') {
+        parent.style.cssText += 'direction:rtl;border:0.5px solid;padding:7.25px;';
+        target.style.cssText += 'width:120.5px;height:40.5px;margin-top:2.25px';
+      }
+      if (scenario === 'nested-scroll') {
+        parent.scrollTop = 27;
+        parent.style.border = '3px solid';
+      }
+      if (scenario === 'parent-scale') parent.style.transform = 'scale(.8)';
+      if (scenario === 'slot') {
+        const host = document.createElement('section');
+        host.attachShadow({ mode: 'open' }).innerHTML = '<div style="position:relative"><slot name="x"></slot></div>';
+        parent.append(host);
+        target.slot = 'x';
+        host.append(target);
+      }
+      const rect = target.getBoundingClientRect();
+      w.expected = { x: rect.x - 3.25, y: rect.y - 4.5, width: 125.5, height: 49.5 };
+      w.manager = await w.engine.createWebProjection(
+        w.engine.createWebProjectionScope(target, 'geometry'),
+        {
+          listen: async () => ({ remove() {} }),
+          send: async (req: any) =>
+            req.action === 'prepare'
+              ? { token: 'geometry', parts: [{ ids: ['a'], url: 'file:///red.png', ...w.expected }] }
+              : { shown: true },
+        },
+        { wake() {}, blocked: () => false, captureDelayMs: 0 },
+      );
+      w.manager.consider(1, [{ element: target, control: { id: 'a', ...rect.toJSON() } }]);
+    }, scenario);
+    await expect(page.locator('img[data-native-ui-projection-image]')).toHaveCount(1);
+    await page.evaluate(() => (window as any).manager.begin());
+    await expect(page.locator('img[data-native-ui-projection-image]')).toHaveCSS('opacity', '1');
+    const result = await page.evaluate(() => ({
+      expected: (window as any).expected,
+      actual: document.querySelector('img[data-native-ui-projection-image]')!.getBoundingClientRect().toJSON(),
+    }));
+    for (const key of ['x', 'y', 'width', 'height']) expect(result.actual[key]).toBeCloseTo(result.expected[key], 1);
+  });
+test('sibling follows parent layer scale without reapplying target effects', async ({ page }) => {
+  await prepare(page);
+  await page.evaluate(() => {
+    const target = (window as any).scope.element;
+    target.parentElement.style.transformOrigin = '0 0';
+  });
+  await page.evaluate(() => (window as any).manager.begin());
+  await expect(page.locator('img[data-native-ui-projection-image]')).toHaveCSS('opacity', '1');
+  const before = await page.locator('img[data-native-ui-projection-image]').boundingBox();
+  await page.evaluate(() => {
+    const w = window as any;
+    w.scope.element.parentElement.style.transform = 'scale(.9)';
+    w.manager.moved();
+  });
+  const after = await page.locator('img[data-native-ui-projection-image]').boundingBox();
+  expect(after!.width).toBeCloseTo(before!.width * 0.9, 1);
+  expect(after!.height).toBeCloseTo(before!.height * 0.9, 1);
+});
+
+test('retained image nodes do not mutate DOM during repeated handoffs', async ({ page }) => {
+  await prepare(page, false, false, false, false, false, 0);
+  await page.evaluate(() => {
+    const w = window as any;
+    w.treeChanges = 0;
+    w.treeObserver = new MutationObserver((records) => (w.treeChanges += records.length));
+    w.treeObserver.observe(document.documentElement, { childList: true, subtree: true });
+  });
+  for (let i = 0; i < 5; i++) {
+    await page.evaluate(() => (window as any).manager.begin());
+    await expect(page.locator('img[data-native-ui-projection-image]')).toHaveCSS('opacity', '1');
+    await page.evaluate(() => {
+      const w = window as any;
+      w.manager.end();
+      w.manager.updated(undefined, ['counter'], 1000);
+    });
+    await expect(page.locator('img[data-native-ui-projection-image]')).toHaveCSS('opacity', '0');
+  }
+  expect(await page.evaluate(() => (window as any).treeChanges)).toBe(0);
+  await page.evaluate(() => {
+    (window as any).treeObserver.disconnect();
+    return (window as any).manager.destroy();
+  });
+  await expect(page.locator('img')).toHaveCount(0);
+});
+test('retained preparation buffers stay bounded across content updates', async ({ page }) => {
+  await prepare(page, false, false, false, false, false, 0);
+  await page.evaluate(() => {
+    const w = window as any;
+    w.adoptions = 0;
+    window.addEventListener(`${w.scope.namespace}:sources-change`, () => w.adoptions++);
+  });
+  for (let i = 0; i < 5; i++) {
+    await page.evaluate(() => (window as any).manager.changed());
+    await expect.poll(() => page.evaluate(() => (window as any).adoptions)).toBe(i + 1);
+    expect(await page.locator('img').count()).toBeLessThanOrEqual(2);
+    await expect(page.locator('img[data-native-ui-projection-image]')).toHaveCount(1);
+  }
+  await page.evaluate(() => (window as any).manager.begin());
+  await expect(page.locator('img[data-native-ui-projection-image]')).toHaveCSS('opacity', '1');
+  await page.evaluate(() => (window as any).manager.destroy());
+  await expect(page.locator('img')).toHaveCount(0);
+});
+test('late release never clears a reused successor image', async ({ page }) => {
+  await boot(page);
+  await page.evaluate(async () => {
+    const w = window as any,
+      target = document.querySelector('#source')!,
+      r = target.getBoundingClientRect();
+    w.captures = 0;
+    w.releases = [];
+    w.manager = await w.engine.createWebProjection(
+      w.engine.createWebProjectionScope(target, 'leased'),
+      {
+        listen: async () => ({ remove() {} }),
+        send: async (req: any) => {
+          if (req.action === 'prepare')
+            return {
+              token: `image-${++w.captures}`,
+              parts: [{ ids: ['a'], url: w.captures === 1 ? 'file:///red.png' : 'file:///ad.png', x: r.x, y: r.y, width: 120, height: 40 }],
+            };
+          if (req.action === 'release') return new Promise((resolve) => w.releases.push(resolve));
+          return { shown: true };
+        },
+      },
+      { wake() {}, blocked: () => false, captureDelayMs: 0, opaqueUnderlay: true, retainPreparedUntilRelease: true },
+    );
+    w.sources = [{ element: target, control: { id: 'a', x: r.x, y: r.y, width: 120, height: 40 } }];
+    w.manager.consider(1, w.sources);
+  });
+  await expect(page.locator('img[data-native-ui-projection-image]')).toHaveCount(1);
+  await page.evaluate(() => {
+    const w = window as any;
+    w.previous = document.querySelector('img[data-native-ui-projection-image]');
+    w.manager.invalidate();
+    w.manager.consider(2, w.sources);
+  });
+  await expect.poll(() => page.locator('img[data-native-ui-projection-image]').getAttribute('src')).toContain('blue');
+  expect(await page.evaluate(() => (window as any).previous !== document.querySelector('img[data-native-ui-projection-image]'))).toBe(true);
+  await page.evaluate(() => {
+    const w = window as any;
+    w.releases.splice(0).forEach((r: any) => r({}));
+  });
+  await expect(page.locator('img[data-native-ui-projection-image]')).toHaveCSS('opacity', '1');
+  expect(
+    await page.evaluate(() => {
+      const e = document.querySelector('img[data-native-ui-projection-image]') as HTMLImageElement;
+      return e.complete && e.naturalWidth === 120;
+    }),
+  ).toBe(true);
+  await page.evaluate(() => (window as any).manager.destroy());
+  await expect(page.locator('img')).toHaveCount(0);
+});
+test('a moved transient return retains DOM until idle preparation or destruction', async ({ page }) => {
+  await boot(page);
+  await page.evaluate(async () => {
+    const w = window as any,
+      target = document.querySelector('#source') as HTMLElement,
+      r = target.getBoundingClientRect();
+    target.style.position = 'relative';
+    w.manager = await w.engine.createWebProjection(
+      w.engine.createWebProjectionScope(target, 'moved'),
+      {
+        listen: async () => ({ remove() {} }),
+        send: async (req: any) => {
+          if (req.action === 'restore') w.returnParts = req.parts;
+          return req.action === 'prepare'
+            ? { token: 'image', parts: [{ ids: ['a'], url: 'file:///red.png', x: r.x, y: r.y, width: 120, height: 40 }] }
+            : { shown: true };
+        },
+      },
+      { wake() {}, blocked: () => false, captureDelayMs: 0, transient: true },
+    );
+    w.manager.consider(1, [{ element: target, control: { id: 'a', x: r.x, y: r.y, width: 120, height: 40 } }]);
+  });
+  await expect(page.locator('img[data-native-ui-projection-image]')).toHaveCount(1);
+  await page.evaluate(() => {
+    const w = window as any;
+    w.mutations = 0;
+    w.observer = new MutationObserver((r) => (w.mutations += r.length));
+    w.observer.observe(document.documentElement, { childList: true, subtree: true });
+    w.manager.begin();
+  });
+  await expect(page.locator('img[data-native-ui-projection-image]')).toHaveCSS('opacity', '1');
+  await page.evaluate(() => {
+    const w = window as any;
+    const t = document.querySelector('#source') as HTMLElement;
+    t.style.left = '20px';
+    w.manager.end();
+    w.manager.updated('image', ['a'], 1000);
+  });
+  expect(await page.evaluate(() => (window as any).mutations)).toBe(0);
+  expect(
+    await page.evaluate(() => Math.abs((window as any).returnParts[0].x - document.querySelector('#source')!.getBoundingClientRect().x)),
+  ).toBeLessThan(0.01);
+  await expect(page.locator('img')).toHaveCount(1);
+  await expect(page.locator('img')).toHaveCSS('opacity', '0');
+  await page.evaluate(() => {
+    (window as any).observer.disconnect();
+    return (window as any).manager.destroy();
+  });
+  await expect(page.locator('img')).toHaveCount(0);
+});
+test('retained pools release obsolete scopes during batch target recycling', async ({ page }) => {
+  await boot(page);
+  await page.evaluate(async () => {
+    const w = window as any;
+    w.current = [];
+    w.adoptions = 0;
+    window.addEventListener('recycled:sources-change', () => w.adoptions++);
+    w.manager = await w.engine.createWebProjectionBatch(
+      {
+        listen: async () => ({ remove() {} }),
+        send: async (req: any) =>
+          req.action === 'prepare'
+            ? { token: `v${w.version}`, parts: w.current.map((c: any) => ({ ids: [c.control.id], url: 'file:///red.png', ...c.control })) }
+            : { shown: true },
+      },
+      { wake() {}, blocked: () => false, captureDelayMs: 0 },
+    );
+  });
+  for (let i = 0; i < 5; i++) {
+    await page.evaluate((i) => {
+      const w = window as any;
+      document.querySelector('#recycled')?.remove();
+      const target = document.createElement('div');
+      target.id = 'recycled';
+      target.style.cssText = 'width:120px;height:40px';
+      document.body.append(target);
+      const r = target.getBoundingClientRect();
+      w.version = i;
+      w.current = [
+        {
+          element: target,
+          scope: w.engine.createWebProjectionScope(target, 'recycled'),
+          control: { id: `v${i}`, x: r.x, y: r.y, width: 120, height: 40 },
+        },
+      ];
+      w.manager.consider(i + 1, w.current);
+    }, i);
+    await expect(page.locator('#recycled')).toHaveAttribute('data-native-ui-snapshot', /.+/);
+  }
+  expect(await page.locator('img').count()).toBeLessThanOrEqual(2);
+  await page.evaluate(() => (window as any).manager.destroy());
+  await expect(page.locator('img')).toHaveCount(0);
+});
+test('delayed release burst shrinks back to the normal preparation buffers', async ({ page }) => {
+  await boot(page);
+  await page.evaluate(async () => {
+    const w = window as any,
+      target = document.querySelector('#source')!,
+      r = target.getBoundingClientRect();
+    w.captures = 0;
+    w.releases = [];
+    w.adoptions = 0;
+    window.addEventListener('burst:sources-change', () => {
+      if (document.querySelector('#source')!.hasAttribute('data-native-ui-snapshot')) w.adoptions++;
+    });
+    w.manager = await w.engine.createWebProjection(
+      w.engine.createWebProjectionScope(target, 'burst'),
+      {
+        listen: async () => ({ remove() {} }),
+        send: async (req: any) => {
+          if (req.action === 'prepare')
+            return {
+              token: `image-${++w.captures}`,
+              parts: [{ ids: ['a'], url: 'file:///red.png', x: r.x, y: r.y, width: 120, height: 40 }],
+            };
+          if (req.action === 'release') return new Promise((resolve) => w.releases.push(resolve));
+          return { shown: true };
+        },
+      },
+      { wake() {}, blocked: () => false, captureDelayMs: 0, opaqueUnderlay: true, retainPreparedUntilRelease: true },
+    );
+    w.sources = [{ element: target, control: { id: 'a', x: r.x, y: r.y, width: 120, height: 40 } }];
+    w.manager.consider(1, w.sources);
+  });
+  for (let i = 1; i <= 5; i++) {
+    await expect.poll(() => page.evaluate(() => (window as any).adoptions)).toBe(i);
+    if (i < 5)
+      await page.evaluate((i) => {
+        const w = window as any;
+        w.manager.invalidate();
+        w.manager.consider(i + 1, w.sources);
+      }, i);
+  }
+  expect(await page.locator('img').count()).toBe(5);
+  await page.evaluate(() => {
+    const w = window as any;
+    w.releases.splice(0).forEach((r: any) => r({}));
+  });
+  await expect.poll(() => page.locator('img').count()).toBeLessThanOrEqual(2);
+  await expect(page.locator('img[data-native-ui-projection-image]')).toHaveCSS('opacity', '1');
+  await page.evaluate(() => (window as any).manager.destroy());
+  await expect(page.locator('img')).toHaveCount(0);
+});
+
+test('application pseudo-elements survive projection and images never take input', async ({ page }) => {
+  await prepare(page);
+  await page.addStyleTag({ content: '#source::before { content:"App decoration"; visibility:visible; color:rgb(255, 0, 0); }' });
+  const decoration = () =>
+    page.evaluate(() => {
+      const style = getComputedStyle(document.querySelector('#source')!, '::before');
+      return { content: style.content, color: style.color, visibility: style.visibility };
+    });
+  const original = await decoration();
+  await page.evaluate(() => (window as any).manager.begin());
+  await expect(page.locator('img[data-native-ui-projection-image]')).toHaveCSS('opacity', '1');
+  expect(await decoration()).toEqual({ ...original, visibility: 'hidden' });
+  expect(
+    await page.evaluate(() => {
+      const image = document.querySelector('img[data-native-ui-projection-image]') as HTMLImageElement;
+      return { inert: image.inert, hidden: image.getAttribute('aria-hidden'), pointer: getComputedStyle(image).pointerEvents };
+    }),
+  ).toEqual({ inert: true, hidden: 'true', pointer: 'none' });
+  await page.evaluate(() => {
+    const w = window as any;
+    w.manager.end();
+    w.manager.updated(undefined, ['counter'], 1000);
+  });
+  expect(await decoration()).toEqual(original);
+  await page.evaluate(() => (window as any).manager.destroy());
+  expect(await decoration()).toEqual(original);
+});
+
+for (const imagePlacement of ['previous', 'child'] as const) {
+  test(`image placement ${imagePlacement} retains geometry, fallback and nodes across handoffs`, async ({ page }) => {
+    await prepare(page, false, false, false, false, false, 0, imagePlacement);
+    const image = page.locator('img[data-native-ui-projection-image]');
+    await expect(image).toHaveCount(1);
+    expect(
+      await page.evaluate(() => {
+        const img = document.querySelector('img[data-native-ui-projection-image]')!;
+        return img.parentElement?.id === 'source' ? 'child' : img.nextElementSibling?.id === 'source' ? 'previous' : 'wrong';
+      }),
+    ).toBe(imagePlacement);
+    const before = await image.boundingBox();
+    await page.evaluate(() => (window as any).manager.begin());
+    await expect(image).toBeVisible();
+    await expect(image).toHaveCSS('opacity', '1');
+    await expect(page.getByRole('button', { name: 'Web action' })).toBeHidden();
+    await page.evaluate(() => {
+      const w = window as any;
+      w.manager.end();
+      w.manager.updated(undefined, ['counter'], 1000);
+    });
+    expect(await image.boundingBox()).toEqual(before);
+    await page.evaluate(() => (window as any).manager.destroy());
+    await expect(page.locator('img')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Web action' })).toBeVisible();
   });
 }

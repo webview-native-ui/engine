@@ -55,21 +55,24 @@ public final class NativeUIProjection: NSObject, WKScriptMessageHandler {
     private var anchors: [String: [String: Anchor]] = [:]
     private var captured: [String: [String: UIView]] = [:]
 
+    /// Place prepared pixels before the fallback, or inside a renderer-owned container.
+    public enum ImagePlacement: String { case previous, child }
+
     public convenience init(webView: WKWebView?, plugin: String, projectionSelector: String,
                 receiveListeners: ReceiveListeners = .init(),
                 allowedOrigins: Set<String> = ["capacitor://localhost", "app://localhost", "https://localhost", "http://localhost"],
                 failedFallback: FailedFallback = .web, runtime: Runtime = .capacitor,
-                captureDelayMs: Double = 50,
+                captureDelayMs: Double = 50, imagePlacement: ImagePlacement = .previous,
                 canCapture: @escaping () -> Bool = { true }, view: @escaping () -> UIView?) throws {
         try self.init(webView: webView, plugin: plugin, projectionSelector: projectionSelector,
                       receiveListeners: receiveListeners, allowedOrigins: allowedOrigins, failedFallback: failedFallback, runtime: runtime,
-                      captureDelayMs: captureDelayMs, canCapture: canCapture, snapshots: NativeUICoveredSnapshots(), view: view)
+                      captureDelayMs: captureDelayMs, imagePlacement: imagePlacement, canCapture: canCapture, snapshots: NativeUICoveredSnapshots(), view: view)
     }
     init(webView: WKWebView?, plugin: String, projectionSelector: String,
          receiveListeners: ReceiveListeners = .init(),
          allowedOrigins: Set<String> = ["capacitor://localhost", "app://localhost", "https://localhost", "http://localhost"],
          failedFallback: FailedFallback = .web, runtime: Runtime = .capacitor,
-         captureDelayMs: Double = 50,
+         captureDelayMs: Double = 50, imagePlacement: ImagePlacement = .previous,
          canCapture: @escaping () -> Bool = { true }, snapshots: NativeUICoveredSnapshots,
          view: @escaping () -> UIView?) throws {
         self.allowedOriginsJSON = String(data: try JSONSerialization.data(withJSONObject: Array(allowedOrigins)), encoding: .utf8)!
@@ -83,7 +86,7 @@ public final class NativeUIProjection: NSObject, WKScriptMessageHandler {
         guard captureDelayMs.isFinite, captureDelayMs >= 0, captureDelayMs <= 2147483647,
               !projectionSelector.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw ProjectionError.invalidConfiguration }
         let config: [String: Any] = ["id": id, "plugin": plugin, "projectionSelector": projectionSelector,
-                                     "captureDelayMs": captureDelayMs, "receiveListeners": receiveListeners.configuration, "failedFallback": failedFallback.rawValue, "runtime": runtime.rawValue]
+                                     "captureDelayMs": captureDelayMs, "imagePlacement": imagePlacement.rawValue, "receiveListeners": receiveListeners.configuration, "failedFallback": failedFallback.rawValue, "runtime": runtime.rawValue]
         let json = String(data: try JSONSerialization.data(withJSONObject: config), encoding: .utf8)!
         let allowed = allowedOriginsJSON
         let runtime = try Self.runtime()

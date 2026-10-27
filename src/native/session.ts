@@ -3,7 +3,7 @@ import { getOverlayCoordinator } from '../dom/overlays.js';
 import { readScrollPlacement } from '../dom/scroll-placement.js';
 import { projectionAncestors } from '../dom/geometry.js';
 import { createWebProjection, type WebProjection } from '../projection/web.js';
-import { createWebProjectionScope } from '../projection/scope.js';
+import { createWebProjectionScope, type ProjectionImagePlacement } from '../projection/scope.js';
 import { bindProjectionEvents, type ProjectionDestination } from '../projection/events.js';
 import type { Frame, ScrollPlacement, ListenerHandle, WebProjectionRequest } from '../types.js';
 
@@ -14,6 +14,7 @@ export interface NativeSessionConfiguration {
   runtime?: 'capacitor' | 'cordova';
   projectionSelector: string;
   captureDelayMs?: number;
+  imagePlacement?: ProjectionImagePlacement;
   /** Recovery while native is requested. Explicit web/none destinations take precedence. */
   failedFallback?: 'web' | 'native';
   captureMode?: 'composited' | 'view';
@@ -297,16 +298,20 @@ export const startNativeSession = async (
       initializing = true;
       const version = generation;
       try {
-        const created = await createWebProjection(createWebProjectionScope(target, config.id), bridge, {
-          wake,
-          captureDelayMs: config.captureDelayMs,
-          retainPreparedUntilRelease: config.nativeDragHandoff,
-          blocked: () => destination !== 'native' || automaticMotion || (placementPending && !manager?.token),
-          revision: () => revision,
-          captureRevision: config.captureMode === 'view' ? () => contentRevision : undefined,
-          transient: true,
-          opaqueUnderlay: config.captureMode === 'view',
-        });
+        const created = await createWebProjection(
+          createWebProjectionScope(target, config.id, { imagePlacement: config.imagePlacement }),
+          bridge,
+          {
+            wake,
+            captureDelayMs: config.captureDelayMs,
+            retainPreparedUntilRelease: config.nativeDragHandoff,
+            blocked: () => destination !== 'native' || automaticMotion || (placementPending && !manager?.token),
+            revision: () => revision,
+            captureRevision: config.captureMode === 'view' ? () => contentRevision : undefined,
+            transient: true,
+            opaqueUnderlay: config.captureMode === 'view',
+          },
+        );
         if (stopped || version !== generation) {
           await created.destroy();
           return;

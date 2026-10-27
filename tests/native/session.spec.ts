@@ -542,7 +542,12 @@ test('opaque movement retains decoded pixels and local coordinates until content
     await page.waitForTimeout(150);
     expect(await page.evaluate(() => (window as any).calls.filter((c: any) => c.action === 'prepare').length)).toBe(preparations);
     await expect(page.locator('#slot')).toHaveAttribute('data-native-ui-snapshot-visible', '');
-    expect(await page.evaluate(() => getComputedStyle(document.querySelector('#slot')!, '::before').top)).toBe('0px');
+    expect(
+      await page.evaluate(
+        () =>
+          `${document.querySelector('#slot')!.previousElementSibling!.getBoundingClientRect().y - document.querySelector('#slot')!.getBoundingClientRect().y}px`,
+      ),
+    ).toBe('0px');
   }
   await page.evaluate(() => (window as any).events.updated({ slot: 1 }));
   await expect
@@ -556,7 +561,12 @@ test('full-view pixels remain host-local when native position lags DOM during fi
     document.body.style.marginTop = '150px';
   });
   await expect(page.locator('#slot')).toHaveAttribute('data-native-ui-snapshot-visible', '');
-  expect(await page.evaluate(() => getComputedStyle(document.querySelector('#slot')!, '::before').top)).toBe('0px');
+  expect(
+    await page.evaluate(
+      () =>
+        `${document.querySelector('#slot')!.previousElementSibling!.getBoundingClientRect().y - document.querySelector('#slot')!.getBoundingClientRect().y}px`,
+    ),
+  ).toBe('0px');
 });
 
 for (const confirmation of ['notification', 'show'] as const) {
