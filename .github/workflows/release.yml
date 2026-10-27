@@ -2,6 +2,12 @@ name: Release
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to verify and publish
+        required: true
+        type: string
 permissions:
   contents: read
 jobs:
@@ -17,7 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ inputs.tag || github.event.release.tag_name }}
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@v5
@@ -27,7 +33,7 @@ jobs:
       - name: Verify release identity and tested commit
         uses: actions/github-script@v8
         env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_TAG: ${{ inputs.tag || github.event.release.tag_name }}
         with:
           script: |
             const { readFileSync } = await import('node:fs');
@@ -47,7 +53,6 @@ jobs:
           for EXTENSION in pom aar; do
             curl --fail --silent --show-error --head --max-time 30 "https://repo.maven.apache.org/maven2/io/github/webview-native-ui/engine/$VERSION/engine-$VERSION.$EXTENSION"
           done
-      - run: npm install -g npm@latest
       - run: npm ci
       - run: npm run build
       - run: npm run test:package
