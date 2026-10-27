@@ -269,3 +269,11 @@ Emit `transitionStarted` before the DOM starts moving, `shown` when native proje
 Provide one laid-out DOM container for each registration, in the layer where its Web projection belongs. It may be inserted after registration. The plugin still owns native view placement and sizing; the Engine does not create or size either view for you.
 
 Read the [DOM and native surface requirements](projection.md#dom-and-native-surface-requirements) before integrating custom elements, SDK content or multiple surfaces. Scroll tracking and image handoff are internal to the registration. For Ionic applications, optionally enable [Ionic overlay support](projection.md#ionic-overlay-support-optional) once during application startup. Other frameworks emit the configured projection notifications from their own transition and overlay lifecycle.
+
+## Animated native controls
+
+Native appearance updates prepare replacement images after a 50 ms debounce by default.
+If your control continues animating after its update notification, set `captureDelayMs`
+on the native registration (Swift: `captureDelayMs: 600`; Kotlin: `captureDelayMs = 600`).
+This changes background image preparation, not overlay presentation timing.
+See [capture timing](projection.md#capture-timing) for the cache behavior and measured guidance.

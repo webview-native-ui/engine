@@ -17,7 +17,15 @@ const boot = async (page: Page) => {
   });
   await page.addScriptTag({ content: bundle });
 };
-const prepare = async (page: Page, fail = false, shadow = false, proxy = false, shared = false, events = false) => {
+const prepare = async (
+  page: Page,
+  fail = false,
+  shadow = false,
+  proxy = false,
+  shared = false,
+  events = false,
+  captureDelayMs?: number,
+) => {
   await boot(page);
   if (shadow)
     await page.evaluate(() => {
@@ -27,7 +35,7 @@ const prepare = async (page: Page, fail = false, shadow = false, proxy = false, 
       (window as any).sourceRoot = host.shadowRoot;
     });
   await page.evaluate(
-    async ({ fail, proxy, shared, events }) => {
+    async ({ fail, proxy, shared, events, captureDelayMs }) => {
       const w = window as any,
         source = (w.sourceRoot ?? document).querySelector('#source') as HTMLElement,
         owner = (w.sourceRoot ?? document).querySelector('#scroll') as HTMLElement;
@@ -102,6 +110,7 @@ const prepare = async (page: Page, fail = false, shadow = false, proxy = false, 
           },
         },
         {
+          captureDelayMs,
           wake() {},
           blocked: () => false,
           revision: () => w.revision,
@@ -120,7 +129,7 @@ const prepare = async (page: Page, fail = false, shadow = false, proxy = false, 
       );
       w.manager.consider(1, [w.source]);
     },
-    { fail, proxy, shared, events },
+    { fail, proxy, shared, events, captureDelayMs },
   );
   if (!fail)
     await expect(page.locator(shared ? '#projection-host' : proxy ? '#proxy' : '#source')).toHaveAttribute('data-native-ui-snapshot', /.+/);
@@ -799,3 +808,32 @@ test('renderer visibility excludes Engine hiding without changing authored visib
   await page.evaluate(() => (document.querySelector<HTMLElement>('#source')!.style.visibility = 'visible'));
   expect(await read()).toEqual({ visibility: 'visible', unchanged: true, projected: 'hidden' });
 });
+
+for (const delay of [undefined, 300]) {
+  test(`capture delay ${delay ?? 'default 50'} debounces updates without blocking prepared handoff`, async ({ page }) => {
+    await prepare(page, false, false, false, false, false, delay);
+    const now = new Date('2026-01-01T00:00:00Z');
+    await page.clock.install({ time: now });
+    await page.clock.pauseAt(now);
+    const interval = delay ?? 50;
+    const captures = () => page.evaluate(() => (window as any).calls.filter((call: any) => call.action === 'prepare').length);
+    const update = () =>
+      page.evaluate(() => {
+        const w = window as any;
+        w.manager.consider(++w.revision, [w.source]);
+      });
+    await update();
+    await page.clock.runFor(interval - 1);
+    expect(await captures()).toBe(1);
+    await update();
+    await page.clock.runFor(interval - 1);
+    expect(await captures()).toBe(1);
+    await page.clock.runFor(1);
+    expect(await captures()).toBe(2);
+    await update();
+    await page.evaluate(() => (window as any).manager.begin());
+    await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
+    await page.clock.runFor(interval * 2);
+    expect(await captures()).toBe(2);
+  });
+}

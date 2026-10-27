@@ -15,6 +15,8 @@ import { snapshotStyles } from './styles.js';
 export interface WebProjectionOptions {
   /** Existing plugin notifications, scoped to this presentation surface. */
   events?: ProjectionEvents;
+  /** Debounce before preparing replacement pixels, in milliseconds. Defaults to 50; never delays handoff. */
+  captureDelayMs?: number;
   wake(): void;
   blocked(): boolean;
   revision?(): number;
@@ -96,6 +98,9 @@ const coordinateSpace = (target: HTMLElement, win: Window, style = win.getComput
 
 /** Images are prepared after accepted native updates, never on the overlay's critical path. */
 const createProjectionEngine = async (scope: WebProjectionScope, transport: WebProjectionTransport, callbacks: WebProjectionOptions) => {
+  const captureDelayMs = callbacks.captureDelayMs ?? 50;
+  if (!Number.isFinite(captureDelayMs) || captureDelayMs < 0 || captureDelayMs > 2147483647)
+    throw new RangeError('captureDelayMs must be a finite, nonnegative timer interval');
   let destination: ProjectionDestination = 'native';
   const doc = scope.element.ownerDocument;
   const win = doc.defaultView!;
@@ -322,7 +327,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
   const schedule = () => {
     win.clearTimeout(timer);
     if (!stopped && destination === 'native' && !active && !touching && !callbacks.blocked())
-      timer = win.setTimeout(() => void prepare(), 50);
+      timer = win.setTimeout(() => void prepare(), captureDelayMs);
   };
   let consideredLayout: string | undefined;
   const consider = (revision: number, candidates: Candidate[]) => {

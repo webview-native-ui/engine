@@ -30,6 +30,7 @@ class NativeUIProjection(
     private val beforeNativeReveal: () -> Unit = {},
     private val updatePlacement: ((JSONObject) -> Unit)? = null,
     private val runtime: Runtime = Runtime.CAPACITOR,
+    captureDelayMs: Int = 50,
     view: () -> View?
 ) : AutoCloseable {
     enum class Runtime { CAPACITOR, CORDOVA }
@@ -155,8 +156,9 @@ class NativeUIProjection(
         check(android.os.Looper.myLooper() == android.os.Looper.getMainLooper())
         require(updatePlacement == null || captureMode == CaptureMode.VIEW) { "Placement handoff requires VIEW capture mode" }
         require(projectionSelector.isNotBlank())
+        require(captureDelayMs >= 0) { "captureDelayMs must be nonnegative" }
         val config = JSONObject().put("runtime", if (runtime == Runtime.CORDOVA) "cordova" else "capacitor").put("id", id).put("plugin", plugin).put("projectionSelector", projectionSelector)
-            .put("receiveListeners", receiveListeners.configuration()).put("failedFallback", failedFallback.value).put("captureMode", if (captureMode == CaptureMode.VIEW) "view" else "composited")
+            .put("captureDelayMs", captureDelayMs).put("receiveListeners", receiveListeners.configuration()).put("failedFallback", failedFallback.value).put("captureMode", if (captureMode == CaptureMode.VIEW) "view" else "composited")
         if (updatePlacement != null) config.put("placementHandoff", true)
         val runtime = webView.context.assets.open("native-ui-engine.js").bufferedReader().use { it.readText() }
         val source = "if (!globalThis.WebViewNativeUIEngineRuntime) { $runtime } WebViewNativeUIEngineRuntime.start($config).catch(console.error);"

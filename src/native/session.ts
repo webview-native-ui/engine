@@ -13,6 +13,7 @@ export interface NativeSessionConfiguration {
   plugin: string;
   runtime?: 'capacitor' | 'cordova';
   projectionSelector: string;
+  captureDelayMs?: number;
   /** Recovery while native is requested. Explicit web/none destinations take precedence. */
   failedFallback?: 'web' | 'native';
   captureMode?: 'composited' | 'view';
@@ -271,6 +272,7 @@ export const startNativeSession = async (
       try {
         const created = await createWebProjection(createWebProjectionScope(target, config.id), bridge, {
           wake,
+          captureDelayMs: config.captureDelayMs,
           blocked: () => destination !== 'native' || automaticMotion || (placementPending && !manager?.token),
           revision: () => revision,
           captureRevision: config.captureMode === 'view' ? () => contentRevision : undefined,

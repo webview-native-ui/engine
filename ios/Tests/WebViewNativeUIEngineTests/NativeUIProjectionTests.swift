@@ -12,10 +12,10 @@ final class NativeUIProjectionTests: XCTestCase {
     @MainActor func testConvenienceInitializerForwardsNativeFailurePolicy() throws {
         let web = WKWebView()
         let registration = try NativeUIProjection(webView: web, plugin: "Fixture", projectionSelector: "#slot",
-            failedFallback: .native, canCapture: { false }, view: { nil })
+            failedFallback: .native, captureDelayMs: 600, canCapture: { false }, view: { nil })
         defer { registration.destroy() }
         XCTAssertTrue(web.configuration.userContentController.userScripts.contains {
-            $0.source.contains("\"failedFallback\":\"native\"")
+            $0.source.contains("\"failedFallback\":\"native\"") && $0.source.contains("\"captureDelayMs\":600")
         })
     }
 

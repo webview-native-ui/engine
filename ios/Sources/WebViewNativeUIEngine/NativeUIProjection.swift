@@ -59,15 +59,17 @@ public final class NativeUIProjection: NSObject, WKScriptMessageHandler {
                 receiveListeners: ReceiveListeners = .init(),
                 allowedOrigins: Set<String> = ["capacitor://localhost", "app://localhost", "https://localhost", "http://localhost"],
                 failedFallback: FailedFallback = .web, runtime: Runtime = .capacitor,
+                captureDelayMs: Double = 50,
                 canCapture: @escaping () -> Bool = { true }, view: @escaping () -> UIView?) throws {
         try self.init(webView: webView, plugin: plugin, projectionSelector: projectionSelector,
                       receiveListeners: receiveListeners, allowedOrigins: allowedOrigins, failedFallback: failedFallback, runtime: runtime,
-                      canCapture: canCapture, snapshots: NativeUICoveredSnapshots(), view: view)
+                      captureDelayMs: captureDelayMs, canCapture: canCapture, snapshots: NativeUICoveredSnapshots(), view: view)
     }
     init(webView: WKWebView?, plugin: String, projectionSelector: String,
          receiveListeners: ReceiveListeners = .init(),
          allowedOrigins: Set<String> = ["capacitor://localhost", "app://localhost", "https://localhost", "http://localhost"],
          failedFallback: FailedFallback = .web, runtime: Runtime = .capacitor,
+         captureDelayMs: Double = 50,
          canCapture: @escaping () -> Bool = { true }, snapshots: NativeUICoveredSnapshots,
          view: @escaping () -> UIView?) throws {
         self.allowedOriginsJSON = String(data: try JSONSerialization.data(withJSONObject: Array(allowedOrigins)), encoding: .utf8)!
@@ -78,9 +80,10 @@ public final class NativeUIProjection: NSObject, WKScriptMessageHandler {
         self.webView = webView; self.views = { view().map { ["view": $0] } ?? [:] }; self.origins = allowedOrigins; self.canCapture = canCapture
         super.init()
         precondition(Thread.isMainThread)
-        guard !projectionSelector.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw ProjectionError.invalidConfiguration }
+        guard captureDelayMs.isFinite, captureDelayMs >= 0, captureDelayMs <= 2147483647,
+              !projectionSelector.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw ProjectionError.invalidConfiguration }
         let config: [String: Any] = ["id": id, "plugin": plugin, "projectionSelector": projectionSelector,
-                                     "receiveListeners": receiveListeners.configuration, "failedFallback": failedFallback.rawValue, "runtime": runtime.rawValue]
+                                     "captureDelayMs": captureDelayMs, "receiveListeners": receiveListeners.configuration, "failedFallback": failedFallback.rawValue, "runtime": runtime.rawValue]
         let json = String(data: try JSONSerialization.data(withJSONObject: config), encoding: .utf8)!
         let allowed = allowedOriginsJSON
         let runtime = try Self.runtime()
