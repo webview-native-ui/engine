@@ -498,9 +498,8 @@ class NativeUIEngineTest {
  @Test fun invalidatedOpaqueImageAppliesPendingPlacementBeforeRelease() = nativeInitialization(NativeUIProjection.CaptureMode.VIEW, releaseWhileActive = true)
  @Test fun pressedWindowBlocksCaptureAcrossFirstConnection() = nativeInitialization(NativeUIProjection.CaptureMode.VIEW, pressOnConnect = true)
  @Test fun explicitPlacementIsNotOverwrittenByOlderImageFrame() = nativeInitialization(NativeUIProjection.CaptureMode.VIEW, authoritativePlacement = true)
- @Test fun childImageReturnsToNative() = nativeInitialization(NativeUIProjection.CaptureMode.COMPOSITED, imagePlacement=NativeUIProjection.ImagePlacement.CHILD)
 
- private fun nativeInitialization(mode: NativeUIProjection.CaptureMode, delayCover:Boolean = false, releaseWhileActive:Boolean = false, pressOnConnect:Boolean = false, authoritativePlacement:Boolean = false, imagePlacement:NativeUIProjection.ImagePlacement = NativeUIProjection.ImagePlacement.PREVIOUS) {
+ private fun nativeInitialization(mode: NativeUIProjection.CaptureMode, delayCover:Boolean = false, releaseWhileActive:Boolean = false, pressOnConnect:Boolean = false, authoritativePlacement:Boolean = false) {
 
   val activity=activity(); lateinit var registration:NativeUIProjection; lateinit var native:View
   val loaded=CountDownLatch(1)
@@ -560,7 +559,7 @@ class NativeUIEngineTest {
      receiveListeners=NativeUIProjection.ReceiveListeners(
       update=listOf("updated"),
       projection=NativeUIProjection.ReceiveListeners.Projection(native=listOf("shown"),web=listOf("moving"),none=listOf("hidden"))),
-     failedFallback=NativeUIProjection.FailedFallback.WEB,captureMode=mode,imagePlacement=imagePlacement,
+     failedFallback=NativeUIProjection.FailedFallback.WEB,captureMode=mode,
      updatePlacement=if(authoritativePlacement) ({ placement ->
       assertEquals(View.INVISIBLE,native.visibility)
       native.y=(placement.getDouble("y")*activity.web.width/placement.getDouble("viewportWidth")).toFloat()
@@ -607,9 +606,7 @@ class NativeUIEngineTest {
    js("testEvents.shown({})")
    }
    waitFor("document.querySelector('#slot')?.hasAttribute('data-native-ui-snapshot')===true")
-   waitFor(if(imagePlacement==NativeUIProjection.ImagePlacement.CHILD)
-    "document.querySelector('#slot > img[data-native-ui-projection-image]')!==null"
-    else "document.querySelector('img[data-native-ui-projection-image]')?.nextElementSibling?.id==='slot'")
+   waitFor("document.querySelector('#slot > img[data-native-ui-projection-image]')!==null")
    if(!delayCover) {
    val before=js("document.querySelector('img[data-native-ui-projection-image]')?.src")
    fun touch(action:Int) { main {

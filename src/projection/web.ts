@@ -9,7 +9,7 @@ import type {
 import type { WebProjectionScope } from './scope.js';
 import { bounded, boundedListener } from '../native/bridge.js';
 import { bindProjectionEvents, type ProjectionEvents, type ProjectionDestination } from './events.js';
-import { snapshotStyles } from './styles.js';
+import { snapshotStyles, snapshotShadowStyles } from './styles.js';
 
 export interface WebProjectionOptions {
   /** Existing plugin notifications, scoped to this presentation surface. */
@@ -107,9 +107,39 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     if (sheets.has(root)) return;
     const style = doc.createElement('style');
     style.setAttribute('data-native-ui-snapshot-base', '');
-    style.textContent = snapshotStyles;
+    style.textContent = snapshotStyles + (root.nodeType === 11 ? snapshotShadowStyles : '');
     (root.nodeType === 11 ? root : (root as Document).head).append(style);
     sheets.set(root, style);
+  };
+  // Each shadow tree is a separate style scope. Keep these rules alongside the
+  // prepared image; only the marker changes during the handoff.
+  const finishVisibilityTransitions = (target: HTMLElement) => {
+    // A visibility transition can keep the old content painted over the image.
+    // Do not stop layout, transform or opacity transitions owned by the renderer.
+    const animations = [
+      ...target.getAnimations({ subtree: true }),
+      ...[...(shadowHosts.get(target) ?? [])].flatMap((host) => host.shadowRoot?.getAnimations() ?? []),
+    ];
+    for (const animation of animations)
+      if ('transitionProperty' in animation && animation.transitionProperty === 'visibility') animation.cancel();
+  };
+  const shadowHosts = new Map<HTMLElement, Set<HTMLElement>>();
+  const syncShadowContent = (target: HTMLElement) => {
+    const hosts = shadowHosts.get(target) ?? new Set<HTMLElement>();
+    shadowHosts.set(target, hosts);
+    const hidden = target.hasAttribute('data-native-ui-snapshot-source') || target.hasAttribute('data-native-ui-snapshot-prepared');
+    const visit = (element: HTMLElement) => {
+      if (element.hasAttribute('data-native-ui-projection-node')) return;
+      if (element.shadowRoot) {
+        hosts.add(element);
+        sheetFor(element.shadowRoot);
+        for (const child of element.shadowRoot.children) visit(child as HTMLElement);
+      }
+      for (const child of element.children) visit(child as HTMLElement);
+    };
+    visit(target);
+    for (const host of hosts) host.toggleAttribute('data-native-ui-snapshot-content', hidden);
+    finishVisibilityTransitions(target);
   };
   const viewport = () => `${win.innerWidth}:${win.innerHeight}:${win.devicePixelRatio}`;
   let handoffPending = false;
@@ -152,6 +182,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
       ...(active?.scopes.map((scope) => scope.element.getRootNode()) ?? []),
       ...(cached?.scopes.map((scope) => scope.element.getRootNode()) ?? []),
       ...[...leasedImages].map((image) => image.getRootNode()),
+      ...[...shadowHosts.values()].flatMap((hosts) => [...hosts].map((host) => host.shadowRoot!)),
     ]);
     for (const [root, pair] of sheets)
       if (root.nodeType === 11 && !liveRoots.has(root)) {
@@ -271,6 +302,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
             let image = pool.find((item) => !leasedImages.has(item));
             if (!image) {
               image = doc.createElement('img');
+              image.setAttribute('data-native-ui-projection-node', '');
               pool.push(image);
             }
             leasedImages.add(image);
@@ -296,7 +328,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
       )
         return;
       const previous = cached;
-      cached = {
+      const prepared: Prepared = {
         data: result as CoveredSnapshot,
         images,
         sources: Array.from(new Set(selected.flatMap((item) => [item.element, ...(item.sources ?? [])]))),
@@ -310,12 +342,29 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
         revision,
         layout: signature(selected),
       };
+      try {
+        if (!render(prepared)) throw new Error('Projection destination is unavailable');
+      } catch (error) {
+        // Do not publish a token whose DOM could not be installed. Restore the
+        // last completed presentation before retiring the failed preparation.
+        detach();
+        try {
+          render();
+          cached?.sources.forEach((source) => {
+            preparedOwners.add(source);
+            preparedSources.add(source);
+          });
+        } catch {
+          abandon();
+        }
+        throw error;
+      }
+      cached = prepared;
       clearPrepared();
       cached.sources.forEach((source) => {
         preparedOwners.add(source);
         preparedSources.add(source);
       });
-      render();
       if (callbacks.opaqueUnderlay) void call({ action: 'prepared', token: result.token }).catch(() => {});
       win.dispatchEvent(new Event(sourcesChangedEvent));
       preparedVisualRevision = visual;
@@ -394,10 +443,14 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
   );
   const preparedTargets = new Set<HTMLElement>();
   const clearTarget = (target: HTMLElement) => {
+    shadowHosts.get(target)?.forEach((host) => host.removeAttribute('data-native-ui-snapshot-content'));
     if (preparedTargets.delete(target)) target.removeAttribute('data-native-ui-snapshot-prepared');
     target.removeAttribute('data-native-ui-snapshot-visible');
     target.removeAttribute(imageMarker);
+    target.removeAttribute('data-native-ui-snapshot-positioned');
     target.removeAttribute('data-native-ui-snapshot-source');
+    finishVisibilityTransitions(target);
+    shadowHosts.delete(target);
   };
   const detach = () => {
     presentation++;
@@ -451,6 +504,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     });
     for (const target of rendered) {
       target.removeAttribute('data-native-ui-snapshot-source');
+      syncShadowContent(target);
       target.toggleAttribute('data-native-ui-snapshot-visible', !!callbacks.opaqueUnderlay);
     }
     image.images.forEach((element) => element.style.setProperty('opacity', callbacks.opaqueUnderlay ? '1' : '0', 'important'));
@@ -476,18 +530,18 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
   const targetsFor = (image: Prepared) => image.scopes.map((scope) => (validTarget(scope.element) ? scope.element : undefined));
   const rendered = new Set<HTMLElement>();
   const preparedKeys = new Map<HTMLElement, string>();
-  const offsets = new Map<HTMLImageElement, { target: HTMLElement; child: boolean; frame: Frame; scale?: { x: number; y: number } }>();
+  const offsets = new Map<HTMLImageElement, { target: HTMLElement; frame: Frame; scale?: { x: number; y: number } }>();
   const updateOffsets = () => {
     const writes: { element: HTMLImageElement; left: number; top: number; width: number; height: number }[] = [];
     // Read all geometry before writing positions; never reset a painted image to zero to measure it.
     for (const [element, placement] of offsets) {
-      const { target, child, frame } = placement;
+      const { target, frame } = placement;
       if (!target.isConnected) {
         element.remove();
         continue;
       }
-      const parent = child ? target : target.parentNode!;
-      if (element.parentNode !== parent) parent.insertBefore(element, child ? null : target);
+      const parent = target.shadowRoot ?? target;
+      if (element.parentNode !== parent) parent.insertBefore(element, null);
       const box = target.getBoundingClientRect();
       const rect = element.getBoundingClientRect();
       const width = parseFloat(element.style.width) || frame.width;
@@ -509,18 +563,17 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
         if (element.style.getPropertyValue(property) !== next) element.style.setProperty(property, next, 'important');
       }
   };
-  const render = () => {
-    const image = active ?? cached;
-    if (!image || ending) return;
+  const render = (image = active ?? cached) => {
+    if (!image || ending) return false;
     if (!image.sources.every(validSource) || targetsFor(image).some((target) => !target)) {
       invalidate();
-      return;
+      return false;
     }
     const targets = targetsFor(image);
     if (active) {
       if (targets.some((target) => !target?.isConnected || !sheets.has(rootFor(target)))) {
         abandon(active, false);
-        return;
+        return false;
       }
       const next = new Set<HTMLElement>();
       for (const [index, source] of image.targets.entries()) {
@@ -531,12 +584,13 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
         target.setAttribute('data-native-ui-snapshot-source', '');
         target.toggleAttribute('data-native-ui-snapshot-visible', presented);
         image.images[index].style.setProperty('opacity', presented ? '1' : '0', 'important');
+        syncShadowContent(target);
         next.add(target);
       }
       for (const target of rendered) if (!next.has(target)) clearTarget(target);
       rendered.clear();
       next.forEach((target) => rendered.add(target));
-      return;
+      return true;
     }
     imagePool.forEach((pool) =>
       pool.forEach((element) => {
@@ -562,9 +616,10 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
         preparedTargets.add(target);
       }
       target.toggleAttribute('data-native-ui-snapshot-visible', !!callbacks.opaqueUnderlay);
+      syncShadowContent(target);
       const box = target.getBoundingClientRect();
-      const child = image.scopes[indices[0]].imagePlacement === 'child';
-      const parent = child ? target : target.parentNode!;
+      target.toggleAttribute('data-native-ui-snapshot-positioned', win.getComputedStyle(target).position === 'static');
+      const parent = target.shadowRoot ?? target;
       for (const index of [...indices].reverse()) {
         const element = image.images[index];
         const part = image.data.parts[index];
@@ -580,23 +635,19 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
         element.setAttribute('aria-hidden', 'true');
         element.setAttribute('data-native-ui-projection-image', key);
         element.style.cssText =
-          'all:initial!important;position:absolute!important;display:block!important;visibility:visible!important;pointer-events:none!important;opacity:0!important;';
+          'all:initial!important;position:absolute!important;display:block!important;visibility:visible!important;pointer-events:none!important;image-rendering:pixelated!important;will-change:opacity!important;opacity:0!important;';
         element.style.setProperty('width', `${frame.width}px`, 'important');
         element.style.setProperty('height', `${frame.height}px`, 'important');
         element.style.setProperty('left', '0px', 'important');
         element.style.setProperty('top', '0px', 'important');
-        element.style.setProperty('z-index', win.getComputedStyle(target).zIndex, 'important');
         element.style.setProperty('opacity', callbacks.opaqueUnderlay ? '1' : '0', 'important');
-        const slot = child ? null : target.getAttribute('slot');
-        if (slot !== null) element.setAttribute('slot', slot);
-        else element.removeAttribute('slot');
-        const anchor = child ? null : target;
-        if (element.parentNode !== parent || element.nextSibling !== anchor) parent.insertBefore(element, anchor);
-        offsets.set(element, { target, child, frame });
+        if (element.parentNode !== parent) parent.insertBefore(element, null);
+        offsets.set(element, { target, frame });
       }
     }
     image.parents = image.scopes.map((scope) => scope.element.parentNode);
     updateOffsets();
+    return true;
   };
 
   const begin = () => {
@@ -632,6 +683,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     rendered.forEach((target) => {
       target.setAttribute('data-native-ui-snapshot-source', '');
       target.toggleAttribute('data-native-ui-snapshot-visible', presented);
+      syncShadowContent(target);
     });
     image.images.forEach((element) => element.style.setProperty('opacity', presented ? '1' : '0', 'important'));
     // Reconciliation may continue after one frame even if the optional bridge reply

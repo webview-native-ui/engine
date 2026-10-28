@@ -1,13 +1,5 @@
-export type ProjectionImagePlacement = 'previous' | 'child';
-
 /** A fixed Web fallback element. A replacement element requires a new scope. */
-export const createWebProjectionScope = (
-  element: HTMLElement,
-  namespace: string,
-  options: { imagePlacement?: ProjectionImagePlacement } = {},
-) => {
-  const imagePlacement = options.imagePlacement ?? 'previous';
-  if (imagePlacement !== 'previous' && imagePlacement !== 'child') throw new TypeError('imagePlacement must be previous or child');
+export const createWebProjectionScope = (element: HTMLElement, namespace: string) => {
   if (element.nodeType !== 1 || element.namespaceURI !== 'http://www.w3.org/1999/xhtml' || !element.ownerDocument || !('style' in element))
     throw new TypeError('A Web projection scope requires an HTMLElement fallback');
   if (
@@ -16,6 +8,6 @@ export const createWebProjectionScope = (
     )
   )
     throw new TypeError('A Web projection fallback must be a container element; use the existing fallback container');
-  return Object.freeze({ element, namespace, imagePlacement });
+  return Object.freeze({ element, namespace });
 };
 export type WebProjectionScope = ReturnType<typeof createWebProjectionScope>;

@@ -545,7 +545,7 @@ test('opaque movement retains decoded pixels and local coordinates until content
     expect(
       await page.evaluate(
         () =>
-          `${document.querySelector('#slot')!.previousElementSibling!.getBoundingClientRect().y - document.querySelector('#slot')!.getBoundingClientRect().y}px`,
+          `${document.querySelector('#slot > img')!.getBoundingClientRect().y - document.querySelector('#slot')!.getBoundingClientRect().y}px`,
       ),
     ).toBe('0px');
   }
@@ -564,7 +564,7 @@ test('full-view pixels remain host-local when native position lags DOM during fi
   expect(
     await page.evaluate(
       () =>
-        `${document.querySelector('#slot')!.previousElementSibling!.getBoundingClientRect().y - document.querySelector('#slot')!.getBoundingClientRect().y}px`,
+        `${document.querySelector('#slot > img')!.getBoundingClientRect().y - document.querySelector('#slot')!.getBoundingClientRect().y}px`,
     ),
   ).toBe('0px');
 });

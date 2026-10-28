@@ -197,6 +197,6 @@ on the native registration (Swift: `captureDelayMs: 600`; Kotlin: `captureDelayM
 This changes background image preparation, not overlay presentation timing.
 See [capture timing](projection.md#capture-timing) for the cache behavior and measured guidance.
 
-### Projection image placement
+### Projection DOM
 
-Prepared images are inserted immediately before the fallback container by default. To keep the image inside a renderer-owned container, set `imagePlacement: .child` in Swift or `imagePlacement = NativeUIProjection.ImagePlacement.CHILD` in Kotlin. Both Capacitor and Cordova use the same option. Child placement inherits the container's clipping and visual effects; see [DOM and image placement requirements](projection.md#dom-and-native-surface-requirements).
+The engine keeps a reusable image inside the fallback container, using its open ShadowRoot when available. No placement option is needed. If the renderer inspects child elements, exclude nodes marked `data-native-ui-projection-node`. See [DOM requirements](projection.md#dom-and-native-surface-requirements).

@@ -12,10 +12,10 @@ final class NativeUIProjectionTests: XCTestCase {
     @MainActor func testConvenienceInitializerForwardsNativeFailurePolicy() throws {
         let web = WKWebView()
         let registration = try NativeUIProjection(webView: web, plugin: "Fixture", projectionSelector: "#slot",
-            failedFallback: .native, captureDelayMs: 600, imagePlacement: .child, canCapture: { false }, view: { nil })
+            failedFallback: .native, captureDelayMs: 600, canCapture: { false }, view: { nil })
         defer { registration.destroy() }
         XCTAssertTrue(web.configuration.userContentController.userScripts.contains {
-            $0.source.contains("\"failedFallback\":\"native\"") && $0.source.contains("\"captureDelayMs\":600") && $0.source.contains("\"imagePlacement\":\"child\"")
+            $0.source.contains("\"failedFallback\":\"native\"") && $0.source.contains("\"captureDelayMs\":600")
         })
     }
 
@@ -78,12 +78,6 @@ final class NativeUIProjectionTests: XCTestCase {
         XCTAssertEqual(configuration.userContentController.userScripts.count, 1, "Keep the host's scripts")
     }
     @MainActor func testPreparedImageReturnsToNativeAfterWebProjection() async throws {
-        try await preparedImageReturns(.previous)
-    }
-    @MainActor func testChildImageReturnsToNativeAfterWebProjection() async throws {
-        try await preparedImageReturns(.child)
-    }
-    @MainActor private func preparedImageReturns(_ imagePlacement: NativeUIProjection.ImagePlacement) async throws {
         let configuration = WKWebViewConfiguration()
         configuration.setURLSchemeHandler(ProjectionFixture(), forURLScheme: "capacitor")
         configuration.userContentController.addUserScript(WKUserScript(source: """
@@ -102,7 +96,6 @@ final class NativeUIProjectionTests: XCTestCase {
         owner.view.addSubview(button)
         let registration = try NativeUIProjection(webView: web, plugin: "Fixture", projectionSelector: "#slot",
             receiveListeners: .init(projection: .init(native: ["shown"], web: ["moving"])),
-            imagePlacement: imagePlacement,
             // SnapshotTestWindow supplies deterministic pixels in hostless XCTest.
             // Capture, file transport and handoff use the production path.
             snapshots: NativeUICoveredSnapshots(), view: { button })
@@ -110,9 +103,7 @@ final class NativeUIProjectionTests: XCTestCase {
         web.load(URLRequest(url: URL(string: "capacitor://localhost/fixture")!))
         for _ in 0..<3 {
             try await wait(web, "document.querySelector('#slot')?.hasAttribute('data-native-ui-snapshot') === true", timeout: 30)
-            try await wait(web, imagePlacement == .child
-                ? "document.querySelector('#slot > img[data-native-ui-projection-image]') !== null"
-                : "document.querySelector('img[data-native-ui-projection-image]')?.nextElementSibling?.id === 'slot'")
+            try await wait(web, "document.querySelector('#slot > img[data-native-ui-projection-image]') !== null")
             XCTAssertFalse(button.isHidden)
             _ = try await web.evaluateJavaScript("testEvents.moving({})")
             try await wait(web, "document.querySelector('#slot').hasAttribute('data-native-ui-snapshot-visible')")

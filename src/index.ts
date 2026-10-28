@@ -1,7 +1,7 @@
 export * from './types.js';
 export * from './dom/geometry.js';
 export * from './dom/scroll-placement.js';
-export { createWebProjectionScope, type WebProjectionScope, type ProjectionImagePlacement } from './projection/scope.js';
+export { createWebProjectionScope, type WebProjectionScope } from './projection/scope.js';
 export * from './projection/web.js';
 export * from './dom/scroll-bindings.js';
 export type { ProjectionEvents, ProjectionDestination } from './projection/events.js';

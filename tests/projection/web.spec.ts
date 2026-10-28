@@ -25,7 +25,6 @@ const prepare = async (
   shared = false,
   events = false,
   captureDelayMs?: number,
-  imagePlacement?: 'previous' | 'child',
 ) => {
   await boot(page);
   if (shadow)
@@ -36,7 +35,7 @@ const prepare = async (
       (window as any).sourceRoot = host.shadowRoot;
     });
   await page.evaluate(
-    async ({ fail, proxy, shared, events, captureDelayMs, imagePlacement }) => {
+    async ({ fail, proxy, shared, events, captureDelayMs }) => {
       const w = window as any,
         source = (w.sourceRoot ?? document).querySelector('#source') as HTMLElement,
         owner = (w.sourceRoot ?? document).querySelector('#scroll') as HTMLElement;
@@ -61,7 +60,6 @@ const prepare = async (
       w.scope = w.engine.createWebProjectionScope(
         shared ? document.getElementById('projection-host') : proxy ? document.getElementById('proxy') : source,
         'test',
-        { imagePlacement },
       );
       w.source = {
         element: source,
@@ -131,7 +129,7 @@ const prepare = async (
       );
       w.manager.consider(1, [w.source]);
     },
-    { fail, proxy, shared, events, captureDelayMs, imagePlacement },
+    { fail, proxy, shared, events, captureDelayMs },
   );
   if (!fail)
     await expect(page.locator(shared ? '#projection-host' : proxy ? '#proxy' : '#source')).toHaveAttribute('data-native-ui-snapshot', /.+/);
@@ -141,7 +139,7 @@ test('prepared pixels appear without a new capture; only matching restore ACK re
   await prepare(page);
   await page.evaluate(() => (window as any).manager.begin());
   await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
-  expect(await page.evaluate(() => getComputedStyle(document.querySelector('#source')!.previousElementSibling!).opacity)).toBe('1');
+  expect(await page.evaluate(() => getComputedStyle(document.querySelector('#source > img')!).opacity)).toBe('1');
   expect(await page.evaluate(() => (window as any).calls.filter((c: any) => c.action === 'prepare').length)).toBe(1);
   await page.evaluate(() => {
     const w = window as any;
@@ -284,7 +282,7 @@ test('image presentation works inside a shadow tree and restores Web', async ({ 
   await prepare(page, false, true);
   await page.evaluate(() => (window as any).manager.begin());
   await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
-  expect(await page.evaluate(() => getComputedStyle((window as any).source.element.previousElementSibling).opacity)).toBe('1');
+  expect(await page.evaluate(() => getComputedStyle((window as any).source.element.querySelector('img')).opacity)).toBe('1');
   await page.evaluate(async () => (window as any).manager.destroy());
   await expect(page.locator('button')).toBeVisible();
   expect(await page.evaluate(() => (window as any).sourceRoot.querySelectorAll('style[data-native-ui-snapshot-base]').length)).toBe(0);
@@ -332,8 +330,8 @@ test('identical native tokens stay isolated across plugin scopes and teardown', 
         second = document.querySelector('#second')!;
       return {
         distinct: first.getAttribute('data-native-ui-snapshot') !== second.getAttribute('data-native-ui-snapshot'),
-        first: decodeURIComponent((first.previousElementSibling as HTMLImageElement).src).includes('fill="red"'),
-        second: decodeURIComponent((second.previousElementSibling as HTMLImageElement).src).includes('fill="blue"'),
+        first: decodeURIComponent((first.querySelector('img') as HTMLImageElement).src).includes('fill="red"'),
+        second: decodeURIComponent((second.querySelector('img') as HTMLImageElement).src).includes('fill="blue"'),
       };
     }),
   ).toEqual({ distinct: true, first: true, second: true });
@@ -347,7 +345,7 @@ test('identical native tokens stay isolated across plugin scopes and teardown', 
       return {
         owners: w.second.owners.length,
         removed: !!w.secondRemoved,
-        opacity: getComputedStyle(document.querySelector('#second')!.previousElementSibling!).opacity,
+        opacity: getComputedStyle(document.querySelector('#second > img')!).opacity,
       };
     }),
   ).toEqual({ owners: 1, removed: false, opacity: '1' });
@@ -841,7 +839,7 @@ for (const delay of [undefined, 300]) {
 }
 
 for (const property of ['padding', 'border', 'opacity', 'filter', 'transform'])
-  test(`sibling ignores fallback decoration ${property}`, async ({ page }) => {
+  test(`inner image does not duplicate host decoration ${property}`, async ({ page }) => {
     await prepare(page);
     const result = await page.evaluate((property) => {
       const w = window as any,
@@ -851,7 +849,7 @@ for (const property of ['padding', 'border', 'opacity', 'filter', 'transform'])
       target.style[property] = { padding: '15px', border: '5px solid red', opacity: '.2', filter: 'blur(3px)', transform: 'scale(.8)' }[
         property
       ];
-      // Entry must not rescale the prepared image to the fallback's transformed dimensions.
+      // Host effects apply once, as with pseudo-elements; do not copy them onto the image.
       w.manager.begin();
       const after = img.getBoundingClientRect().toJSON();
       return {
@@ -860,12 +858,12 @@ for (const property of ['padding', 'border', 'opacity', 'filter', 'transform'])
         style: { opacity: getComputedStyle(img).opacity, transform: getComputedStyle(img).transform, filter: getComputedStyle(img).filter },
       };
     }, property);
-    expect(result.after.width).toBe(result.before.width);
-    expect(result.after.height).toBe(result.before.height);
+    expect(result.after.width).toBeCloseTo(result.before.width * (property === 'transform' ? 0.8 : 1));
+    expect(result.after.height).toBeCloseTo(result.before.height * (property === 'transform' ? 0.8 : 1));
     expect(result.style.transform).toBe('none');
     expect(result.style.filter).toBe('none');
   });
-test('sibling multiple parts retain overlap order and remove every node', async ({ page }) => {
+test('inner multiple parts retain overlap order and remove every node', async ({ page }) => {
   await boot(page);
   await page.evaluate(async () => {
     const w = window as any,
@@ -900,7 +898,7 @@ test('sibling multiple parts retain overlap order and remove every node', async 
   await page.evaluate(() => (window as any).manager.destroy());
   await expect(page.locator('img[data-native-ui-projection-image]')).toHaveCount(0);
 });
-test('sibling active reparenting keeps the image beside its target', async ({ page }) => {
+test('inner active reparenting keeps the image inside its target', async ({ page }) => {
   await prepare(page);
   await page.evaluate(() => (window as any).manager.begin());
   await expect(page.locator('img[data-native-ui-projection-image]')).toHaveCSS('opacity', '1');
@@ -909,10 +907,10 @@ test('sibling active reparenting keeps the image beside its target', async ({ pa
     document.querySelector('#other')!.append(w.scope.element);
     w.manager.moved();
   });
-  expect(await page.evaluate(() => document.querySelector('img[data-native-ui-projection-image]')!.nextElementSibling?.id)).toBe('source');
+  expect(await page.evaluate(() => document.querySelector('img[data-native-ui-projection-image]')!.parentElement?.id)).toBe('source');
 });
 for (const scenario of ['fractional-rtl', 'nested-scroll', 'parent-scale', 'slot'])
-  test(`sibling coordinates ${scenario}`, async ({ page }) => {
+  test(`inner coordinates ${scenario}`, async ({ page }) => {
     await boot(page);
     await page.evaluate(async (scenario) => {
       const w = window as any,
@@ -959,7 +957,7 @@ for (const scenario of ['fractional-rtl', 'nested-scroll', 'parent-scale', 'slot
     }));
     for (const key of ['x', 'y', 'width', 'height']) expect(result.actual[key]).toBeCloseTo(result.expected[key], 1);
   });
-test('sibling follows parent layer scale without reapplying target effects', async ({ page }) => {
+test('inner image follows parent layer scale without reapplying target effects', async ({ page }) => {
   await prepare(page);
   await page.evaluate(() => {
     const target = (window as any).scope.element;
@@ -1243,30 +1241,169 @@ test('application pseudo-elements survive projection and images never take input
   expect(await decoration()).toEqual(original);
 });
 
-for (const imagePlacement of ['previous', 'child'] as const) {
-  test(`image placement ${imagePlacement} retains geometry, fallback and nodes across handoffs`, async ({ page }) => {
-    await prepare(page, false, false, false, false, false, 0, imagePlacement);
+for (const previous of [false, true]) {
+  test(`failed insertion preserves ${previous ? 'the completed image' : 'the live fallback'}`, async ({ page }) => {
+    await boot(page);
+    await page.evaluate(async (previous) => {
+      const w = window as any;
+      const target = document.querySelector('#source') as HTMLElement;
+      const rect = target.getBoundingClientRect();
+      w.calls = [];
+      w.captures = 0;
+      w.manager = await w.engine.createWebProjection(
+        w.engine.createWebProjectionScope(target, 'insertion'),
+        {
+          listen: async () => ({ remove() {} }),
+          send: async (request: any) => {
+            w.calls.push(request);
+            if (request.action === 'prepare') {
+              const successful = previous && ++w.captures === 1;
+              return {
+                token: successful ? 'good' : 'failed',
+                parts: [{ ids: ['one'], url: successful ? 'file:///red.png' : 'file:///ad.png', ...rect.toJSON() }],
+              };
+            }
+            return { shown: true };
+          },
+        },
+        { wake() {}, blocked: () => false, captureDelayMs: 0 },
+      );
+      const parent = target;
+      const insert = parent.insertBefore.bind(parent);
+      parent.insertBefore = (node: Node, reference: Node | null) => {
+        const result = insert(node, reference);
+        if (node instanceof HTMLImageElement && decodeURIComponent(node.src).includes('blue')) throw new Error('Insertion rejected');
+        return result;
+      };
+      w.manager.consider(1, [{ element: target, control: { id: 'one', ...rect.toJSON() } }]);
+    }, previous);
+    if (previous) {
+      await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot', /.+/);
+      await page.evaluate(() => (window as any).manager.changed());
+    }
+    await expect
+      .poll(() =>
+        page.evaluate(() => (window as any).calls.some((request: any) => request.action === 'release' && request.token === 'failed')),
+      )
+      .toBe(true);
+    await page.evaluate(() => (window as any).manager.begin());
+    if (previous) {
+      await expect(page.locator('img[data-native-ui-projection-image]')).toHaveCSS('opacity', '1');
+      expect(await page.evaluate(() => (window as any).manager.token)).toBe('good');
+    } else {
+      await expect(page.locator('#source')).not.toHaveAttribute('data-native-ui-snapshot');
+      await expect(page.getByRole('button', { name: 'Web action' })).toBeVisible();
+    }
+    expect(
+      await page.evaluate(() =>
+        (window as any).calls.some(
+          (request: any) => ['cover', 'painted', 'prepared'].includes(request.action) && request.token === 'failed',
+        ),
+      ),
+    ).toBe(false);
+    await page.evaluate(() => (window as any).manager.destroy());
+    await expect(page.locator('img')).toHaveCount(0);
+  });
+}
+
+for (const shadow of [false, true]) {
+  test(`inner projection preserves scroll clipping and fallback lifecycle (shadow: ${shadow})`, async ({ page }) => {
+    await prepare(page);
+    await page.evaluate((shadow) => {
+      const target = (window as any).scope.element as HTMLElement;
+      if (shadow) target.attachShadow({ mode: 'open' }).innerHTML = '<div style="overflow:hidden;padding:20px"><slot></slot></div>';
+      (window as any).manager.begin();
+    }, shadow);
     const image = page.locator('img[data-native-ui-projection-image]');
-    await expect(image).toHaveCount(1);
+    await expect(image).toHaveCSS('opacity', '1');
+    expect(await image.boundingBox()).toEqual(await page.locator('#source').boundingBox());
+    const outside = { x: 10, y: 0, width: 100, height: 8 };
+    const clipped = await page.screenshot({ clip: outside });
+    await page.evaluate(() => {
+      document.querySelector('#scroll')!.scrollTop = 120;
+    });
+    expect(await page.screenshot({ clip: outside })).toEqual(clipped);
+    // No moved() call: the CSS containing block must carry the image while scrolling.
+    expect(await image.boundingBox()).toEqual(await page.locator('#source').boundingBox());
     expect(
       await page.evaluate(() => {
-        const img = document.querySelector('img[data-native-ui-projection-image]')!;
-        return img.parentElement?.id === 'source' ? 'child' : img.nextElementSibling?.id === 'source' ? 'previous' : 'wrong';
+        const target = (window as any).scope.element as HTMLElement;
+        const root = target.shadowRoot ?? target;
+        return root.querySelector('img[data-native-ui-projection-image]')?.parentNode === root;
       }),
-    ).toBe(imagePlacement);
-    const before = await image.boundingBox();
-    await page.evaluate(() => (window as any).manager.begin());
-    await expect(image).toBeVisible();
-    await expect(image).toHaveCSS('opacity', '1');
-    await expect(page.getByRole('button', { name: 'Web action' })).toBeHidden();
+    ).toBe(true);
+    await page.evaluate(() => (window as any).manager.destroy());
+    await expect(page.locator('img[data-native-ui-projection-node]')).toHaveCount(0);
+    await page.evaluate(() => {
+      document.querySelector('#scroll')!.scrollTop = 0;
+    });
+    await expect(page.getByRole('button', { name: 'Web action' })).toBeVisible();
+  });
+}
+
+for (const location of ['host', 'light', 'shadow-host', 'shadow', 'nested-shadow'] as const) {
+  test(`projection suppresses and restores explicit pseudo-elements in ${location}`, async ({ page }) => {
+    await prepare(page);
+    await page.evaluate((location) => {
+      const w = window as any;
+      const host = w.scope.element as HTMLElement;
+      let root: Document | ShadowRoot = document;
+      let target = host;
+      if (location === 'shadow-host') root = host.attachShadow({ mode: 'open' });
+      else if (location !== 'host') {
+        if (location.includes('shadow')) root = host.attachShadow({ mode: 'open' });
+        target = document.createElement('span');
+        (root === document ? host : root).append(target);
+        if (location === 'nested-shadow') {
+          root = target.attachShadow({ mode: 'open' });
+          target = document.createElement('span');
+          root.append(target);
+        }
+      }
+      target.id = 'decoration';
+      const style = document.createElement('style');
+      style.textContent =
+        '#decoration::before, #decoration::after { content:"Decoration"; position:absolute; inset:0; background:lime; visibility:visible!important; transition:visibility 500ms linear; }';
+      if (location === 'shadow-host') style.textContent = style.textContent.replaceAll('#decoration', ':host');
+      (root === document ? document.head : root).append(style);
+      w.decoration = target;
+      w.decorations = () =>
+        ['::before', '::after'].map((pseudo) => {
+          const css = getComputedStyle(target, pseudo);
+          return { content: css.content, visibility: css.visibility, background: css.backgroundColor };
+        });
+      w.original = w.decorations();
+      w.manager.begin();
+    }, location);
+    await expect(page.locator('img[data-native-ui-projection-image]')).toHaveCSS('opacity', '1');
+    expect(await page.evaluate(() => (window as any).decorations().map((s: any) => s.visibility))).toEqual(['hidden', 'hidden']);
     await page.evaluate(() => {
       const w = window as any;
       w.manager.end();
       w.manager.updated(undefined, ['counter'], 1000);
     });
-    expect(await image.boundingBox()).toEqual(before);
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    expect(await page.evaluate(() => (window as any).decorations())).toEqual(await page.evaluate(() => (window as any).original));
     await page.evaluate(() => (window as any).manager.destroy());
-    await expect(page.locator('img')).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Web action' })).toBeVisible();
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    expect(await page.evaluate(() => (window as any).decorations())).toEqual(await page.evaluate(() => (window as any).original));
   });
 }
+
+test('hiding fallback content does not cancel its other CSS transitions', async ({ page }) => {
+  await prepare(page);
+  await page.evaluate(() => {
+    const button = document.querySelector('button')!;
+    button.style.transition = 'opacity 10s linear';
+    button.getAnimations();
+    button.style.opacity = '0.5';
+    (window as any).opacityTransition = button
+      .getAnimations()
+      .find((animation) => 'transitionProperty' in animation && animation.transitionProperty === 'opacity');
+    (window as any).manager.begin();
+  });
+  await expect(page.locator('img[data-native-ui-projection-image]')).toHaveCSS('opacity', '1');
+  expect(await page.evaluate(() => (window as any).opacityTransition?.playState)).toBe('running');
+  await page.evaluate(() => (window as any).manager.destroy());
+  expect(await page.evaluate(() => (window as any).opacityTransition?.playState)).toBe('running');
+});
