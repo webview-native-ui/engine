@@ -14,6 +14,33 @@ Start with the [Capacitor](capacitor-plugin.md) or [Cordova](cordova-plugin.md) 
 
 A DOM slot does not necessarily contain a Web replacement: a UI plugin can restore a button, while an ad plugin may hide its slot. Image handoff is explicit and noninteractive. The engine never forwards clicks through an image or replaces SDK click/impression handling.
 
+## DOM and page lifetime
+
+Native registration is independent of the JavaScript framework. Its selector identifies
+one fallback container in the current document; it may appear after registration.
+When a framework removes or replaces that container, the Engine retires the old
+projection and binds the current matching element. A pending drag or native draw
+acknowledgement from the departed container must not hold up its replacement.
+Moving the same element between parents refreshes its scroll bindings without
+requiring the plugin to register it again.
+
+A full HTML navigation creates a new document and runtime session. The native
+registration installs the runtime in the new document and retains the plugin's
+explicit projection destination; images and replies belong to their original
+document. Keep registrations for the native renderer's lifetime, rather than
+recreating them for each framework page event.
+
+These rules apply to selector-based native registration. A lower-level
+`createWebProjectionScope(element)` intentionally binds that particular element;
+its renderer remains responsible for replacing the scope when it changes elements.
+
+The Engine cannot infer every framework's transition or modal semantics from DOM
+mutations. Use the existing projection notifications for those transitions, and an
+explicit overlay integration when needed. Ionic support is opt-in; it is not required
+for ordinary DOM lifetime handling. Framework-specific events are not installed
+automatically. Native view creation, layout constraints and SDK
+lifecycle remain owned by the plugin.
+
 ## Projection contract
 
 A notification specifies **where the surface belongs**, not how to capture it. The Engine chooses the platform-specific handoff without requiring the plugin to keep another copy of projection state.

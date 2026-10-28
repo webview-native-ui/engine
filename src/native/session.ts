@@ -188,7 +188,7 @@ export const startNativeSession = async (
   let revision = 0;
   let contentRevision = 0;
   let generation = 0;
-  let restoring = false;
+  let restoring: WebProjection | undefined;
   let initializing = false;
   let scheduled = false;
   let reconciling = false;
@@ -244,15 +244,15 @@ export const startNativeSession = async (
       target?.removeAttribute(marker);
       return;
     }
-    if (restoring || !manager?.restoring || destination !== 'native') return;
-    restoring = true;
+    if (!manager?.restoring || restoring === manager || destination !== 'native') return;
+    restoring = manager;
     const version = generation;
     const current = manager;
     // The native library acknowledges after the live views have entered a draw pass.
     void bridge
       .send({ action: 'resume' })
       .then(() => {
-        if (stopped || version !== generation || current !== manager) return;
+        if (stopped || version !== generation || current !== manager || findTarget() !== target) return;
         placementPending = false;
         current.updated(undefined, [sourceID], ++revision);
         setVisibility();
@@ -264,30 +264,44 @@ export const startNativeSession = async (
         void recoverFailedProjection();
       })
       .finally(() => {
-        restoring = false;
+        if (restoring === current) restoring = undefined;
         wake();
       });
   };
   const reconcile = async () => {
-    if (stopped || initializing || automaticMotion) return;
+    if (stopped || initializing) return;
+    const found = findTarget();
+    if (found !== target) {
+      generation++;
+      automaticMotion = false;
+      nativeDragging = false;
+      clearTimeout(scrollTimer);
+      clearPlacement();
+      target?.removeAttribute(marker);
+      // A page/DOM replacement retires its old surface even during a drag or draw ACK.
+      // Hide before releasing its image so retirement cannot reveal the departed view.
+      const previous = manager;
+      const previousTarget = target;
+      manager = undefined;
+      target = undefined;
+      sizeObserver.disconnect();
+      refreshScrollListeners();
+      try {
+        if (previousTarget) await bridge.send({ action: 'visibility', visible: false });
+      } finally {
+        await previous?.destroy();
+      }
+      if (stopped) return;
+      target = findTarget();
+      placementPending = false;
+      if (target) sizeObserver.observe(target);
+    }
+    refreshScrollListeners();
+    if (automaticMotion) return;
     if (manager?.restoring) {
       wake();
       return;
     }
-    const found = findTarget();
-    if (found !== target) {
-      generation++;
-      clearPlacement();
-      target?.removeAttribute(marker);
-      await manager?.destroy();
-      manager = undefined;
-      if (stopped) return;
-      target = found;
-      placementPending = false;
-      sizeObserver.disconnect();
-      if (target) sizeObserver.observe(target);
-    }
-    refreshScrollListeners();
     destination = effectiveDestination();
     if (!target) {
       await bridge.send({ action: 'visibility', visible: false });
