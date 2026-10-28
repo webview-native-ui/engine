@@ -34,11 +34,38 @@ An existing renderer that checks CSS visibility can call `getUnprojectedVisibili
 
 ## DOM and native surface requirements
 
-`projectionSelector` is required and must resolve to **one existing container when projection starts**, including one retrieved by the plugin's own `querySelector`. The engine does not create the fallback container or choose its size, placement, layer or z-index. Keep the container's normal layout and any interactive Web controls; an empty zero-size placeholder is not a usable fallback. It is a fixed scope, not a discovery root.
+`projectionSelector` is required and must resolve to **one existing container when projection starts**, using a valid CSS selector. ID, class, attribute and descendant selectors are supported; zero or multiple matches leave Native hidden. The engine does not create the fallback container or choose its size, placement, layer or z-index. Keep the container's normal layout and any interactive Web controls; an empty zero-size placeholder is not a usable fallback. It is a fixed scope, not a discovery root.
 
 The container does not have to exist at registration time. A missing DOM waits without showing native content; replacing it creates a new binding and retires old images. The engine preserves the container's children, listeners and values. Pass the native view itself through `view`; a group of controls can use their common native container. The engine manages the internal identifier, so no ID list or view dictionary is required. Independent surfaces use separate registrations.
 
 A Web Component host can be the destination, for example `projectionSelector: 'native-ad[placement="home"]'`. Give the host a layout box (`display: block` with the intended dimensions); the engine observes insertion, removal and selector attribute changes. The selector runs in the document and does not search inside shadow roots. The engine suppresses fallback content and pseudo-elements in the light DOM and open shadow roots during projection. Closed shadow content cannot be inspected and must inherit the host's `visibility`; provide a container whose shadow/slot structure can display the inserted image.
+
+### Supported destination elements
+
+The selected element must have a layout box and be able to contain the projected image.
+
+| Destination                                            | Support                                                                                                                 |
+| ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
+| `div`, `section`, `nav`, `button`                      | Supported with the intended size and placement.                                                                         |
+| `span`, `a`                                            | Use `inline-block` or `block` with the intended dimensions; avoid fragmented inline text.                               |
+| `select`, `input`, `textarea`                          | Use an outer container; direct scopes are rejected.                                                                     |
+| `img`, `canvas`, media/embedded content, void elements | Use an outer container; direct scopes are rejected.                                                                     |
+| SVG/MathML                                             | Use an HTML container.                                                                                                  |
+| Custom elements, including `ion-select`                | Conditional on their layout and Shadow DOM structure, as described above. An `ion-select` host is not an HTML `select`. |
+
+For example, select `#seat-projection` as the destination:
+
+```html
+<span id="seat-projection" style="display: inline-block; width: 12rem; height: 2.75rem">
+  <select aria-label="Seat" style="width: 100%; height: 100%">
+    <option>Any seat</option>
+  </select>
+</span>
+```
+
+The existing control and its value/listeners are preserved. The image is noninteractive; the plugin still owns native control behavior and value synchronization. Pseudo-elements are not selectable destinations. Elements without a usable box (`display: none`, `display: contents`, zero size) and elements with special child-rendering rules such as `option` need an ordinary wrapper.
+
+### Native surface requirements
 
 For independently moving AdMob slots, retain one registration per loaded native view/surface, use a slot-specific selector and filter the plugin's notifications through `receiveListeners.match` (`match: ["slotKey": slotKey, "loadId": loadId]` / `match = mapOf("slotKey" to slotKey, "loadId" to loadId)`). Dispose the registration when a loaded ad is replaced, even if its host view is reused. Keep SDK loading, impression and click handling in the ad plugin. Supply `canCapture` with its existing capture eligibility checks (for example, test-ad / opaque-background / no-video restrictions); the engine does not grant permission to snapshot an SDK view.
 
