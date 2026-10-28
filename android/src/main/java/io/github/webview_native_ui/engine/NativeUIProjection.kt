@@ -294,22 +294,6 @@ class NativeUIProjection(
             val current = views()
             return snapshots.hidesNativeViews(token) && selected.isNotEmpty() && selected.all { (id, view) -> current[id] === view }
         }
-        fun projectionFrames(): Map<String, RectF>? {
-            val parts = request.optJSONArray("parts") ?: JSONArray()
-            val width = request.optDouble("viewportWidth")
-            if (!width.isFinite() || width <= 0 || parts.length() == 0) { return null }
-            val scale = (webView.width / width).toFloat()
-            val frames = mutableMapOf<String, RectF>()
-            for (index in 0 until parts.length()) {
-                val part = parts.optJSONObject(index) ?: return null
-                val x = part.optDouble("x"); val y = part.optDouble("y"); val w = part.optDouble("width"); val h = part.optDouble("height")
-                if (!listOf(x,y,w,h).all { it.isFinite() } || w <= 0 || h <= 0) { return null }
-                val ids = part.optJSONArray("ids") ?: return null
-                for (i in 0 until ids.length()) frames[ids.getString(i)] = RectF((x*scale).toFloat(), (y*scale).toFloat(), ((x+w)*scale).toFloat(), ((y+h)*scale).toFloat())
-            }
-            if (frames.isEmpty() || frames.keys != snapshots.identifiers(token)) { return null }
-            return frames
-        }
         when (request.optString("action")) {
             "connect" -> {
                 if (!connected) { destination = (if (views().values.any { it.visibility == View.VISIBLE }) "native" else "none"); connected = true }
@@ -362,7 +346,7 @@ class NativeUIProjection(
                 val generation = ++coverGeneration
                 val selected = captured[token] ?: emptyMap(); val current = views()
                 val valid = visible && canCapture() && selected.isNotEmpty() && selected.all { (id, view) -> current[id] === view }
-                val frames = if (request.has("parts")) projectionFrames() else null
+                val frames = if (request.has("parts")) snapshots.projectionFrames(request, webView) else null
                 if (request.has("parts") && frames == null) { complete(JSONObject().put("shown", false)); return }
                 restoreAccepted = true
                 if (captureMode == CaptureMode.VIEW && valid) {
@@ -383,7 +367,7 @@ class NativeUIProjection(
                 coverGeneration++
                 restoreAccepted = false
                 if (suspended || !visible) { complete(JSONObject().put("shown", false)); return }
-                val frames = projectionFrames() ?: run { complete(JSONObject().put("shown", false)); return }
+                val frames = snapshots.projectionFrames(request, webView) ?: run { complete(JSONObject().put("shown", false)); return }
                 if (!applyPlacement()) return
                 prepareNativeReveal()
                 val current = views()

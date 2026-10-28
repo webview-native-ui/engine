@@ -27,6 +27,65 @@ public final class NativeUICoveredSnapshots {
     private var observer: SnapshotTouchObserver?
     private let directory = FileManager.default.temporaryDirectory.appendingPathComponent("native-ui-snapshots-\(UUID().uuidString)")
     public private(set) var coveringToken: String?
+    /// Dispatch the renderer's existing ordered image-handoff transport on the main thread.
+    /// The renderer supplies eligible native bounds and the complete views that may be hidden.
+    public func handle(_ request: [String: Any], in webView: UIView,
+                       frames: @escaping (Set<String>, Int) -> [String: CGRect],
+                       views: (Set<String>) -> [UIView]?, complete: @escaping ([String: Any]) -> Void) {
+        let token = request["token"] as? String ?? ""
+        switch request["action"] as? String {
+        case "prepare":
+            guard let ids = request["ids"] as? [String], !ids.isEmpty, !ids.contains(""), Set(ids).count == ids.count,
+                  let revision = request["revision"] as? Int,
+                  let width = request["viewportWidth"] as? Double, width.isFinite, width > 0 else { complete([:]); return }
+            let expected = Set(ids)
+            var initial: [String: CGRect]? = frames(expected, revision)
+            guard Set(initial!.keys) == expected else { complete([:]); return }
+            prepare(frames: {
+                let measured = initial ?? frames(expected, revision)
+                initial = nil
+                return Set(measured.keys) == expected ? measured : [:]
+            }, in: webView, viewportWidth: width, complete: complete)
+        case "cover":
+            let ids = identifiers(for: token)
+            let destination = request["parts"] == nil ? nil : projectionFrames(request, in: webView)
+            guard !ids.isEmpty, let selected = views(ids), !selected.isEmpty,
+                  request["parts"] == nil || destination != nil else { complete(["shown": false]); return }
+            var seen = Set<ObjectIdentifier>()
+            complete(["shown": cover(token, in: webView, views: selected.filter { seen.insert(ObjectIdentifier($0)).inserted },
+                                      transient: request["transient"] as? Bool == true, frames: destination)])
+        case "restore":
+            guard let destination = projectionFrames(request, in: webView) else { complete(["shown": false]); return }
+            complete(["shown": restore(in: webView, token: token, frames: destination)])
+        case "painted", "restored":
+            retireCopy(token, entry: request["action"] as? String == "painted")
+            complete([:])
+        case "release": release(token); complete([:])
+        case "reset": reset(); complete([:])
+        default: complete([:])
+        }
+    }
+
+    /// Convert Web viewport CSS pixels to native points, rejecting partial or malformed destinations.
+    func projectionFrames(_ request: [String: Any], in webView: UIView) -> [String: CGRect]? {
+        guard let token = request["token"] as? String,
+              let width = request["viewportWidth"] as? Double, width.isFinite, width > 0,
+              webView.bounds.width > 0, let parts = request["parts"] as? [[String: Any]], !parts.isEmpty else { return nil }
+        let scale = webView.bounds.width / width
+        var result: [String: CGRect] = [:]
+        for part in parts {
+            guard let ids = part["ids"] as? [String], !ids.isEmpty,
+                  let x = part["x"] as? Double, let y = part["y"] as? Double,
+                  let w = part["width"] as? Double, let h = part["height"] as? Double,
+                  [x, y, w, h, x * scale, y * scale, w * scale, h * scale].allSatisfy({ $0.isFinite }), w > 0, h > 0 else { return nil }
+            for id in ids {
+                guard !id.isEmpty, result[id] == nil else { return nil }
+                result[id] = CGRect(x: x * scale, y: y * scale, width: w * scale, height: h * scale)
+            }
+        }
+        return !result.isEmpty && Set(result.keys) == identifiers(for: token) ? result : nil
+    }
+
     public var covering: Bool { coveringToken != nil }
 
     public func observe(_ window: UIWindow, changed: @escaping (Bool) -> Void) {

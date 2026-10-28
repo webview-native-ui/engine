@@ -46,6 +46,81 @@ class NativeUISnapshots(private val directory: File) : AutoCloseable {
     val supported get() = Build.VERSION.SDK_INT >= 26
     private fun onMain() = check(Looper.myLooper() == Looper.getMainLooper())
     private fun origin(view: View): List<Int> = IntArray(2).also { view.getLocationInWindow(it) }.toList()
+    /** Dispatch an ordered image-handoff request. The renderer owns eligibility and native layout. */
+    fun handle(request: JSONObject, window: Window, webView: WebView,
+               frames: (Set<String>, Long) -> Map<String, RectF>, views: (Set<String>) -> List<View>?,
+               complete: (Result<JSONObject>) -> Unit) {
+        onMain()
+        val respond: (JSONObject) -> Unit = { complete(Result.success(it)) }
+        val token = request.optString("token")
+        when (request.optString("action")) {
+            "prepare" -> {
+                val raw = request.optJSONArray("ids")
+                val ids = raw?.let { array -> (0 until array.length()).map { array.opt(it) as? String ?: "" } } ?: emptyList()
+                val revision = request.optDouble("revision")
+                val width = request.optDouble("viewportWidth")
+                if (ids.isEmpty() || ids.any { it.isEmpty() } || ids.toSet().size != ids.size ||
+                    !revision.isFinite() || revision != request.optLong("revision").toDouble() || !width.isFinite() || width <= 0) {
+                    respond(JSONObject()); return
+                }
+                val expected = ids.toSet()
+                var initial: Map<String, RectF>? = frames(expected, request.getLong("revision"))
+                if (initial!!.keys != expected) { respond(JSONObject()); return }
+                prepare(window, webView, width, {
+                    val measured = initial ?: frames(expected, request.getLong("revision"))
+                    initial = null
+                    measured.takeIf { it.keys == expected } ?: emptyMap()
+                }, complete = respond)
+            }
+            "cover" -> {
+                val ids = identifiers(token)
+                val selected = if (ids.isEmpty()) null else views(ids)
+                val destination = if (request.has("parts")) projectionFrames(request, webView) else null
+                val shown = selected != null && selected.isNotEmpty() && (!request.has("parts") || destination != null) &&
+                    cover(token, window, webView, selected.distinct(), request.optBoolean("transient"), frames = destination)
+                respond(JSONObject().put("shown", shown))
+            }
+            "restore" -> {
+                val destination = projectionFrames(request, webView)
+                respond(JSONObject().put("shown", destination != null && restore(token, window, webView, destination)))
+            }
+            "painted", "restored" -> {
+                retireCopyAfterWebDraw(token, webView, entry = request.optString("action") == "painted") { ready ->
+                    if (ready) respond(JSONObject())
+                    else complete(Result.failure(IllegalStateException("Web image did not draw")))
+                }
+            }
+            "release" -> { release(token); respond(JSONObject()) }
+            "reset" -> { reset(); respond(JSONObject()) }
+            else -> respond(JSONObject())
+        }
+    }
+
+    /** CSS viewport coordinates to physical pixels; every captured ID must occur exactly once. */
+    internal fun projectionFrames(request: JSONObject, reference: View): Map<String, RectF>? {
+        val parts = request.optJSONArray("parts") ?: return null
+        val width = request.optDouble("viewportWidth")
+        if (!width.isFinite() || width <= 0 || reference.width <= 0 || parts.length() == 0) return null
+        val scale = reference.width / width
+        val result = linkedMapOf<String, RectF>()
+        for (index in 0 until parts.length()) {
+            val part = parts.optJSONObject(index) ?: return null
+            val x = part.optDouble("x"); val y = part.optDouble("y")
+            val w = part.optDouble("width"); val h = part.optDouble("height")
+            if (!listOf(x, y, w, h).all { it.isFinite() } || w <= 0 || h <= 0) return null
+            val frame = RectF((x * scale).toFloat(), (y * scale).toFloat(), ((x + w) * scale).toFloat(), ((y + h) * scale).toFloat())
+            if (!frame.valid()) return null
+            val ids = part.optJSONArray("ids") ?: return null
+            if (ids.length() == 0) return null
+            for (i in 0 until ids.length()) {
+                val id = ids.opt(i) as? String ?: return null
+                if (id.isEmpty() || result.containsKey(id)) return null
+                result[id] = frame
+            }
+        }
+        return result.takeIf { it.isNotEmpty() && it.keys == identifiers(request.optString("token")) }
+    }
+
     fun changed() { onMain(); generation++ }
     fun interaction(active: Boolean) { onMain(); touching = active; generation++ }
 
@@ -221,13 +296,16 @@ class NativeUISnapshots(private val directory: File) : AutoCloseable {
         } }, 500)
         return true
     }
-    fun retireCopyAfterWebDraw(token: String, webView: WebView, complete: (Boolean) -> Unit) {
+    fun retireCopyAfterWebDraw(token: String, webView: WebView, complete: (Boolean) -> Unit) =
+        retireCopyAfterWebDraw(token, webView, true, complete)
+
+    internal fun retireCopyAfterWebDraw(token: String, webView: WebView, entry: Boolean, complete: (Boolean) -> Unit) {
         onMain()
-        if (token in expiredEntries) { complete(false); return }
+        if (entry && token in expiredEntries) { complete(false); return }
         val expected = copy
-        if (expected == null || expected.token != token || !expected.entry) { complete(true); return }
+        if (expected == null || expected.token != token || expected.entry != entry) { complete(true); return }
         NativeUIWebReadiness.prepare(webView, { !closed && copy === expected }) { ready ->
-            if (!ready) { complete(token !in expiredEntries && copy !== expected); return@prepare }
+            if (!ready) { complete((!entry || token !in expiredEntries) && copy !== expected); return@prepare }
             val observer = webView.viewTreeObserver
             var done = false
             lateinit var listener: android.view.ViewTreeObserver.OnDrawListener
@@ -235,8 +313,8 @@ class NativeUISnapshots(private val directory: File) : AutoCloseable {
                 if (done) return
                 done = true
                 if (observer.isAlive) observer.removeOnDrawListener(listener)
-                if (success && copy === expected) retireCopy(token)
-                complete(token !in expiredEntries && (success || copy !== expected))
+                if (success && copy === expected) retireCopy(token, entry)
+                complete((!entry || token !in expiredEntries) && (success || copy !== expected))
             }
             listener = android.view.ViewTreeObserver.OnDrawListener { webView.post { finish(true) } }
             observer.addOnDrawListener(listener)

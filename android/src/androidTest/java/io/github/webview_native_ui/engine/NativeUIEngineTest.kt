@@ -32,6 +32,51 @@ class NativeUIEngineTest {
   assertTrue("Web fixture did not finish loading",ready)
   return activity
  }
+ @Test fun requestHandoffRejectsMalformedFramesAndUsesCurrentDestination() {
+  val activity=activity();lateinit var snapshots:NativeUISnapshots;lateinit var native:View
+  fun send(request:JSONObject):JSONObject {
+   val done=CountDownLatch(1);var result:Result<JSONObject>?=null
+   main { snapshots.handle(request,activity.window,activity.web,
+    frames={ids,revision -> if(ids==setOf("button") && revision==7L) mapOf("button" to RectF(20f,120f,180f,184f)) else emptyMap()},
+    views={ids -> if(ids==setOf("button")) listOf(native) else null}) {result=it;done.countDown()} }
+   assertTrue(done.await(10,TimeUnit.SECONDS));return result!!.getOrThrow()
+  }
+  try {
+   main {
+    native=View(activity);native.setBackgroundColor(Color.RED);activity.root.addView(native,FrameLayout.LayoutParams(160,64).apply{leftMargin=20;topMargin=120})
+    snapshots=NativeUISnapshots(File(activity.cacheDir,"protocol-${System.nanoTime()}"))
+   }
+   instrumentation.waitForIdleSync()
+   val capture=send(JSONObject().put("action","prepare").put("ids",org.json.JSONArray().put("button")).put("revision",7).put("viewportWidth",activity.web.width/2.0))
+   val token=capture.getString("token");val part=capture.getJSONArray("parts").getJSONObject(0)
+   part.put("y",part.getDouble("y")+30)
+   val request=JSONObject().put("action","cover").put("token",token).put("viewportWidth",activity.web.width/2.0).put("parts",org.json.JSONArray().put(part))
+   val invalid=JSONObject(request.toString()).put("parts",org.json.JSONArray().put(part).put(part))
+   assertFalse(send(invalid).getBoolean("shown"))
+   main {
+    assertEquals(View.VISIBLE,native.visibility)
+    assertEquals(168f,snapshots.projectionFrames(request,activity.web)!!.getValue("button").top,0.01f)
+   }
+   assertTrue(send(request).getBoolean("shown"))
+   main {
+    assertEquals(View.INVISIBLE,native.visibility)
+    val root=activity.window.decorView
+    val pixels=android.graphics.Bitmap.createBitmap(root.width,root.height,android.graphics.Bitmap.Config.ARGB_8888)
+    root.draw(android.graphics.Canvas(pixels))
+    val origin=IntArray(2);val rootOrigin=IntArray(2)
+    activity.web.getLocationInWindow(origin);root.getLocationInWindow(rootOrigin)
+    assertEquals("Entry image must be painted at its new destination",Color.RED,pixels.getPixel(origin[0]-rootOrigin[0]+100,origin[1]-rootOrigin[1]+220))
+    pixels.recycle()
+   }
+   send(JSONObject().put("action","painted").put("token",token))
+   assertTrue(send(JSONObject(request.toString()).put("action","restore")).getBoolean("shown"))
+   main {snapshots.restoreViews();assertEquals(View.VISIBLE,native.visibility)}
+   send(JSONObject().put("action","restored").put("token",token))
+   send(JSONObject().put("action","release").put("token",token))
+   assertFalse(send(request).getBoolean("shown"))
+   main {assertEquals(View.VISIBLE,native.visibility)}
+  } finally {main{snapshots.close();activity.finish()}}
+ }
  @Test fun cordovaNotificationsAndLifecycleDoNotReachUntrustedNavigation() {
   org.junit.Assume.assumeTrue(androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.DOCUMENT_START_SCRIPT))
   val activity=activity();var registration:NativeUIProjection?=null
@@ -171,7 +216,12 @@ class NativeUIEngineTest {
     assertEquals(View.VISIBLE,native.visibility)
     var completed=false
     snapshots.retireCopyAfterWebDraw(token,activity.web){assertFalse(it);completed=true}
-    assertTrue(completed);snapshots.close()
+    assertTrue(completed)
+    var rejected=false
+    snapshots.handle(JSONObject().put("action","painted").put("token",token),activity.window,activity.web,
+     frames={_,_->emptyMap()},views={listOf(native)}) {rejected=it.isFailure}
+    assertTrue("Expired paint must reject the bridge request so Web abandons its image",rejected)
+    snapshots.close()
    }
   } finally {main{activity.finish()}}
  }
