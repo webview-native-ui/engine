@@ -163,17 +163,15 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
   const pruneIdleImages = () => {
     const targets = new Set(latest?.candidates.map((candidate) => candidate.scope.element));
     for (const [target, pool] of imagePool) {
-      if (!stopped && target.isConnected && targets.has(target)) {
-        if (active || ending || handoffPending) continue;
-        const limit = 2 * Math.max(1, cached?.scopes.filter((scope) => scope.element === target).length ?? 0);
-        let spare = Math.max(0, limit - pool.filter((image) => leasedImages.has(image)).length);
-        const retained = pool.filter((image) => leasedImages.has(image) || spare-- > 0);
-        for (const image of pool) if (!retained.includes(image)) image.remove();
-        imagePool.set(target, retained);
-        continue;
-      }
-      const retained = pool.filter((image) => leasedImages.has(image));
-      for (const image of pool) if (!leasedImages.has(image)) image.remove();
+      const reusable = !stopped && target.isConnected && targets.has(target);
+      if (reusable && (active || ending || handoffPending)) continue;
+      const limit = reusable ? 2 * Math.max(1, cached?.scopes.filter((scope) => scope.element === target).length ?? 0) : 0;
+      let spare = Math.max(0, limit - pool.filter((image) => leasedImages.has(image)).length);
+      const retained = pool.filter((image) => {
+        if (leasedImages.has(image) || spare-- > 0) return true;
+        image.remove();
+        return false;
+      });
       if (retained.length) imagePool.set(target, retained);
       else imagePool.delete(target);
     }
@@ -502,12 +500,8 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
       owners.delete(source);
       visibleOwners.delete(source);
     });
-    for (const target of rendered) {
-      target.removeAttribute('data-native-ui-snapshot-source');
-      syncShadowContent(target);
-      target.toggleAttribute('data-native-ui-snapshot-visible', !!callbacks.opaqueUnderlay);
-    }
-    image.images.forEach((element) => element.style.setProperty('opacity', callbacks.opaqueUnderlay ? '1' : '0', 'important'));
+    rendered.forEach((target) => target.removeAttribute('data-native-ui-snapshot-source'));
+    showImages(image, !!callbacks.opaqueUnderlay);
     active = undefined;
     ending = false;
     win.clearTimeout(restoreTimeout);
@@ -529,6 +523,13 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
   };
   const targetsFor = (image: Prepared) => image.scopes.map((scope) => (validTarget(scope.element) ? scope.element : undefined));
   const rendered = new Set<HTMLElement>();
+  const showImages = (image: Prepared, visible: boolean) => {
+    for (const target of rendered) {
+      target.toggleAttribute('data-native-ui-snapshot-visible', visible);
+      syncShadowContent(target);
+    }
+    image.images.forEach((element) => element.style.setProperty('opacity', visible ? '1' : '0', 'important'));
+  };
   const preparedKeys = new Map<HTMLElement, string>();
   const offsets = new Map<HTMLImageElement, { target: HTMLElement; frame: Frame; scale?: { x: number; y: number } }>();
   const updateOffsets = () => {
@@ -582,14 +583,12 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
         if (!key || !target?.isConnected) continue;
         target.setAttribute(imageMarker, key);
         target.setAttribute('data-native-ui-snapshot-source', '');
-        target.toggleAttribute('data-native-ui-snapshot-visible', presented);
-        image.images[index].style.setProperty('opacity', presented ? '1' : '0', 'important');
-        syncShadowContent(target);
         next.add(target);
       }
       for (const target of rendered) if (!next.has(target)) clearTarget(target);
       rendered.clear();
       next.forEach((target) => rendered.add(target));
+      showImages(image, presented);
       return true;
     }
     imagePool.forEach((pool) =>
@@ -680,12 +679,8 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     image.sources.forEach((source) => {
       owners.add(source);
     });
-    rendered.forEach((target) => {
-      target.setAttribute('data-native-ui-snapshot-source', '');
-      target.toggleAttribute('data-native-ui-snapshot-visible', presented);
-      syncShadowContent(target);
-    });
-    image.images.forEach((element) => element.style.setProperty('opacity', presented ? '1' : '0', 'important'));
+    rendered.forEach((target) => target.setAttribute('data-native-ui-snapshot-source', ''));
+    showImages(image, presented);
     // Reconciliation may continue after one frame even if the optional bridge reply
     // is delayed. The ordered native transport processes cover before that update.
     paintFrame = win.requestAnimationFrame(() => {
@@ -855,9 +850,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     },
     consider,
     changed,
-    moved: () => {
-      updateOffsets();
-    },
+    moved: updateOffsets,
     get token() {
       return ending ? undefined : active?.data.token;
     },
