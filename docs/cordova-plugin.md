@@ -4,9 +4,33 @@ The same npm package, Swift library and Android AAR support Capacitor and Cordov
 
 The consuming plugin still owns its native view and the corresponding DOM, including placement, size and stacking order. Supply an existing selector such as `native-ad` or `#player`. The DOM may be added after initialization. Image preparation, scroll handling, overlays and restoration use the common Engine implementation.
 
+## What this integration gives you
+
+A native control can remain interactive during normal use, then yield its visual
+presentation to a prepared image when a Web overlay or unsupported motion needs
+the DOM layer. Once native placement is ready again, the Engine restores the live
+view. This avoids rebuilding capture, image readiness and restoration coordination
+inside each plugin. See [concepts and limits](concepts.md) before choosing a fallback
+for content that cannot be captured.
+
+The steps below connect three things: your native view, an existing DOM container
+at the intended Web layer, and notifications describing successful appearance or
+presentation changes. The Engine needs those notifications because a native API
+call alone does not tell it when your control's visible state has changed.
+
 ## Requirements
 
 The integration is verified with cordova-ios 8.1.1 and cordova-android 15.1.0 using their standard WebViews. The Engine itself requires iOS 15+ and Android API 23+; the Cordova host or SDK may require a higher minimum. Composited Android capture requires API 26+.
+
+## Choose the Web destination
+
+Provide a laid-out container such as `native-ad` or `#player` in the layer where
+the projected appearance should live. It may be inserted after registration, but
+must exist when projection starts. The native view's rectangle cannot identify
+its intended place in the DOM stacking tree. Check the
+[container support table](projection-containers.md) before choosing the selector.
+For Ionic applications, add [overlay support](ionic-overlays.md) once; other
+frameworks report their own transition lifecycle through notifications.
 
 ## Dependencies
 
@@ -176,7 +200,7 @@ The defaults support Cordova's `https://localhost` and `http://localhost`. If th
 
 Keep the registration for the WebView lifetime. Engine reconnects after a document reload and clears the old document's image state. If the plugin destroys its native UI in `onReset`, update its view provider and emit the appropriate destination; do not leave a registration pointing at a destroyed view. Dispose registrations when the plugin/WebView is destroyed.
 
-Capacitor registrations retain their existing default. The Cordova integration requires the standard Cordova WebView resource handler. Running a Cordova plugin inside a Capacitor app is not covered by this integration; the host must use the Capacitor integration instead. See the shared [DOM and native surface requirements](projection.md#dom-and-native-surface-requirements) for selector, layout and capture rules. [Ionic overlay support](projection.md#ionic-overlay-support-optional) remains optional; plain Cordova apps need not enable it.
+Capacitor registrations retain their existing default. The Cordova integration requires the standard Cordova WebView resource handler. Running a Cordova plugin inside a Capacitor app is not covered by this integration; the host must use the Capacitor integration instead. See the shared [DOM and native surface requirements](projection.md#dom-and-native-surface-requirements) for selector, layout and capture rules. [Ionic overlay support](ionic-overlays.md) remains optional; plain Cordova apps need not enable it.
 
 The integration fixture uses Cordova CLI 13, cordova-ios 8.1.1 and cordova-android 15.1.0 with their standard WebViews. It checks actual PNG handoff, native restoration and hidden-state retention across document reload, not merely JS bridge mocks. Older Cordova releases and custom WebView engines require separate verification.
 
@@ -197,6 +221,6 @@ on the native registration (Swift: `captureDelayMs: 600`; Kotlin: `captureDelayM
 This changes background image preparation, not overlay presentation timing.
 See [capture timing](projection.md#capture-timing) for the cache behavior and measured guidance.
 
-### Projection DOM
+## Integrating with DOM inspection
 
 The engine keeps a reusable image inside the fallback container, using its open ShadowRoot when available. No placement option is needed. If the renderer inspects child elements, exclude nodes marked `data-native-ui-projection-node`. See [DOM requirements](projection.md#dom-and-native-surface-requirements).

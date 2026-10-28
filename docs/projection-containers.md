@@ -10,7 +10,7 @@ Choose the existing DOM element that occupies the native surface's intended loca
 - `projectionSelector` uses document CSS selectors (ID, class, attribute or descendant). It must match exactly one element and does not enter Shadow DOM. A missing element can be created later; zero or multiple matches keep Native hidden.
 - The retained image is inserted in the element's open ShadowRoot, or as a light-DOM child otherwise. Closed shadow content must inherit the host's visibility and expose a slot that can display the image.
 - An overlay, collapsed item or inactive page is eligible only while it has a visible layout box. Do not force hidden configuration elements to render just to use them as destinations.
-- Host/ancestor clipping, opacity, transforms and filters still affect the image. The image is noninteractive and freezes the captured appearance. See [projection behavior](projection.md#dom-and-native-surface-requirements) for lifecycle, mutation-observer exclusions and native capture limits.
+- Host/ancestor clipping, opacity, transforms and filters still affect the image. The image is noninteractive and freezes the captured appearance. See the [projection reference](projection.md#dom-and-native-surface-requirements) for native capture limits and the [renderer guide](renderer-guide.md#low-level-web-projection) for DOM mutation-observer exclusions.
 
 ## HTML containers
 

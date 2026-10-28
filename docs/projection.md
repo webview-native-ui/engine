@@ -1,18 +1,20 @@
-# Projection behavior and advanced integration
+# Projection reference
 
-Start with the [Capacitor](capacitor-plugin.md) or [Cordova](cordova-plugin.md) guide. This reference explains shared DOM requirements, destination rules and the lower-level APIs for existing renderers.
+Use this reference to check integration contracts and platform limits. Start with
+[concepts and integration choices](concepts.md) to decide whether the Engine fits
+your UI, then follow the [Capacitor](capacitor-plugin.md),
+[Cordova](cordova-plugin.md) or [renderer](renderer-guide.md) guide.
 
-## Ownership
-
-| Engine                                                              | Consuming plugin                                                     |
-| ------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| DOM measurement, image geometry and supported native scroll binding | Creating, attaching, positioning and sizing native views             |
-| Startup, event subscriptions and native draw acknowledgements       | Providing the fallback DOM at the correct layer                      |
-| Prepared image cache, decoding, display and retirement              | Reporting appearance changes and the intended projection destination |
-| Native capture and temporary return images                          | Providing native views and SDK capture eligibility                   |
-| Image invalidation, token cleanup and observer teardown             | Owning business actions and the interactive Web fallback             |
-
-A DOM slot does not necessarily contain a Web replacement: a UI plugin can restore a button, while an ad plugin may hide its slot. Image handoff is explicit and noninteractive. The engine never forwards clicks through an image or replaces SDK click/impression handling.
+| Question                                                | Reference                                                                                  |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| What survives DOM replacement or page navigation?       | [DOM and page lifetime](#dom-and-page-lifetime)                                            |
+| When can native content or its image be shown?          | [Projection contract](#projection-contract)                                                |
+| Which DOM hosts and native views are eligible?          | [DOM and native surface requirements](#dom-and-native-surface-requirements)                |
+| How does a custom renderer implement the bridge?        | [Native handoff](#native-handoff-on-both-platforms)                                        |
+| Where do images live, and which permissions are needed? | [Temporary storage](#temporary-storage-and-application-permissions)                        |
+| What movement can remain native?                        | [Native scroll tracking](#native-scroll-tracking)                                          |
+| What differs on Android?                                | [Android library](#android-library)                                                        |
+| When is an image captured, and how accurate is it?      | [Capture timing](#capture-timing) and [iOS color precision](#image-color-precision-on-ios) |
 
 ## DOM and page lifetime
 
@@ -57,7 +59,7 @@ The Engine owns image readiness and restoration acknowledgement. It must not hid
 
 Registration and notification forwarding retain the latest intent across startup and reconnection; they do not replay business events. Destruction retires the registration and its cached images. Notifications are intent, not completion promises: an API that promises completed hiding must await the explicit retirement acknowledgement described under DOM and native surface requirements.
 
-An existing renderer that checks CSS visibility can call `getUnprojectedVisibility(element)` from the npm package. It reads current authored/inherited visibility without the Engine's hiding rules, and restores projection ownership before returning. Do not use Engine marker attributes to infer projection ownership or mutate them in a consuming plugin. Excluding Engine-owned DOM mutations from renderer invalidation is described below. This helper performs a style read and can trigger attribute observers; it does not eliminate measurement or transport costs.
+An existing renderer that checks CSS visibility can call `getUnprojectedVisibility(element)` from the npm package. It reads current authored/inherited visibility without the Engine's hiding rules, and restores projection ownership before returning. Do not use Engine marker attributes to infer projection ownership or mutate them in a consuming plugin. See [renderer DOM integration](renderer-guide.md#low-level-web-projection) for excluding Engine-owned mutations from renderer invalidation. This helper performs a style read and can trigger attribute observers; it does not eliminate measurement or transport costs.
 
 ## DOM and native surface requirements
 
@@ -139,117 +141,7 @@ Scrolling is internal: iOS uses a uniquely matched native scroll binding when av
 
 By default, the internal channel is limited to the main frame on Capacitor's localhost origins. Pass the application's exact `allowedOrigins` for a different configured origin. Android requires WebView's `WEB_MESSAGE_LISTENER` and `DOCUMENT_START_SCRIPT` features; registration fails explicitly on unsupported WebView implementations. Do not use wildcard origins for remotely navigable WebViews.
 
-## Ionic overlay support (optional)
-
-For an Ionic application, call this once during application startup. When calling it directly from the application, install `@webview-native-ui/engine` as a direct application dependency:
-
-```ts
-import { enableSupportIonicOverlays } from '@webview-native-ui/engine/ionic';
-
-enableSupportIonicOverlays();
-```
-
-Plugin maintainers can include this snippet in their application setup instructions, or call it inside an existing JS initializer. `@rdlabo/capacitor-native-ui` already calls the same initializer internally; its users need no additional call. Non-Ionic applications omit it. Native registration alone does not install Ionic event listeners.
-
-One monitor is shared per document, including between the npm module and the runtime injected by Swift/Android. Repeated initialization does not add listeners or erase explicit configuration. Destroying one projection removes only its subscription; it does not stop the monitor used by other plugins. The monitor lives with the document.
-
-The default covers Modal, Popover, Alert, Action Sheet, Loading, Picker, Toast and Menu lifecycle events. It compares each projection's DOM with the active overlay stack: content inside the front modal stays native, while covered content temporarily uses its prepared image. Toasts and inactive sheet backdrops do not cover a surface. Nested overlays keep it covered until the remaining stack permits restoration. Missing images retain the normal Web fallback. This temporary coverage never overwrites a plugin's explicit `web` or `none` destination. Projections registered later read the current state.
-
-Native Popover ownership is supplied by the Native UI vertical-bars renderer. The shared monitor does not treat its source DOM as a covering Web overlay. If native presentation fails, the renderer releases ownership and normal DOM coverage resumes.
-
-Optional settings are document-wide:
-
-```ts
-enableSupportIonicOverlays({
-  exclude: '[data-nonblocking-overlay]',
-  additional: [
-    {
-      selector: 'app-dialog',
-      events: {
-        willPresent: 'appDialogWillPresent',
-        didDismiss: 'appDialogDidDismiss',
-      },
-    },
-  ],
-});
-```
-
-Use `covers(overlay, target)` only when a registered DOM projection needs a custom coverage rule; return `undefined` for the default, or a boolean to override it. Exclusions and explicit native-window ownership take precedence. The standard relationship uses overlay order, DOM containment and backdrop state, rather than attempting to interpret arbitrary CSS stacking contexts. Configure unusual layouts explicitly.
-
-## Low-level Web projection
-
-A scope binds one existing Web fallback element for its lifetime. Obtain that element from your plugin's DOM; the engine does not create a replacement host or choose a page, stacking order or z-index. A different fallback element requires a new scope. Its Document is derived from `element.ownerDocument`.
-
-```ts
-import { createWebProjectionScope, createWebProjection } from '@webview-native-ui/engine';
-
-const fallback = container.querySelector<HTMLElement>('[data-web-fallback]');
-if (!fallback) throw new Error('Web fallback is missing');
-const scope = createWebProjectionScope(fallback, 'my-plugin');
-const projection = await createWebProjection(
-  scope,
-  {
-    send: (request) => plugin.snapshot(request),
-    listen: (listener) => plugin.addListener('snapshotInteraction', listener),
-  },
-  {
-    wake: () => schedulePluginUpdate(),
-    blocked: () => overlayIsActive(),
-    revision: () => lastSentRevision,
-  },
-);
-```
-
-The container, bridge and update callbacks above belong to the consuming plugin. No `document`, `target`, `layer`, CSS selector or layer resolver is passed to the projection manager.
-
-1. After an accepted native update, call `projection.consider(revision, sources)`. Sources associate the native IDs and viewport frames with their source DOM; they need not be inside the fallback element. Images are captured and decoded in advance.
-2. Call `projection.changed()` for appearance changes, or `projection.changed(scrollElement)` to invalidate scroll geometry. Layout updates go through `consider`; use `invalidate()` for other geometry changes.
-3. Before covering Native with a Web overlay, call `projection.begin()`. It displays already prepared pixels at the fixed fallback. No new capture or decode starts here. If capture is unavailable, the plugin keeps its ordinary Web fallback.
-4. Exclude `projection.owners` from normal Native updates while the image owns those sources. `visibleOwners` keeps their return pixels while Native is being restored; `preparedOwners` identifies sources with prepared images. These arrays are read-only snapshots.
-5. Call `projection.end()`, send the normal native update, then call `projection.updated(snapshotToken, acceptedIDs, revision)`. A newer acknowledgement containing all captured IDs retires the image.
-6. Call `projection.destroy()` when disposing the surface. It releases only its own images and listener; the plugin owns final Native reset and its DOM.
-
-The engine prepares a noninteractive `img` inside the fallback container (directly inside its open ShadowRoot when present) while Native is visible. It reuses the decoded image and DOM node across handoffs, and releases them when the scope is retired or destroyed. The image is `inert`, hidden from accessibility and excluded from hit testing. The existing fallback and its children are never cloned, replaced, removed or assigned `inert`/`aria-hidden`; their listeners, values and application changes survive projection. Both `::before` and `::after` remain available to the application.
-
-Supply an existing container such as `div`, `button` or a custom element. Replaced/void elements such as `img`, `input` and `video` remain unsupported as scopes; use their existing fallback container. The renderer may move the same container between parents, but must not replace a low-level scope's element or let two managers control it simultaneously. Notify the manager through `moved()` when changing its placement during projection.
-
-The image is absolutely positioned within the fallback, which retains its layout box. As with the previous pseudo-element presentation, static hosts become positioned while the image is visible. Host and ancestor clipping, transforms and filters still apply. Open ShadowRoot insertion bypasses internal slot wrappers, not the host's own clipping. Closed shadow roots cannot be inspected; provide a fallback container that can render the image.
-
-Engine-owned nodes carry `data-native-ui-projection-node` for their entire pooled lifetime. Renderers that inspect fallback children must exclude these nodes from application content discovery. A renderer that uses a MutationObserver to invalidate captures must also ignore insertion/removal and attribute changes of these nodes, changes inside them, and Engine-owned `data-native-ui-snapshot-*` attributes. Continue observing authored content, dimensions and disabled-state changes; ignoring all mutations on a projection host would hide real updates. Otherwise image preparation can invalidate itself and cause repeated capture/release cycles. The engine removes only its own nodes on disposal. Child insertion can affect structural selectors within the fallback, but does not add items alongside it in flex, grid or virtual lists.
-
-### Notifications from the existing plugin
-
-The low-level manager can subscribe to the existing plugin's events through `options.events`:
-
-```ts
-events: {
-  addListener: (name, listener) => plugin.addListener(name, listener),
-  update: ['setColors', 'setTabs', 'tabSelected'],
-  projection: {
-    native: ['shown'],
-    web: ['transitionStarted'],
-    none: ['hidden'],
-  },
-}
-```
-
-These are **notifications**, not intercepted method names. The plugin emits update events after its native changes succeed. A Web projection event must arrive before movement starts; it uses the previously prepared image. A native event requests restoration, but the image remains until the normal renderer acknowledgement confirms that Native is ready. A hidden event follows the plugin's native hide operation and retires the image; it does not invoke `hide()` or change application-owned fallback DOM. Appearance updates preserve the requested destination, including `none`.
-
-For plugins with several surfaces, provide `accepts(event)` to select this scope's stable surface identity. Events shared by `update` and a destination are subscribed once and processed together. Conflicting destinations for the same event are rejected before subscription. Destroying the manager removes all its subscriptions, including registrations that resolve late after initialization fails. No public plugin methods are wrapped or replayed.
-
-The manager converts private native file URLs with Capacitor internally. Plugin authors do not supply a URL resolver.
-
-This section describes the lower-level manager for renderers that already own batch reconciliation, such as the Ionic adapter. Prefer the native registration in the plugin guides for a new integration; it owns startup, measurements and draw acknowledgements.
-
-### Multiple fallbacks in one Native transaction
-
-Use `createWebProjectionBatch(transport, options)` when several fallback elements must switch together. It uses the same image engine, one listener and one capture/cover/restore token. Pass `{ scope, element, control, ... }` for each entry to `batch.consider(revision, sources)`. Several native IDs may share one scope, such as a button group.
-
-The batch derives its Document from the first nonempty `consider`; all subsequent scopes and sources must belong to that Document. Before this first update, `begin()` does nothing and `destroy()` is safe. A changed fallback requires a new scope. Scope identity participates in cache invalidation; an active presentation retains its captured scopes until restoration finishes.
-
-`WebProjectionRequest` is an action-discriminated union. `prepare` requires `revision`, `viewportWidth` and `ids`; `cover` requires `token` and includes `viewportWidth` and destination `parts` for transient movement; `restore` requires `token`, `viewportWidth` and destination `parts`; `painted`, `restored` and `release` require `token`; `reset` takes no payload. Empty preparation results and `{ shown: false }` mean the plugin should use its normal Web fallback. Use the plugin's existing ordered bridge; the engine does not retry user actions.
-
-### Native handoff on both platforms
+## Native handoff on both platforms
 
 Call all view and snapshot lifecycle APIs on the main/UI thread. Native input frames use **points relative to the WebView on iOS** and **physical pixels relative to the reference view on Android**. `viewportWidth` is the Web viewport width in CSS pixels. Prepared parts sent to JavaScript are converted to CSS pixels.
 
@@ -287,7 +179,7 @@ The image transport accepts `WebProjectionRequest` and returns prepared token/pa
 
 Use `NativeUICoveredSnapshots.observe` to notify the JS listener when interaction starts/ends. On iOS, captures rasterize the visible window with `drawHierarchy(in:afterScreenUpdates:)`, including the background under the clipped native component. Screen snapshot views are display replicas and are not used as bitmap sources. UIKit rasterization can differ from the live compositor for materials such as Liquid Glass; validate the appearance on physical devices with the backgrounds your plugin supports. Cache validity therefore includes layout and the plugin's visual-change notifications. The engine does not capture continuously or guarantee every possible renderer can be captured.
 
-### Temporary storage and application permissions
+## Temporary storage and application permissions
 
 Prepared images stay in the app's private temporary storage. iOS uses `FileManager.default.temporaryDirectory`. On Android, construct `NativeUISnapshots` with a directory inside `context.cacheDir`; do not use shared or external storage. Neither platform needs a photo-library or storage permission prompt for this path. No Capacitor Filesystem plugin is required. See [Apple's sandbox directories](https://developer.apple.com/library/archive/documentation/FileManagement/Conceptual/FileSystemProgrammingGuide/FileSystemOverview/FileSystemOverview.html) and [Android's app-specific storage](https://developer.android.com/training/data-storage/app-specific).
 
@@ -393,96 +285,3 @@ This reduces color loss in wide-gamut content but does not guarantee identical L
 Glass appearance: native compositing and conversion to integer PNG can still change
 pixels. Higher precision also increases capture memory and image size. The existing
 fallback policy applies if preparation fails. Android retains its platform capture path.
-
-## Managing renderer surfaces
-
-### Why a renderer needs a surface
-
-A Web modal should visually cover the Native controls behind it. However, those
-controls live above the WebView: raising the modal's CSS `z-index` cannot place it
-above them. Hiding the Native controls can reveal a visibly different Web fallback;
-showing them again before their position is ready can make them jump.
-
-`createWebProjectionSurface` lets a renderer treat related Native controls as one
-handoff unit. It prepares their images in their corresponding DOM containers before
-the handoff, so a Web overlay can cover those representations in the intended DOM
-layer. On return, it keeps the images until the renderer acknowledges that Native is
-ready. If a usable image is unavailable, the existing Web fallback remains available.
-This preserves visual continuity within the platform's capture limitations; it does
-not eliminate the capture differences described above.
-
-A **surface** is a group of controls that share a handoff lifecycle, such as a page
-or a modal. It is not necessarily one Native view or one image, and it does not
-create a modal or choose the application's stacking order.
-
-For example, Native UI uses separate surfaces for a background page and each modal:
-
-| Surface         | Native content              | When a Web image is useful                                                 |
-| --------------- | --------------------------- | -------------------------------------------------------------------------- |
-| Background page | Toolbar buttons and tab bar | A Web modal or popover must cover the page's controls.                     |
-| Modal           | Close and confirm buttons   | The modal moves during a drag, or another Web overlay covers its controls. |
-
-When a modal opens, the background surface can switch to its prepared images while
-the modal's own controls remain Native when appropriate. Closing the modal requests
-restoration of the background controls at their current positions; their images are
-removed after the accepted Native update. Separate surfaces prevent a departing
-modal's images or late replies from taking ownership of the newly exposed page.
-
-This API is useful when a renderer already batches multiple Native controls and
-knows which page or overlay owns them. It removes the need to implement DOM scope
-caching, temporary proxy placement, image handoff cleanup and restoration ordering
-in that renderer. `createWebProjectionSurfaces` manages those surfaces together,
-including asynchronous creation/disposal and shared appearance monitoring.
-
-For a single ad view or tab bar that fits the existing `NativeUIProjection`
-registration, use the [Capacitor](capacitor-plugin.md) or [Cordova](cordova-plugin.md)
-guide instead. Neither a Web modal nor a single Native view, by itself, requires
-this lower-level API. The renderer still reports framework lifecycle decisions;
-the Engine does not automatically discover when every kind of modal opens or closes.
-
-### Register and update renderer surfaces
-
-Register the mapping from Native control sources to their existing Web fallback
-containers with `createWebProjectionSurface`:
-
-```ts
-const surfaces = createWebProjectionSurfaces<HTMLElement, WebProjectionSurface>();
-const projection = await surfaces.ensure(page, () =>
-  createWebProjectionSurface(transport, {
-    namespace: 'my-renderer',
-    target: (source) => source.element,
-    wake: scheduleUpdate,
-    blocked: () => transitionIsActive,
-  }),
-);
-surfaces.consider(acceptedRevision, sources);
-projection?.begin(); // The framework reports a covering layer or motion.
-projection?.end(); // Requests restoration; keeps the image until Native is ready.
-surfaces.updated(token, restoredIDs, acceptedRevision);
-await surfaces.delete(page);
-await surfaces.destroy();
-```
-
-The renderer supplies Native IDs and frames, source ownership, placement policy and
-accepted update acknowledgements. Framework lifecycle events remain outside the
-Engine; it does not infer modal semantics from arbitrary DOM mutations.
-
-For renderer-owned fallback proxies, `canRelocate(target)` explicitly permits
-`begin(layer)` to place those hosts in a supplied overlay layer. The Engine restores
-their parent and sibling order after restoration, failure or disposal. Application
-DOM is not relocated by default, and an application reparenting a proxy takes
-precedence over restoring its old location.
-
-A collection shares appearance, resize, orientation and document visibility
-listeners across its surfaces, and ignores Engine-owned image events. Renderers can
-exclude their own proxy events with `ignoreTarget`. `followMotion(moving, target)`
-uses the renderer's existing moving-element map to rebase images only while their
-own hosts animate; ancestor transforms already move the images without polling.
-All listeners and scheduled frames are removed at disposal.
-
-Repeated `ensure` calls share pending creation or the existing projection. Deletion,
-DOM disconnection or renderer disposal prevents a late result from becoming active;
-the Engine destroys it instead. A failed creation may be retried. The renderer
-signals page retirement through its existing lifecycle and can inspect `keys()`
-and `values()` during its normal update pass. The collection does not install a
-second DOM mutation observer or a continuous polling loop.
