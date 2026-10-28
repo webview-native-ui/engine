@@ -41,12 +41,16 @@ modal's images or late replies from taking ownership of the newly exposed page.
 Connect each phase to the corresponding event in your renderer. These snippets
 show separate lifecycle points, not calls to execute together during initialization.
 The renderer supplies `transport`, source IDs and frames, accepted revisions and
-its existing update scheduler.
+its existing update scheduler. In this example, `ownerOf(element)` is the
+renderer's existing lookup of the page or modal that owns a control.
 
 ### Create a surface when its owner becomes available
 
 Map native control sources to existing fallback containers. The collection reuses
-the surface for repeated updates to the same owner:
+the surface for repeated updates to the same owner. The owner passed to `ensure`
+is a lifecycle key, not a source filter: `surfaces.consider` broadcasts the batch
+to every surface. Each surface uses `eligible` to select only its own controls;
+two surfaces must not manage the same fallback container:
 
 ```ts
 import { createWebProjectionSurface, createWebProjectionSurfaces, type WebProjectionSurface } from '@webview-native-ui/engine';
@@ -56,6 +60,7 @@ const projection = await surfaces.ensure(page, () =>
   createWebProjectionSurface(transport, {
     namespace: 'my-renderer',
     target: (source) => source.element,
+    eligible: (source) => ownerOf(source.element) === page,
     wake: scheduleUpdate,
     blocked: () => transitionIsActive,
   }),
@@ -66,7 +71,10 @@ const projection = await surfaces.ensure(page, () =>
 
 An accepted native update provides the appearance to prepare. Beginning a handoff
 uses that prepared image; ending one requests restoration rather than immediately
-removing it. Retire the image only after the normal native update is acknowledged.
+removing it. While a surface owns the image, exclude its `owners` from ordinary
+native rendering so live controls do not appear above the covering Web layer.
+Use `visibleOwners` for return-image ownership while restoring. Retire the image
+only after the normal native update is acknowledged.
 
 ```ts
 // After accepting an ordinary native update:
@@ -198,7 +206,7 @@ These are **notifications**, not intercepted method names. The plugin emits upda
 
 For plugins with several surfaces, provide `accepts(event)` to select this scope's stable surface identity. Events shared by `update` and a destination are subscribed once and processed together. Conflicting destinations for the same event are rejected before subscription. Destroying the manager removes all its subscriptions, including registrations that resolve late after initialization fails. No public plugin methods are wrapped or replayed.
 
-The manager converts private native file URLs with Capacitor internally. Plugin authors do not supply a URL resolver.
+The manager uses the host runtime's resource URL conversion internally (Capacitor or Cordova). Plugin authors do not supply a URL resolver.
 
 This section describes the lower-level manager for renderers that already own batch reconciliation, rather than a single native-view registration. Prefer the native registration in the plugin guides for a new integration; it owns startup, measurements and draw acknowledgements.
 

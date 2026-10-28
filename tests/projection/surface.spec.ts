@@ -59,7 +59,7 @@ for (const completion of ['ack', 'rejected'] as const) {
 }
 
 test('surface group owns shared invalidation and ignores its image events until teardown', async ({ page }) => {
-  await page.setContent('<main></main><section></section><img data-native-ui-projection-node>');
+  await page.setContent('<main></main><section></section><img data-native-ui-projection-node><img id=content>');
   await page.addScriptTag({ content: bundle });
   expect(
     await page.evaluate(async () => {
@@ -76,14 +76,23 @@ test('surface group owns shared invalidation and ignores its image events until 
           },
           async destroy() {},
         }));
-      document.querySelector('img')!.dispatchEvent(new Event('load', { bubbles: true }));
+      const load = (selector: string) =>
+        new Promise<void>((resolve, reject) => {
+          const image = document.querySelector<HTMLImageElement>(selector)!;
+          image.onload = () => resolve();
+          image.onerror = () => reject(new Error('Image failed to load'));
+          image.src = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg"/>');
+        });
+      await load('[data-native-ui-projection-node]');
       const ownImageChanges = changes;
+      await load('#content');
+      const contentChanges = changes;
       document.querySelector('main')!.dispatchEvent(new Event('transitionend', { bubbles: true }));
       window.dispatchEvent(new Event('resize'));
       await group.destroy();
       document.querySelector('main')!.dispatchEvent(new Event('transitionend', { bubbles: true }));
       window.dispatchEvent(new Event('resize'));
-      return { ownImageChanges, changes, invalidations };
+      return { ownImageChanges, contentChanges, changes, invalidations };
     }),
-  ).toEqual({ ownImageChanges: 0, changes: 2, invalidations: 2 });
+  ).toEqual({ ownImageChanges: 0, contentChanges: 2, changes: 4, invalidations: 2 });
 });

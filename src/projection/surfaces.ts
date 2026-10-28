@@ -38,7 +38,7 @@ export const createWebProjectionSurfaces = <Owner extends Node, Surface extends 
       changed();
     };
     for (const name of ['load', 'transitionrun', 'transitionend', 'transitioncancel', 'animationstart', 'animationend', 'animationcancel'])
-      doc.addEventListener(name, appearance, subscription);
+      doc.addEventListener(name, appearance, { ...subscription, capture: name === 'load' });
   };
   const followMotion = (moving: ReadonlyMap<HTMLElement, unknown>, target: (source: HTMLElement) => HTMLElement = (source) => source) => {
     if (motionFrame || stopped || !moving.size || !doc?.defaultView) return;
