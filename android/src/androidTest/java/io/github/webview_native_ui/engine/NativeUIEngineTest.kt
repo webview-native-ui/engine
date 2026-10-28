@@ -498,6 +498,7 @@ class NativeUIEngineTest {
  @Test fun invalidatedOpaqueImageAppliesPendingPlacementBeforeRelease() = nativeInitialization(NativeUIProjection.CaptureMode.VIEW, releaseWhileActive = true)
  @Test fun pressedWindowBlocksCaptureAcrossFirstConnection() = nativeInitialization(NativeUIProjection.CaptureMode.VIEW, pressOnConnect = true)
  @Test fun explicitPlacementIsNotOverwrittenByOlderImageFrame() = nativeInitialization(NativeUIProjection.CaptureMode.VIEW, authoritativePlacement = true)
+
  private fun nativeInitialization(mode: NativeUIProjection.CaptureMode, delayCover:Boolean = false, releaseWhileActive:Boolean = false, pressOnConnect:Boolean = false, authoritativePlacement:Boolean = false) {
 
   val activity=activity(); lateinit var registration:NativeUIProjection; lateinit var native:View
@@ -605,8 +606,9 @@ class NativeUIEngineTest {
    js("testEvents.shown({})")
    }
    waitFor("document.querySelector('#slot')?.hasAttribute('data-native-ui-snapshot')===true")
+   waitFor("document.querySelector('#slot > img[data-native-ui-projection-image]')!==null")
    if(!delayCover) {
-   val before=js("getComputedStyle(document.querySelector('#slot'),'::before').backgroundImage")
+   val before=js("document.querySelector('img[data-native-ui-projection-image]')?.src")
    fun touch(action:Int) { main {
     native.isClickable=true
     val location=IntArray(2);native.getLocationInWindow(location)
@@ -618,9 +620,9 @@ class NativeUIEngineTest {
    main{native.setBackgroundColor(Color.GREEN)}
    js("testEvents.updated({})")
    Thread.sleep(500)
-   assertEquals(before,js("getComputedStyle(document.querySelector('#slot'),'::before').backgroundImage"))
+   assertEquals(before,js("document.querySelector('img[data-native-ui-projection-image]')?.src"))
    touch(android.view.MotionEvent.ACTION_CANCEL)
-   waitFor("getComputedStyle(document.querySelector('#slot'),'::before').backgroundImage!==$before")
+   waitFor("document.querySelector('img[data-native-ui-projection-image]')?.src!==$before")
    }
    if(delayCover) {
     js("testEvents.moving({})")
@@ -661,7 +663,7 @@ class NativeUIEngineTest {
     val cssWidth=js("innerWidth").toFloat()
     main{
      assertEquals(View.VISIBLE,native.visibility)
-     if(mode==NativeUIProjection.CaptureMode.COMPOSITED) assertEquals((20+iteration*20)*activity.web.width/cssWidth,native.translationY,0.01f)
+     if(mode==NativeUIProjection.CaptureMode.COMPOSITED) assertEquals((20+iteration*20)*activity.web.width/cssWidth,native.translationY,0.05f) // CSS layout quantization stays below 0.05 physical px.
      else {
       val location=IntArray(2);val origin=IntArray(2);native.getLocationInWindow(location);activity.web.getLocationInWindow(origin)
       assertEquals((120+iteration*20+(if(authoritativePlacement)20 else 0))*activity.web.width/cssWidth,(location[1]-origin[1]).toFloat(),1f)

@@ -1,14 +1,27 @@
 /** Image presentation only; Native/Web ownership styling stays with the renderer. */
+const hidden = ':is([data-native-ui-snapshot-source], [data-native-ui-snapshot-prepared], [data-native-ui-snapshot-content])';
+
 export const snapshotStyles = `
-:is([data-native-ui-snapshot-source], [data-native-ui-snapshot-prepared]),
-:is([data-native-ui-snapshot-source], [data-native-ui-snapshot-prepared]) *,
-:is([data-native-ui-snapshot-source], [data-native-ui-snapshot-prepared])::after,
-:is([data-native-ui-snapshot-source], [data-native-ui-snapshot-prepared])::part(native) { visibility: hidden !important; }
-[data-native-ui-snapshot][data-native-ui-snapshot]::before {
- all:initial!important;content:""!important;display:block!important;position:absolute!important;
- visibility:visible!important;opacity:0!important;will-change:opacity!important;
- pointer-events:none!important;image-rendering:pixelated!important;
+@layer native-ui-projection {
+${hidden}, ${hidden} *, ${hidden}::part(native) { visibility: hidden !important; }
+${hidden}::before, ${hidden}::after,
+${hidden} *::before, ${hidden} *::after {
+  visibility: hidden !important;
+}
 }
 [data-native-ui-snapshot-visible] { opacity:1!important;overflow:visible!important; }
-[data-native-ui-snapshot-visible][data-native-ui-snapshot][data-native-ui-snapshot]::before { opacity:1!important; }
+[data-native-ui-snapshot-visible][data-native-ui-snapshot-positioned] { position:relative!important; }
+`;
+
+export const snapshotShadowStyles = `
+@layer native-ui-projection {
+:host([data-native-ui-snapshot-content]),
+:host([data-native-ui-snapshot-content])::before,
+:host([data-native-ui-snapshot-content])::after,
+:host([data-native-ui-snapshot-content]) *,
+:host([data-native-ui-snapshot-content]) *::before,
+:host([data-native-ui-snapshot-content]) *::after {
+  visibility: hidden !important;
+}
+}
 `;

@@ -7,7 +7,7 @@ export const createWebProjectionScope = (element: HTMLElement, namespace: string
       'img, input, textarea, select, video, audio, canvas, iframe, embed, object, br, hr, area, base, link, meta, source, track, wbr',
     )
   )
-    throw new TypeError('A Web projection fallback must support ::before; use its existing container element');
+    throw new TypeError('A Web projection fallback must be a container element; use the existing fallback container');
   return Object.freeze({ element, namespace });
 };
 export type WebProjectionScope = ReturnType<typeof createWebProjectionScope>;

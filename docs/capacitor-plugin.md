@@ -277,3 +277,7 @@ If your control continues animating after its update notification, set `captureD
 on the native registration (Swift: `captureDelayMs: 600`; Kotlin: `captureDelayMs = 600`).
 This changes background image preparation, not overlay presentation timing.
 See [capture timing](projection.md#capture-timing) for the cache behavior and measured guidance.
+
+### Projection DOM
+
+The engine keeps a reusable image inside the fallback container, using its open ShadowRoot when available. No placement option is needed. If the renderer inspects child elements, exclude nodes marked `data-native-ui-projection-node`. See [DOM requirements](projection.md#dom-and-native-surface-requirements).

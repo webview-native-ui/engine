@@ -103,6 +103,7 @@ final class NativeUIProjectionTests: XCTestCase {
         web.load(URLRequest(url: URL(string: "capacitor://localhost/fixture")!))
         for _ in 0..<3 {
             try await wait(web, "document.querySelector('#slot')?.hasAttribute('data-native-ui-snapshot') === true", timeout: 30)
+            try await wait(web, "document.querySelector('#slot > img[data-native-ui-projection-image]') !== null")
             XCTAssertFalse(button.isHidden)
             _ = try await web.evaluateJavaScript("testEvents.moving({})")
             try await wait(web, "document.querySelector('#slot').hasAttribute('data-native-ui-snapshot-visible')")
