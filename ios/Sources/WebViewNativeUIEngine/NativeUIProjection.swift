@@ -30,7 +30,18 @@ public final class NativeUIProjection: NSObject, WKScriptMessageHandler {
     private let views: () -> [String: UIView]
     private let snapshots: NativeUICoveredSnapshots
     private let scrolling = NativeUIScrollBindings()
-    private var masks: [String: CAShapeLayer] = [:]
+    private struct ScrollMask {
+        weak var view: UIView?
+        let layer: CAShapeLayer
+    }
+    private var masks: [String: ScrollMask] = [:]
+    private func resetScrolling() {
+        scrolling.reset()
+        for mask in masks.values where mask.view?.layer.mask === mask.layer {
+            mask.view?.layer.mask = nil
+        }
+        masks.removeAll()
+    }
     private let id = "nativeUI" + UUID().uuidString.replacingOccurrences(of: "-", with: "")
     private let origins: Set<String>
     private let allowedOriginsJSON: String
@@ -145,7 +156,7 @@ public final class NativeUIProjection: NSObject, WKScriptMessageHandler {
               let key = message["key"] as? String, key.hasPrefix(id + ":"),
               let request = message["request"] as? [String: Any] else { return }
         let page = key.split(separator: ":").dropFirst().first.map(String.init)
-        if documentID != page { snapshots.reset(); scrolling.reset(); captured.removeAll(); anchors.removeAll(); documentID = page }
+        if documentID != page { snapshots.reset(); resetScrolling(); captured.removeAll(); anchors.removeAll(); documentID = page }
         let complete: ([String: Any]) -> Void = { [weak self] value in
             guard let self, !self.closed, self.documentID == page else { return }
             self.reply(key, value)
@@ -173,9 +184,7 @@ public final class NativeUIProjection: NSObject, WKScriptMessageHandler {
             if let next = request["destination"] as? String, ["native", "web", "none"].contains(next) { destination = next; connected = true }
             complete([:])
         case "track":
-            scrolling.reset()
-            for (id, mask) in masks { if views()[id]?.layer.mask === mask { views()[id]?.layer.mask = nil } }
-            masks.removeAll()
+            resetScrolling()
             guard let raw = request["scroll"] as? [String: Any], let width = request["viewportWidth"] as? Double, width.isFinite, width > 0,
                   let data = try? JSONSerialization.data(withJSONObject: raw),
                   let placement = try? JSONDecoder().decode(NativeUIScrollPlacement.self, from: data), placement.isValid else {
@@ -199,8 +208,8 @@ public final class NativeUIProjection: NSObject, WKScriptMessageHandler {
                 let from = parent.convert(CGPoint(x: old.midX, y: old.midY), from: webView)
                 let to = parent.convert(CGPoint(x: frame.midX, y: frame.midY), from: webView)
                 view.transform.tx += to.x-from.x; view.transform.ty += to.y-from.y
-                let mask = self.masks[id] ?? CAShapeLayer()
-                self.masks[id] = mask
+                let mask = self.masks[id]?.layer ?? CAShapeLayer()
+                self.masks[id] = ScrollMask(view: view, layer: mask)
                 mask.frame = view.bounds
                 mask.path = UIBezierPath(rect: clip.isNull ? .zero : view.convert(clip, from: webView).intersection(view.bounds)).cgPath
                 view.layer.mask = mask
@@ -304,11 +313,9 @@ public final class NativeUIProjection: NSObject, WKScriptMessageHandler {
             controller.removeAllUserScripts()
             remaining.forEach { controller.addUserScript($0) }
         }
-        snapshots.reset(); scrolling.reset(); captured.removeAll(); anchors.removeAll()
+        snapshots.reset(); resetScrolling(); captured.removeAll(); anchors.removeAll()
         if destination != "none" { hiddenByProjection.forEach { $0.isHidden = false } }
         hiddenByProjection.removeAll()
-        for (id, mask) in masks { if views()[id]?.layer.mask === mask { views()[id]?.layer.mask = nil } }
-        masks.removeAll()
     }
 }
 private final class WeakProjectionHandler: NSObject, WKScriptMessageHandler {

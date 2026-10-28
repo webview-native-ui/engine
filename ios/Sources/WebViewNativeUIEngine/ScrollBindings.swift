@@ -14,6 +14,7 @@ public final class NativeUIScrollBindings {
         for (id, group) in Dictionary(grouping: nodes.filter { $0.scroll != nil }, by: { $0.scroll!.id }) {
             if group.contains(where: { $0.scroll?.reuse == true }) {
                 if let tracker = previous[id], tracker.replace(group, webView: webView, scale: scale) {
+                    tracker.render = render
                     trackers[id] = tracker
                 } else { rejected.append(contentsOf: group.map(\.id)) }
             } else if let tracker = NativeUIScrollTracker(webView: webView, nodes: group, scale: scale, render: render) {

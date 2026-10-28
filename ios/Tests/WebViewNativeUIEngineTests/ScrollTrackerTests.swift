@@ -3,11 +3,11 @@ import WebKit
 @testable import WebViewNativeUIEngine
 
 final class NativeUIScrollTrackerTests: XCTestCase {
-    private func node(_ id: String = "counter", y: Double = 400) throws -> NativeUIScrollNode {
+    private func node(_ id: String = "counter", y: Double = 400, reuse: Bool = false) throws -> NativeUIScrollNode {
         let value: [String: Any] = ["id": id, "kind": "extension", "x": 10, "y": y + 80, "width": 240, "height": 60,
             "items": [], "dark": false, "rtl": false,
             "extension": ["name": "counter", "props": "{}", "actions": ["increment": "button"]],
-            "scroll": ["id": "scroll", "offsetX": 0, "offsetY": 0, "viewport": ["x": 0, "y": 80, "width": 320, "height": 500],
+            "scroll": ["id": "scroll", "reuse": reuse, "offsetX": 0, "offsetY": 0, "viewport": ["x": 0, "y": 80, "width": 320, "height": 500],
                        "clip": ["x": 0, "y": 100, "width": 320, "height": 480],
                        "contentWidth": 320, "contentHeight": 1200,
                        "frame": ["x": 10, "y": y, "width": 240, "height": 60]]]
@@ -63,6 +63,20 @@ final class NativeUIScrollTrackerTests: XCTestCase {
         let previous = updates
         scroll.contentOffset.y = 100
         XCTAssertEqual(updates, previous)
+        scroll.contentOffset.y = 0
+        let bindings = NativeUIScrollBindings()
+        var oldUpdates = 0
+        var replacementFrame: CGRect?
+        XCTAssertTrue(try bindings.replace([node()], in: web, scale: 1) { _, _, _ in oldUpdates += 1 }.isEmpty)
+        bindings.update()
+        let oldCount = oldUpdates
+        scroll.moving = true
+        XCTAssertTrue(try bindings.replace([node(reuse: true)], in: web, scale: 1) { _, frame, _ in replacementFrame = frame }.isEmpty)
+        scroll.contentOffset.y = 100
+        XCTAssertEqual(oldUpdates, oldCount, "Reusing the observer must replace its renderer")
+        XCTAssertEqual(replacementFrame?.minY, 380, "Keep the acquired coordinate origin while replacing the renderer")
+        bindings.reset()
+        scroll.moving = false
         let duplicate = UIScrollView(frame: scroll.frame)
         duplicate.contentSize = scroll.contentSize
         web.addSubview(duplicate)

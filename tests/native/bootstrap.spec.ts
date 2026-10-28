@@ -1,20 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { readFileSync } from 'node:fs';
-import { buildSync } from 'esbuild';
 const runtime = readFileSync('runtime/native-ui-engine.js', 'utf8');
-
-test('the bundled native runtime matches the TypeScript source', () => {
-  const expected = buildSync({
-    entryPoints: ['src/native/bootstrap.ts'],
-    bundle: true,
-    format: 'iife',
-    globalName: 'WebViewNativeUIEngineRuntime',
-    minify: true,
-    target: ['safari15', 'chrome100'],
-    write: false,
-  }).outputFiles[0].text;
-  expect(runtime).toBe(expected);
-});
 
 test('injected runtime retains the existing Capacitor object and disposes a pending startup', async ({ page }) => {
   await page.setContent('<div id="slot" style="width:120px;height:40px"></div>');

@@ -77,6 +77,76 @@ final class NativeUIProjectionTests: XCTestCase {
         try await wait(web, "Object.keys(testEvents).length === 0")
         XCTAssertEqual(configuration.userContentController.userScripts.count, 1, "Keep the host's scripts")
     }
+    @MainActor func testScrollMasksFollowTheirViewsAcrossReplacementAndDocumentReset() async throws {
+        let configuration = WKWebViewConfiguration()
+        configuration.setURLSchemeHandler(ProjectionFixture(), forURLScheme: "capacitor")
+        configuration.userContentController.addUserScript(WKUserScript(source: """
+          window.testReply = null;
+          window.WebViewNativeUIEngineRuntime = {
+            start: async () => {}, stop: () => {},
+            receive: (id, key, value) => { window.testReply = value; }
+          };
+        """, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        let window = UIWindow(frame: UIScreen.main.bounds)
+        let owner = UIViewController(); window.rootViewController = owner; window.makeKeyAndVisible()
+        let web = WKWebView(frame: window.bounds, configuration: configuration)
+        owner.view.addSubview(web)
+        let scroll = UIScrollView(frame: CGRect(x: 0, y: 80, width: 320, height: 500))
+        scroll.contentSize = CGSize(width: 320, height: 1200)
+        web.addSubview(scroll)
+        let first = UIView(frame: CGRect(x: 10, y: 100, width: 100, height: 40))
+        let second = UIView(frame: first.frame)
+        owner.view.addSubview(first); owner.view.addSubview(second)
+        var current = first
+        let registration = try NativeUIProjection(webView: web, plugin: "Fixture", projectionSelector: "#absent",
+            canCapture: { false }, view: { current })
+        defer { registration.destroy(); window.isHidden = true }
+        web.load(URLRequest(url: URL(string: "capacitor://localhost/fixture")!))
+        try await wait(web, "document.readyState === 'complete' && location.host === 'localhost'")
+        let script = try XCTUnwrap(configuration.userContentController.userScripts.last?.source)
+        let id = String(script[try XCTUnwrap(script.range(of: "nativeUI[0-9A-F]{32}", options: .regularExpression))])
+        func send(_ action: String, page: String = "maskTest") async throws {
+            _ = try await web.evaluateJavaScript("""
+            (() => {
+              const id = '\(id)';
+              window.testReply = null;
+              webkit.messageHandlers[id].postMessage(JSON.stringify({key: id + ':\(page):1', request: {
+                action: '\(action)', viewportWidth: \(web.bounds.width),
+                scroll: {id:'scroll',offsetX:0,offsetY:0,viewport:{x:0,y:80,width:320,height:500},
+                  clip:{x:0,y:100,width:320,height:480},contentWidth:320,contentHeight:1200,
+                  frame:{x:10,y:20,width:100,height:40}}
+              }}));
+            })()
+            """)
+            try await wait(web, "testReply !== null")
+        }
+        try await send("track")
+        scroll.contentOffset.y = 10
+        XCTAssertNotNil(first.layer.mask)
+        current = second
+        try await send("track")
+        XCTAssertNil(first.layer.mask, "Release the original view, not the replacement from the provider")
+        scroll.contentOffset.y = 20
+        XCTAssertNotNil(second.layer.mask)
+        try await send("connect", page: "nextDocument")
+        XCTAssertNil(second.layer.mask, "Changing documents must release scroll clipping")
+        try await send("track", page: "nextDocument")
+        scroll.contentOffset.y = 30
+        XCTAssertNotNil(second.layer.mask)
+        let rendererMask = CAShapeLayer()
+        second.layer.mask = rendererMask
+        try await send("track", page: "nextDocument")
+        XCTAssertTrue(second.layer.mask === rendererMask, "Do not remove a mask installed later by the renderer")
+        second.layer.mask = nil
+        current = first
+        try await send("track", page: "nextDocument")
+        scroll.contentOffset.y = 40
+        XCTAssertNotNil(first.layer.mask)
+        current = second
+        registration.destroy()
+        XCTAssertNil(first.layer.mask, "Teardown must release the previously bound view")
+    }
+
     @MainActor func testPreparedImageReturnsToNativeAfterWebProjection() async throws {
         let configuration = WKWebViewConfiguration()
         configuration.setURLSchemeHandler(ProjectionFixture(), forURLScheme: "capacitor")

@@ -34,7 +34,7 @@ public final class NativeUIScrollTracker {
     private let contentOrigin: CGPoint
     private let viewportCorrection: CGPoint
     private var frames: [String: CGRect] = [:]
-    private let render: (String, CGRect, CGRect) -> Void
+    var render: (String, CGRect, CGRect) -> Void
     private var observation: NSKeyValueObservation?
 
     public init?(webView: WKWebView, nodes: [NativeUIScrollNode], scale: CGFloat,
