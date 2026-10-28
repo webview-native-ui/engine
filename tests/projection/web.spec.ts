@@ -34,6 +34,7 @@ const prepare = async (
   shared = false,
   events = false,
   captureDelayMs?: number,
+  transient = false,
 ) => {
   await boot(page);
   if (shadow)
@@ -44,7 +45,7 @@ const prepare = async (
       (window as any).sourceRoot = host.shadowRoot;
     });
   await page.evaluate(
-    async ({ fail, proxy, shared, events, captureDelayMs }) => {
+    async ({ fail, proxy, shared, events, captureDelayMs, transient }) => {
       const w = window as any,
         source = (w.sourceRoot ?? document).querySelector('#source') as HTMLElement,
         owner = (w.sourceRoot ?? document).querySelector('#scroll') as HTMLElement;
@@ -107,7 +108,7 @@ const prepare = async (
               if (w.holdCover) return new Promise((resolve) => w.coverReplies.push(resolve));
               return { shown: !w.failCover };
             }
-            return {};
+            return transient && request.action === 'restore' ? { shown: true } : {};
           },
           listen: async (listener: (event: { active: boolean }) => void) => {
             w.interact = listener;
@@ -120,6 +121,7 @@ const prepare = async (
         },
         {
           captureDelayMs,
+          transient,
           wake() {},
           blocked: () => false,
           revision: () => w.revision,
@@ -138,7 +140,7 @@ const prepare = async (
       );
       w.manager.consider(1, [w.source]);
     },
-    { fail, proxy, shared, events, captureDelayMs },
+    { fail, proxy, shared, events, captureDelayMs, transient },
   );
   if (!fail)
     await expect(page.locator(shared ? '#projection-host' : proxy ? '#proxy' : '#source')).toHaveAttribute('data-native-ui-snapshot', /.+/);
@@ -954,159 +956,103 @@ for (const scenario of ['fractional-rtl', 'nested-scroll', 'parent-scale', 'host
     }
   });
 
-test('retained image nodes do not mutate DOM during repeated handoffs', async ({ page }) => {
-  await prepare(page, false, false, false, false, false, 0);
-  await page.evaluate(() => {
-    const w = window as any;
-    w.treeChanges = 0;
-    w.treeObserver = new MutationObserver((records) => (w.treeChanges += records.length));
-    w.treeObserver.observe(document.documentElement, { childList: true, subtree: true });
-  });
-  for (let i = 0; i < 5; i++) {
-    await page.evaluate(() => (window as any).manager.begin());
-    await expect(page.locator('img[data-native-ui-projection-image]')).toHaveCSS('opacity', '1');
+for (const transient of [false, true]) {
+  test(`handoff retains prepared DOM through ${transient ? 'a moved native return' : 'repeated switches'}`, async ({ page }) => {
+    await prepare(page, false, false, false, false, false, 0, transient);
     await page.evaluate(() => {
       const w = window as any;
-      w.manager.end();
-      w.manager.updated(undefined, ['counter'], 1000);
+      w.treeChanges = 0;
+      w.treeObserver = new MutationObserver((records) => (w.treeChanges += records.length));
+      w.treeObserver.observe(document.documentElement, { childList: true, subtree: true });
     });
-    await expect(page.locator('img[data-native-ui-projection-image]')).toHaveCSS('opacity', '0');
-  }
-  expect(await page.evaluate(() => (window as any).treeChanges)).toBe(0);
-  await page.evaluate(() => {
-    (window as any).treeObserver.disconnect();
-    return (window as any).manager.destroy();
-  });
-  await expect(page.locator('img')).toHaveCount(0);
-});
-test('retained preparation buffers stay bounded across content updates', async ({ page }) => {
-  await prepare(page, false, false, false, false, false, 0);
-  await page.evaluate(() => {
-    const w = window as any;
-    w.adoptions = 0;
-    window.addEventListener(`${w.scope.namespace}:sources-change`, () => w.adoptions++);
-  });
-  for (let i = 0; i < 5; i++) {
-    await page.evaluate(() => (window as any).manager.changed());
-    await expect.poll(() => page.evaluate(() => (window as any).adoptions)).toBe(i + 1);
-    expect(await page.locator('img').count()).toBeLessThanOrEqual(2);
-    await expect(page.locator('img[data-native-ui-projection-image]')).toHaveCount(1);
-  }
-  await page.evaluate(() => (window as any).manager.begin());
-  await expect(page.locator('img[data-native-ui-projection-image]')).toHaveCSS('opacity', '1');
-  await destroyProjection(page);
-});
-
-test('a moved transient return retains DOM until idle preparation or destruction', async ({ page }) => {
-  await boot(page);
-  await page.evaluate(async () => {
-    const w = window as any,
-      target = document.querySelector('#source') as HTMLElement,
-      r = target.getBoundingClientRect();
-    target.style.position = 'relative';
-    w.manager = await w.createProjection(
-      target,
-      'moved',
-      async (req: any) => {
-        if (req.action === 'restore') w.returnParts = req.parts;
-        return req.action === 'prepare'
-          ? { token: 'image', parts: [{ ids: ['a'], url: 'file:///red.png', x: r.x, y: r.y, width: 120, height: 40 }] }
-          : { shown: true };
-      },
-      { transient: true },
-    );
-    w.manager.consider(1, [{ element: target, control: { id: 'a', x: r.x, y: r.y, width: 120, height: 40 } }]);
-  });
-  await expect(page.locator('img[data-native-ui-projection-image]')).toHaveCount(1);
-  await page.evaluate(() => {
-    const w = window as any;
-    w.mutations = 0;
-    w.observer = new MutationObserver((r) => (w.mutations += r.length));
-    w.observer.observe(document.documentElement, { childList: true, subtree: true });
-    w.manager.begin();
-  });
-  await expect(page.locator('img[data-native-ui-projection-image]')).toHaveCSS('opacity', '1');
-  await page.evaluate(() => {
-    const w = window as any;
-    const t = document.querySelector('#source') as HTMLElement;
-    t.style.left = '20px';
-    w.manager.end();
-    w.manager.updated('image', ['a'], 1000);
-  });
-  expect(await page.evaluate(() => (window as any).mutations)).toBe(0);
-  expect(
-    await page.evaluate(() => Math.abs((window as any).returnParts[0].x - document.querySelector('#source')!.getBoundingClientRect().x)),
-  ).toBeLessThan(0.01);
-  await expect(page.locator('img')).toHaveCount(1);
-  await expect(page.locator('img')).toHaveCSS('opacity', '0');
-  await page.evaluate(() => {
-    (window as any).observer.disconnect();
-    return (window as any).manager.destroy();
-  });
-  await expect(page.locator('img')).toHaveCount(0);
-});
-
-test('delayed releases preserve current pixels and shrink the preparation buffers', async ({ page }) => {
-  await boot(page);
-  await page.evaluate(async () => {
-    const w = window as any,
-      target = document.querySelector('#source')!,
-      r = target.getBoundingClientRect();
-    w.captures = w.adoptions = 0;
-    w.releases = [];
-    window.addEventListener('retained:sources-change', () => {
-      if (target.hasAttribute('data-native-ui-snapshot')) w.adoptions++;
-    });
-    w.manager = await w.createProjection(
-      target,
-      'retained',
-      async (req: any) => {
-        if (req.action === 'prepare')
-          return {
-            token: `image-${++w.captures}`,
-            parts: [
-              {
-                ids: ['a'],
-                url: w.captures > 1 ? 'file:///ad.png' : 'file:///red.png',
-                x: r.x,
-                y: r.y,
-                width: 120,
-                height: 40,
-              },
-            ],
-          };
-        if (req.action === 'release') return new Promise((resolve) => w.releases.push(resolve));
-        return { shown: true };
-      },
-      { opaqueUnderlay: true, retainPreparedUntilRelease: true },
-    );
-    w.sources = [{ element: target, control: { id: 'a', x: r.x, y: r.y, width: 120, height: 40 } }];
-    w.manager.consider(1, w.sources);
-  });
-  for (let i = 1; i <= 5; i++) {
-    await expect.poll(() => page.evaluate(() => (window as any).adoptions)).toBe(i);
-    if (i < 5)
-      await page.evaluate((i) => {
+    for (let i = 0; i < (transient ? 1 : 5); i++) {
+      await page.evaluate(() => (window as any).manager.begin());
+      await expect(page.locator('img[data-native-ui-projection-image]')).toHaveCSS('opacity', '1');
+      await page.evaluate((transient) => {
         const w = window as any;
-        w.manager.invalidate();
-        w.manager.consider(i + 1, w.sources);
-      }, i);
-  }
-  await expect(page.locator('img[data-native-ui-projection-image]')).toHaveAttribute('src', /blue/);
-  await page.evaluate(() => {
-    const w = window as any;
-    w.releases.splice(0).forEach((r: any) => r({}));
+        if (transient) document.querySelector<HTMLElement>('#source')!.style.transform = 'translateX(20px)';
+        w.manager.end();
+        w.manager.updated(undefined, ['counter'], 1000);
+      }, transient);
+      await expect(page.locator('img[data-native-ui-projection-image]')).toHaveCSS('opacity', '0');
+    }
+    if (transient)
+      expect(
+        await page.evaluate(() => {
+          const part = (window as any).calls.find((c: any) => c.action === 'restore').parts[0];
+          return Math.abs(part.x - document.querySelector('#source')!.getBoundingClientRect().x);
+        }),
+      ).toBeLessThan(0.01);
+    expect(await page.evaluate(() => (window as any).treeChanges)).toBe(0);
+    await page.evaluate(() => (window as any).treeObserver.disconnect());
+    await destroyProjection(page);
   });
-  await expect.poll(() => page.locator('img').count()).toBeLessThanOrEqual(2);
-  await expect(page.locator('img[data-native-ui-projection-image]')).toHaveCSS('opacity', '1');
-  expect(
+}
+
+for (const delayed of [false, true]) {
+  test(`release acknowledgement (delayed: ${delayed}) preserves pixels and bounds buffers`, async ({ page }) => {
+    await boot(page);
+    await page.evaluate(async (delayed) => {
+      const w = window as any,
+        target = document.querySelector('#source')!,
+        r = target.getBoundingClientRect();
+      w.captures = w.adoptions = 0;
+      w.releases = [];
+      window.addEventListener('retained:sources-change', () => {
+        if (target.hasAttribute('data-native-ui-snapshot')) w.adoptions++;
+      });
+      w.manager = await w.createProjection(
+        target,
+        'retained',
+        async (req: any) => {
+          if (req.action === 'prepare')
+            return {
+              token: `image-${++w.captures}`,
+              parts: [
+                {
+                  ids: ['a'],
+                  url: w.captures > 1 ? 'file:///ad.png' : 'file:///red.png',
+                  x: r.x,
+                  y: r.y,
+                  width: 120,
+                  height: 40,
+                },
+              ],
+            };
+          if (delayed && req.action === 'release') return new Promise((resolve) => w.releases.push(resolve));
+          return { shown: true };
+        },
+        { opaqueUnderlay: true, retainPreparedUntilRelease: true },
+      );
+      w.sources = [{ element: target, control: { id: 'a', x: r.x, y: r.y, width: 120, height: 40 } }];
+      w.manager.consider(1, w.sources);
+    }, delayed);
+    for (let i = 1; i <= 5; i++) {
+      await expect.poll(() => page.evaluate(() => (window as any).adoptions)).toBe(i);
+      if (!delayed) expect(await page.locator('img').count()).toBeLessThanOrEqual(2);
+      if (i < 5)
+        await page.evaluate((i) => {
+          const w = window as any;
+          w.manager.invalidate();
+          w.manager.consider(i + 1, w.sources);
+        }, i);
+    }
+    await expect(page.locator('img[data-native-ui-projection-image]')).toHaveAttribute('src', /blue/);
     await page.evaluate(() => {
-      const image = document.querySelector('img[data-native-ui-projection-image]') as HTMLImageElement;
-      return decodeURIComponent(image.src).includes('blue') && image.complete && image.naturalWidth === 120;
-    }),
-  ).toBe(true);
-  await destroyProjection(page);
-});
+      const w = window as any;
+      w.releases.splice(0).forEach((r: any) => r({}));
+    });
+    await expect.poll(() => page.locator('img').count()).toBeLessThanOrEqual(2);
+    await expect(page.locator('img[data-native-ui-projection-image]')).toHaveCSS('opacity', '1');
+    expect(
+      await page.evaluate(() => {
+        const image = document.querySelector('img[data-native-ui-projection-image]') as HTMLImageElement;
+        return decodeURIComponent(image.src).includes('blue') && image.complete && image.naturalWidth === 120;
+      }),
+    ).toBe(true);
+    await destroyProjection(page);
+  });
+}
 
 for (const previous of [false, true]) {
   test(`failed insertion preserves ${previous ? 'the completed image' : 'the live fallback'}`, async ({ page }) => {
