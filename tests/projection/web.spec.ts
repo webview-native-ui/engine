@@ -108,7 +108,7 @@ const prepare = async (
               if (w.holdCover) return new Promise((resolve) => w.coverReplies.push(resolve));
               return { shown: !w.failCover };
             }
-            return transient && request.action === 'restore' ? { shown: true } : {};
+            return transient && request.action === 'restore' ? { shown: !w.failRestore } : {};
           },
           listen: async (listener: (event: { active: boolean }) => void) => {
             w.interact = listener;
@@ -988,6 +988,62 @@ for (const transient of [false, true]) {
     await destroyProjection(page);
   });
 }
+
+test('translated transient pixels survive immediate redrag until a replacement is ready', async ({ page }) => {
+  await prepare(page, false, false, false, false, false, 50, true);
+  const result = await page.evaluate(async () => {
+    const w = window as any;
+    // Hold replacement captures throughout the test, independently of machine speed.
+    w.interact({ active: true });
+    const captures = w.calls.filter((c: any) => c.action === 'prepare').length;
+    const source = document.querySelector<HTMLElement>('#source')!;
+    const originalY = source.getBoundingClientRect().y;
+    // Idle translation has no preceding restore, and an optional return copy can fail.
+    source.style.transform = 'translateY(10px)';
+    w.source.control.y = originalY + 10;
+    w.manager.consider(++w.revision, [w.source]);
+    w.failRestore = true;
+    for (const y of [20, 0, 30]) {
+      w.manager.begin();
+      await Promise.resolve();
+      source.style.transform = `translateY(${y}px)`;
+      w.manager.end();
+      w.manager.updated(undefined, ['counter'], ++w.revision);
+      w.source.control.y = source.getBoundingClientRect().y;
+      w.manager.consider(w.revision, [w.source]);
+    }
+    w.manager.begin();
+    await Promise.resolve();
+    const covers = w.calls.filter((c: any) => c.action === 'cover').length;
+    const coverOffsets = w.calls.filter((c: any) => c.action === 'cover').map((c: any) => c.parts[0].y - originalY);
+    const extraCaptures = w.calls.filter((c: any) => c.action === 'prepare').length - captures;
+    const image = document.querySelector('img[data-native-ui-projection-image]')!;
+    const offset = image.getBoundingClientRect().y - source.getBoundingClientRect().y;
+    w.manager.end();
+    w.manager.updated(undefined, ['counter'], ++w.revision);
+    w.source.control.width++;
+    w.manager.consider(w.revision, [w.source]);
+    w.manager.begin();
+    return { covers, coverOffsets, extraCaptures, offset, afterResize: w.calls.filter((c: any) => c.action === 'cover').length };
+  });
+  expect(result).toEqual({ covers: 4, coverOffsets: [10, 20, 0, 30], extraCaptures: 0, offset: 0, afterResize: 4 });
+  await destroyProjection(page);
+});
+
+test('moving a source within a fixed transient scope invalidates its old image layout', async ({ page }) => {
+  await prepare(page, false, false, false, true, false, 50, true);
+  await page.evaluate(() => {
+    const w = window as any;
+    w.interact({ active: true });
+    const source = document.querySelector<HTMLElement>('#source')!;
+    source.style.transform = 'translateY(90px)';
+    w.source.control.y = source.getBoundingClientRect().y;
+    w.manager.consider(++w.revision, [w.source]);
+    w.manager.begin();
+  });
+  expect(await page.evaluate(() => (window as any).calls.filter((c: any) => c.action === 'cover'))).toEqual([]);
+  await destroyProjection(page);
+});
 
 for (const delayed of [false, true]) {
   test(`release acknowledgement (delayed: ${delayed}) preserves pixels and bounds buffers`, async ({ page }) => {

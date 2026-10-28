@@ -220,7 +220,7 @@ Use `createWebProjectionBatch(transport, options)` when several fallback element
 
 The batch derives its Document from the first nonempty `consider`; all subsequent scopes and sources must belong to that Document. Before this first update, `begin()` does nothing and `destroy()` is safe. A changed fallback requires a new scope. Scope identity participates in cache invalidation; an active presentation retains its captured scopes until restoration finishes.
 
-`WebProjectionRequest` is an action-discriminated union. `prepare` requires `revision`, `viewportWidth` and `ids`; `cover` requires `token`; `restore` requires `token`, `viewportWidth` and destination `parts`; `painted`, `restored` and `release` require `token`; `reset` takes no payload. Empty preparation results and `{ shown: false }` mean the plugin should use its normal Web fallback. Use the plugin's existing ordered bridge; the engine does not retry user actions.
+`WebProjectionRequest` is an action-discriminated union. `prepare` requires `revision`, `viewportWidth` and `ids`; `cover` requires `token` and includes `viewportWidth` and destination `parts` for transient movement; `restore` requires `token`, `viewportWidth` and destination `parts`; `painted`, `restored` and `release` require `token`; `reset` takes no payload. Empty preparation results and `{ shown: false }` mean the plugin should use its normal Web fallback. Use the plugin's existing ordered bridge; the engine does not retry user actions.
 
 ### Native handoff on both platforms
 
@@ -229,12 +229,16 @@ Call all view and snapshot lifecycle APIs on the main/UI thread. Native input fr
 On both platforms, `cover` installs the prepared entry image **before hiding the supplied live views**, within the same UI turn. Its boolean result reports whether this was possible; failure leaves visibility unchanged. Supply the actual views for every captured component. Do not separately hide views or create another entry copy.
 
 ```swift
-let shown = snapshots.cover(token, in: webView, views: renderedViews, transient: movingSurface)
+let shown = snapshots.cover(token, in: webView, views: renderedViews, transient: movingSurface, frames: destinationFrames)
 ```
 
 ```kotlin
-val shown = snapshots.cover(token, activity.window, webView, renderedViews, transient = movingSurface)
+val shown = snapshots.cover(token, activity.window, webView, renderedViews, transient = movingSurface, frames = destinationFrames)
 ```
+
+For a custom transport, convert request `parts` from CSS pixels to native frames using `webView.bounds.width / viewportWidth` on iOS or `webView.width / viewportWidth` on Android, mapping each part's IDs to its rectangle. Pass these as `destinationFrames` for both `cover` and `restore`. A retained image can move before its first cover or after a failed return copy; always use the supplied coordinates. When `parts` is absent, pass `nil` / `null` to retain the captured placement. The high-level `NativeUIProjection` registration handles this conversion automatically.
+
+A transient surface keeps its image while its sources retain the same sizes and positions relative to their projection scopes. Moving the whole scope can reuse pixels; moving a source inside a fixed scope invalidates the cached layout.
 
 `transient: true` is for a moving foreground surface: it does not replace the background's `coveringToken`. Retire the entry copy with `retireCopy(token)` after Web image readiness. Before applying a normal native update, undo the engine's visibility changes with iOS `restoreControls()` / Android `restoreViews()`. For return, `restore` installs the cached return image, the plugin renders underneath it, and `retireCopy(token, entry: false)` retires it after the corresponding acknowledgement/readiness. These platform-native names remain idiomatic; the lifecycle is the same. `cover` is an entry operation, not a method to repeat on each normal update.
 
@@ -244,15 +248,15 @@ The optional `eligible(source)` and `current(sources)` callbacks keep framework-
 
 The image transport accepts `WebProjectionRequest` and returns prepared token/parts or `{ shown: false }`. Parts use local `file:` URLs and CSS-pixel viewport coordinates. Requests use the plugin's existing ordered bridge:
 
-| Action     | Native responsibility                                                                                                                                   |
-| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `prepare`  | Validate the current revision and IDs, then `NativeUICoveredSnapshots.prepare` using actual rendered frames.                                            |
-| `cover`    | Validate the token and complete native surface ownership; create the entry copy and hide the associated native views. Return `shown: false` on failure. |
-| `painted`  | Retire only that token's entry copy.                                                                                                                    |
-| `restore`  | Rebase the prepared return copy to supplied frames. Never capture here.                                                                                 |
-| `restored` | Retire only that token's return copy after the native update ACK and Web paint boundary.                                                                |
-| `release`  | Release the named token, files and associated temporary views.                                                                                          |
-| `reset`    | Owner teardown only; release all native capture resources.                                                                                              |
+| Action     | Native responsibility                                                                                                                                                                                       |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `prepare`  | Validate the current revision and IDs, then `NativeUICoveredSnapshots.prepare` using actual rendered frames.                                                                                                |
+| `cover`    | Validate the token and complete native surface ownership; create the entry copy at supplied frames (or captured frames when absent) and hide the associated native views. Return `shown: false` on failure. |
+| `painted`  | Retire only that token's entry copy.                                                                                                                                                                        |
+| `restore`  | Rebase the prepared return copy to supplied frames. Never capture here.                                                                                                                                     |
+| `restored` | Retire only that token's return copy after the native update ACK and Web paint boundary.                                                                                                                    |
+| `release`  | Release the named token, files and associated temporary views.                                                                                                                                              |
+| `reset`    | Owner teardown only; release all native capture resources.                                                                                                                                                  |
 
 Use `NativeUICoveredSnapshots.observe` to notify the JS listener when interaction starts/ends. On iOS, captures rasterize the visible window with `drawHierarchy(in:afterScreenUpdates:)`, including the background under the clipped native component. Screen snapshot views are display replicas and are not used as bitmap sources. UIKit rasterization can differ from the live compositor for materials such as Liquid Glass; validate the appearance on physical devices with the backgrounds your plugin supports. Cache validity therefore includes layout and the plugin's visual-change notifications. The engine does not capture continuously or guarantee every possible renderer can be captured.
 

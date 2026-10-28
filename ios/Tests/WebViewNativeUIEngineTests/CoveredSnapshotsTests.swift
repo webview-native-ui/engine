@@ -148,7 +148,9 @@ final class NativeUICoveredSnapshotsTests: XCTestCase {
         snapshots.retireCopy(foreground, entry: false)
         XCTAssertNil(returned.superview)
         XCTAssertEqual(snapshots.identifiers(for: foreground), ["modal"], "Retiring a return copy must preserve its reusable capture")
-        XCTAssertTrue(snapshots.cover(foreground, in: view, views: [], transient: true))
+        XCTAssertTrue(snapshots.cover(foreground, in: view, views: [], transient: true, frames: ["modal": destination]))
+        XCTAssertEqual(window.subviews.compactMap { $0 as? UIImageView }.first?.frame, view.convert(destination, to: window),
+                       "A repeated cover must use the restored position without a new capture")
         snapshots.retireCopy(foreground, entry: false)
         XCTAssertFalse(window.subviews.compactMap { $0 as? UIImageView }.isEmpty, "An old return acknowledgement cannot remove a new entry copy")
         snapshots.release(foreground)
