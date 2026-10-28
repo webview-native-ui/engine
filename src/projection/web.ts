@@ -95,7 +95,11 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     JSON.stringify(
       candidates.map((candidate) => {
         if (!scopeIDs.has(candidate.scope)) scopeIDs.set(candidate.scope, ++scopeSerial);
-        return [scopeIDs.get(candidate.scope), layout([candidate], !!callbacks.opaqueUnderlay)];
+        const origin = callbacks.transient && !callbacks.opaqueUnderlay ? candidate.scope.element.getBoundingClientRect() : undefined;
+        const relative = origin
+          ? { ...candidate, control: { ...candidate.control, x: candidate.control.x - origin.x, y: candidate.control.y - origin.y } }
+          : candidate;
+        return [scopeIDs.get(candidate.scope), layout([relative], !!callbacks.opaqueUnderlay)];
       }),
     );
   const sheets = new Map<Document | ShadowRoot, HTMLStyleElement>();
@@ -649,6 +653,12 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     return true;
   };
 
+  const currentParts = (image: Prepared) =>
+    image.images.map((element, index) => {
+      const rect = element.getBoundingClientRect();
+      return { ...image.data.parts[index], x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+    });
+
   const begin = () => {
     retireRestoration();
     if (stopped || destination === 'none' || active) return;
@@ -689,7 +699,13 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
       handoffPending = false;
       callbacks.wake();
     });
-    void bounded(call({ action: 'cover', token: image.data.token, ...(callbacks.transient ? { transient: true } : {}) }))
+    void bounded(
+      call({
+        action: 'cover',
+        token: image.data.token,
+        ...(callbacks.transient ? { transient: true, viewportWidth: win.innerWidth, parts: currentParts(image) } : {}),
+      }),
+    )
       .then((result) => {
         if (!isCurrent()) return;
         handoffPending = false;
@@ -739,18 +755,15 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
         abandon(image, false);
         return;
       }
-      const parts = targets.map((target, index) => {
-        const rect = image.images[index].getBoundingClientRect();
-        return { ...image.data.parts[index], x: rect.x, y: rect.y, width: rect.width, height: rect.height };
-      });
+      const parts = currentParts(image);
+      // Translation changes placement, not pixels. Keep the pre-interaction
+      // image until its replacement is ready; resizing still invalidates it.
       if (
-        parts.some((part, index) =>
-          ['x', 'y', 'width', 'height'].some((key) => part[key as keyof Frame] !== image.data.parts[index][key as keyof Frame]),
-        )
-      ) {
-        if (callbacks.opaqueUnderlay) image.data = { ...image.data, parts };
-        else cached = undefined;
-      }
+        callbacks.opaqueUnderlay ||
+        parts.every((part, index) => part.width === image.data.parts[index].width && part.height === image.data.parts[index].height)
+      )
+        image.data = { ...image.data, parts };
+      else cached = undefined;
       // Both requests use the same ordered bridge. Reprojection need not await this optional copy.
       void call({ action: 'restore', token: image.data.token, viewportWidth: win.innerWidth, parts }).catch(() => {});
     }

@@ -150,8 +150,8 @@ public final class NativeUICoveredSnapshots {
 
     /// Install prepared pixels before hiding live views, within the same main-thread turn.
     /// A transient (moving) surface does not replace background covering ownership.
-    @discardableResult public func cover(_ token: String, in webView: UIView, views: [UIView], transient: Bool = false) -> Bool {
-        guard restore(in: webView, token: token, entry: true) else { return false }
+    @discardableResult public func cover(_ token: String, in webView: UIView, views: [UIView], transient: Bool = false, frames: [String: CGRect]? = nil) -> Bool {
+        guard restore(in: webView, token: token, frames: frames, entry: true) else { return false }
         if !transient { coveringToken = token }
         hide(views, for: token)
         return true

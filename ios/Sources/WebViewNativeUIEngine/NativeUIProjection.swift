@@ -151,6 +151,20 @@ public final class NativeUIProjection: NSObject, WKScriptMessageHandler {
             self.reply(key, value)
         }
         let token = request["token"] as? String ?? ""
+        func projectionFrames() -> [String: CGRect]? {
+            guard let width = request["viewportWidth"] as? Double, width.isFinite, width > 0,
+                  let parts = request["parts"] as? [[String: Any]] else { return nil }
+            var frames: [String: CGRect] = [:]
+            let scale = webView.bounds.width / width
+            for part in parts {
+                guard let ids = part["ids"] as? [String], let x = part["x"] as? Double, let y = part["y"] as? Double,
+                      let w = part["width"] as? Double, let h = part["height"] as? Double,
+                      [x,y,w,h].allSatisfy({ $0.isFinite }), w > 0, h > 0 else { return nil }
+                for id in ids { frames[id] = CGRect(x: x*scale, y: y*scale, width: w*scale, height: h*scale) }
+            }
+            guard Set(frames.keys) == snapshots.identifiers(for: token), !frames.isEmpty else { return nil }
+            return frames
+        }
         switch request["action"] as? String {
         case "connect":
             if !connected { destination = (views().values.contains(where: { !$0.isHidden }) ? "native" : "none"); connected = true }
@@ -221,21 +235,13 @@ public final class NativeUIProjection: NSObject, WKScriptMessageHandler {
         case "cover":
             let selected = captured[token] ?? [:], current = views()
             let valid = visible && canCapture() && !selected.isEmpty && selected.allSatisfy { current[$0.key] === $0.value }
+            let frames = request["parts"] == nil ? nil : projectionFrames()
+            guard request["parts"] == nil || frames != nil else { complete(["shown": false]); return }
             restoreAccepted = true
-            complete(["shown": valid && snapshots.cover(token, in: webView, views: Array(Dictionary(grouping: selected.values, by: { ObjectIdentifier($0) }).values.compactMap { $0.first }), transient: true)])
+            complete(["shown": valid && snapshots.cover(token, in: webView, views: Array(Dictionary(grouping: selected.values, by: { ObjectIdentifier($0) }).values.compactMap { $0.first }), transient: true, frames: frames)])
         case "restore":
             restoreAccepted = false
-            guard let width = request["viewportWidth"] as? Double, width.isFinite, width > 0,
-                  let parts = request["parts"] as? [[String: Any]] else { complete(["shown": false]); return }
-            var frames: [String: CGRect] = [:]
-            let scale = webView.bounds.width / width
-            for part in parts {
-                guard let ids = part["ids"] as? [String], let x = part["x"] as? Double, let y = part["y"] as? Double,
-                      let w = part["width"] as? Double, let h = part["height"] as? Double,
-                      [x,y,w,h].allSatisfy({ $0.isFinite }), w > 0, h > 0 else { complete(["shown": false]); return }
-                for id in ids { frames[id] = CGRect(x: x*scale, y: y*scale, width: w*scale, height: h*scale) }
-            }
-            guard Set(frames.keys) == snapshots.identifiers(for: token), !frames.isEmpty else { complete(["shown": false]); return }
+            guard let frames = projectionFrames() else { complete(["shown": false]); return }
             let current = views()
             // Preserve renderer-owned constraints. Translation follows the corresponding DOM's movement.
             for (id, frame) in frames {
