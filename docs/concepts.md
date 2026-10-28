@@ -47,12 +47,12 @@ bar implementation.
 
 ## Choose the smallest integration that fits
 
-| What you are building                                                               | Start here                                    | Why this route                                                                                                     |
-| ----------------------------------------------------------------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| A Capacitor plugin exposing a native view, such as a tab bar or an eligible ad slot | [Capacitor plugin guide](capacitor-plugin.md) | Native registration owns runtime startup, measurements and handoff acknowledgements; keep the existing plugin API. |
-| A Cordova plugin with the same need                                                 | [Cordova plugin guide](cordova-plugin.md)     | The same lifecycle uses Cordova's native hooks and resource handler.                                               |
-| A renderer already batching many controls across pages and modals                   | [Renderer guide](renderer-guide.md)           | Group controls by lifecycle while retaining the renderer's existing placement and update protocol.                 |
-| An Ionic application using an Engine-enabled plugin                                 | [Ionic overlay guide](ionic-overlays.md)      | One shared monitor connects Ionic overlay lifecycle to projection coverage.                                        |
+| What you are building                                                                           | Start here                                    | Why this route                                                                                                     |
+| ----------------------------------------------------------------------------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| A Capacitor plugin exposing a native view, such as a tab bar or a capturable advertisement view | [Capacitor plugin guide](capacitor-plugin.md) | Native registration owns runtime startup, measurements and handoff acknowledgements; keep the existing plugin API. |
+| A Cordova plugin with the same need                                                             | [Cordova plugin guide](cordova-plugin.md)     | The same lifecycle uses Cordova's native hooks and resource handler.                                               |
+| A renderer already batching many controls across pages and modals                               | [Renderer guide](renderer-guide.md)           | Group controls by lifecycle while retaining the renderer's existing placement and update protocol.                 |
+| An Ionic application using an Engine-enabled plugin                                             | [Ionic overlay guide](ionic-overlays.md)      | One shared monitor connects Ionic overlay lifecycle to projection coverage.                                        |
 
 A Web modal alone does not require the renderer APIs. Start with native
 `NativeUIProjection` registration unless you already own multi-control
@@ -70,7 +70,7 @@ use their own transition notifications; Ionic is optional.
 | Native capture and temporary return images                          | Providing native views and SDK capture eligibility                   |
 | Image invalidation, token cleanup and observer teardown             | Owning business actions and the interactive Web fallback             |
 
-A DOM slot does not necessarily contain a Web replacement: a UI plugin can restore a button, while an ad plugin may hide its slot. Image handoff is explicit and noninteractive. The engine never forwards clicks through an image or replaces SDK click/impression handling.
+A DOM container does not necessarily contain an interactive Web replacement: a button plugin may provide an HTML button as its fallback, while an advertising plugin may leave the container empty when native content is unavailable. Image handoff is explicit and noninteractive. The engine never forwards clicks through an image or replaces SDK click/impression handling.
 
 ## Decide whether the limits fit your UI
 

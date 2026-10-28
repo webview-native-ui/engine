@@ -248,12 +248,12 @@ before the first navigation, even when SDK views arrive later. Include installat
 in the same error boundary as registration; if it fails, keep the existing Web
 fallback and do not retry installation after navigation. Registrations then
 share that main-frame, origin-restricted channel; they do not install new message
-listeners into a loaded WebView. This avoids a WebView native crash reproduced when
-registering an asynchronously loaded AdMob view. The registration constructor can
+listeners into a loaded WebView. Installing the channel before navigation avoids a WebView native crash when
+registering a view that loads asynchronously. The registration constructor can
 install the channel only on an un-navigated WebView; late installation fails with
 an actionable error instead of attempting unsafe injection. All registrations on
 the same WebView must use the same allowed origins. Closing a registration removes
-only its owner from the channel, so other slots continue working. The shared channel
+only its owner from the channel, so other registered views continue working. The shared channel
 remains installed for the WebView lifetime; registrations must still be retained
 and closed by their consuming plugin.
 

@@ -27,7 +27,12 @@ One monitor is shared per document, including between the npm module and the run
 
 The default covers Modal, Popover, Alert, Action Sheet, Loading, Picker, Toast and Menu lifecycle events. It compares each projection's DOM with the active overlay stack: content inside the front modal stays native, while covered content temporarily uses its prepared image. Toasts and inactive sheet backdrops do not cover a surface. Nested overlays keep it covered until the remaining stack permits restoration. Missing images retain the normal Web fallback. This temporary coverage never overwrites a plugin's explicit `web` or `none` destination. Projections registered later read the current state.
 
-Native Popover ownership is supplied by the Native UI vertical-bars renderer. The shared monitor does not treat its source DOM as a covering Web overlay. If native presentation fails, the renderer releases ownership and normal DOM coverage resumes.
+A popover displayed in a native window is different from a popover rendered in
+the WebView: its DOM placeholder must not be treated as a covering Web overlay.
+The `@rdlabo/capacitor-native-ui` plugin reports this native presentation ownership
+to the monitor. If its native presentation fails, it releases that ownership and
+the monitor resumes ordinary Web overlay coverage. This exception depends on an
+explicit integration; it is not inferred from the popover's DOM alone.
 
 ## Customize unusual layouts
 

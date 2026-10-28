@@ -1,6 +1,7 @@
 # Coordinate pages and modals in an existing renderer
 
-Use this guide when your renderer already creates and positions multiple native
+Here, a **renderer** means the part of your plugin that creates native views and
+updates their layout and appearance. Use this guide when it manages multiple native
 controls, batches their updates, and knows which page or modal owns them. The
 Engine takes over image preparation, scope reuse and handoff cleanup so those
 concerns do not need separate implementations for every overlay.
@@ -21,7 +22,8 @@ Separate groups matter because covering a background page does not necessarily
 cover the foreground modal's controls. Sharing one lifecycle would make those
 independent presentation decisions interfere with each other.
 
-For example, Native UI uses separate surfaces for a background page and each modal:
+For example, a plugin rendering toolbar buttons and a tab bar can use separate
+surfaces for a background page and each modal:
 
 | Surface         | Native content              | When a Web image is useful                                                 |
 | --------------- | --------------------------- | -------------------------------------------------------------------------- |
@@ -198,7 +200,7 @@ For plugins with several surfaces, provide `accepts(event)` to select this scope
 
 The manager converts private native file URLs with Capacitor internally. Plugin authors do not supply a URL resolver.
 
-This section describes the lower-level manager for renderers that already own batch reconciliation, such as the Ionic adapter. Prefer the native registration in the plugin guides for a new integration; it owns startup, measurements and draw acknowledgements.
+This section describes the lower-level manager for renderers that already own batch reconciliation, rather than a single native-view registration. Prefer the native registration in the plugin guides for a new integration; it owns startup, measurements and draw acknowledgements.
 
 ### Multiple fallbacks in one Native transaction
 

@@ -73,7 +73,35 @@ See [Projection container support](projection-containers.md) for the HTML and co
 
 ### Native surface requirements
 
-For independently moving AdMob slots, retain one registration per loaded native view/surface, use a slot-specific selector and filter the plugin's notifications through `receiveListeners.match` (`match: ["slotKey": slotKey, "loadId": loadId]` / `match = mapOf("slotKey" to slotKey, "loadId" to loadId)`). Dispose the registration when a loaded ad is replaced, even if its host view is reused. Keep SDK loading, impression and click handling in the ad plugin. Supply `canCapture` with its existing capture eligibility checks (for example, test-ad / opaque-background / no-video restrictions); the engine does not grant permission to snapshot an SDK view.
+When a plugin displays several independently moving native views—for example,
+several advertisements in a scrolling feed—create a separate registration for
+each view and give each one a selector matching its own DOM container. This lets
+one view move, hide or be replaced without changing another view's projection.
+
+If those registrations share plugin notifications, use `receiveListeners.match`
+to route each notification to its intended registration. The matching fields are
+chosen by your plugin, not reserved Engine identifiers. For example, include
+`viewKey` to identify the displayed item and `instanceId` to distinguish successive
+loaded instances for that item:
+
+```swift
+match: ["viewKey": viewKey, "instanceId": instanceId]
+```
+
+```kotlin
+match = mapOf("viewKey" to viewKey, "instanceId" to instanceId)
+```
+
+Include the same fields in the notification payload. Dispose the old registration
+when replacing its loaded content, even if the native container is reused, so
+notifications for the previous instance cannot affect the replacement.
+
+For third-party SDK views, keep loading and interaction handling in your plugin.
+Use `canCapture` to report whether the current content may be captured under the
+SDK's rules and your integration's supported capture conditions. For example, an
+advertising SDK may require different handling for video and static content.
+The Engine does not grant permission to capture SDK content or replace its
+click and impression handling.
 
 For SDK consumers without an equivalent Web fallback, set `failedFallback: .native`
 on iOS or `failedFallback = NativeUIProjection.FailedFallback.NATIVE` on Android.
@@ -211,7 +239,11 @@ android/gradlew -p android testDebugUnitTest assembleRelease connectedDebugAndro
 
 After prepared Web pixels are shown or retired, `NativeUIWebReadiness.prepare` checks readiness for a subsequent WebView draw. Its `current` predicate must validate the owning session, source generation and image revision. The temporary native copy covers this asynchronous handoff; overlay startup itself does not wait. Neither bridge acknowledgement nor this callback proves physical display presentation.
 
-[AdMob PR #487](https://github.com/capacitor-community/admob/pull/487) demonstrates a persistent image underlay for opaque test ads. That policy is not enabled globally: translucent UI would be composited twice, and video/SDK interactions require renderer-specific decisions. Never synthesize clicks through an image. The Native UI consumer uses the engine on both iOS and Android. Android acceptance tests exercise the real Capacitor bridge and translucent Compose content. Other SDK consumers still require their own integration and acceptance testing.
+An opaque image can remain beneath an opaque native view between handoffs, but
+that policy must not be applied to translucent controls: drawing a translucent
+view over its own captured appearance would composite the content twice. Choose
+capture behavior for the actual view and background, and validate the complete
+integration. Never synthesize clicks through a projected image.
 
 ### Translucent Android surfaces
 
