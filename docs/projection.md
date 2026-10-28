@@ -394,12 +394,56 @@ Glass appearance: native compositing and conversion to integer PNG can still cha
 pixels. Higher precision also increases capture memory and image size. The existing
 fallback policy applies if preparation fails. Android retains its platform capture path.
 
-### Managing renderer surfaces
+## Managing renderer surfaces
 
-Advanced renderers can register their source-to-fallback mapping with
-`createWebProjectionSurface`. The Engine reuses DOM scopes, prepares images and
-coordinates cover, restoration acknowledgement, failure and disposal. Normal native
-registration does not require this lower-level API.
+### Why a renderer needs a surface
+
+A Web modal should visually cover the Native controls behind it. However, those
+controls live above the WebView: raising the modal's CSS `z-index` cannot place it
+above them. Hiding the Native controls can reveal a visibly different Web fallback;
+showing them again before their position is ready can make them jump.
+
+`createWebProjectionSurface` lets a renderer treat related Native controls as one
+handoff unit. It prepares their images in their corresponding DOM containers before
+the handoff, so a Web overlay can cover those representations in the intended DOM
+layer. On return, it keeps the images until the renderer acknowledges that Native is
+ready. If a usable image is unavailable, the existing Web fallback remains available.
+This preserves visual continuity within the platform's capture limitations; it does
+not eliminate the capture differences described above.
+
+A **surface** is a group of controls that share a handoff lifecycle, such as a page
+or a modal. It is not necessarily one Native view or one image, and it does not
+create a modal or choose the application's stacking order.
+
+For example, Native UI uses separate surfaces for a background page and each modal:
+
+| Surface         | Native content              | When a Web image is useful                                                 |
+| --------------- | --------------------------- | -------------------------------------------------------------------------- |
+| Background page | Toolbar buttons and tab bar | A Web modal or popover must cover the page's controls.                     |
+| Modal           | Close and confirm buttons   | The modal moves during a drag, or another Web overlay covers its controls. |
+
+When a modal opens, the background surface can switch to its prepared images while
+the modal's own controls remain Native when appropriate. Closing the modal requests
+restoration of the background controls at their current positions; their images are
+removed after the accepted Native update. Separate surfaces prevent a departing
+modal's images or late replies from taking ownership of the newly exposed page.
+
+This API is useful when a renderer already batches multiple Native controls and
+knows which page or overlay owns them. It removes the need to implement DOM scope
+caching, temporary proxy placement, image handoff cleanup and restoration ordering
+in that renderer. `createWebProjectionSurfaces` manages those surfaces together,
+including asynchronous creation/disposal and shared appearance monitoring.
+
+For a single ad view or tab bar that fits the existing `NativeUIProjection`
+registration, use the [Capacitor](capacitor-plugin.md) or [Cordova](cordova-plugin.md)
+guide instead. Neither a Web modal nor a single Native view, by itself, requires
+this lower-level API. The renderer still reports framework lifecycle decisions;
+the Engine does not automatically discover when every kind of modal opens or closes.
+
+### Register and update renderer surfaces
+
+Register the mapping from Native control sources to their existing Web fallback
+containers with `createWebProjectionSurface`:
 
 ```ts
 const surfaces = createWebProjectionSurfaces<HTMLElement, WebProjectionSurface>();
