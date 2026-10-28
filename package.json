@@ -33,7 +33,7 @@
     "lint": "npm run typecheck && eslint . --max-warnings 0 && npm run format:check",
     "format": "prettier --write \"**/*.{ts,js,mjs,cjs,json,md,yml,yaml,html}\"",
     "prepublishOnly": "npm run build",
-    "test:release": "node --test scripts/native-ui-engine-release/publish.test.mjs",
+    "test:release": "node --test scripts/native-ui-engine-release/*.test.mjs",
     "test:package": "node scripts/verify-package.mjs",
     "release": "np --no-publish --no-tests --branch main",
     "test:cordova": "node scripts/verify-cordova.mjs",
