@@ -40,30 +40,7 @@ The container does not have to exist at registration time. A missing DOM waits w
 
 A Web Component host can be the destination, for example `projectionSelector: 'native-ad[placement="home"]'`. Give the host a layout box (`display: block` with the intended dimensions); the engine observes insertion, removal and selector attribute changes. The selector runs in the document and does not search inside shadow roots. The engine suppresses fallback content and pseudo-elements in the light DOM and open shadow roots during projection. Closed shadow content cannot be inspected and must inherit the host's `visibility`; provide a container whose shadow/slot structure can display the inserted image.
 
-### Supported destination elements
-
-The selected element must have a layout box and be able to contain the projected image.
-
-| Destination                                            | Support                                                                                                                 |
-| ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
-| `div`, `section`, `nav`, `button`                      | Supported with the intended size and placement.                                                                         |
-| `span`, `a`                                            | Use `inline-block` or `block` with the intended dimensions; avoid fragmented inline text.                               |
-| `select`, `input`, `textarea`                          | Use an outer container; direct scopes are rejected.                                                                     |
-| `img`, `canvas`, media/embedded content, void elements | Use an outer container; direct scopes are rejected.                                                                     |
-| SVG/MathML                                             | Use an HTML container.                                                                                                  |
-| Custom elements, including `ion-select`                | Conditional on their layout and Shadow DOM structure, as described above. An `ion-select` host is not an HTML `select`. |
-
-For example, select `#seat-projection` as the destination:
-
-```html
-<span id="seat-projection" style="display: inline-block; width: 12rem; height: 2.75rem">
-  <select aria-label="Seat" style="width: 100%; height: 100%">
-    <option>Any seat</option>
-  </select>
-</span>
-```
-
-The existing control and its value/listeners are preserved. The image is noninteractive; the plugin still owns native control behavior and value synchronization. Pseudo-elements are not selectable destinations. Elements without a usable box (`display: none`, `display: contents`, zero size) and elements with special child-rendering rules such as `option` need an ordinary wrapper.
+See [Projection container support](projection-containers.md) for the HTML and complete Ionic element tables, sizing conditions and a wrapper example.
 
 ### Native surface requirements
 

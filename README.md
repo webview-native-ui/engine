@@ -44,6 +44,7 @@ The current API is pre-1.0. Use matching, pinned Engine versions across npm and 
 
 ## Further reading
 
+- [Projection container support](docs/projection-containers.md) — supported HTML and Ionic destinations, sizing conditions and wrapper examples.
 - [Projection behavior and advanced integration](docs/projection.md) — DOM requirements, lifecycle, fallback policies, optional Ionic support and lower-level APIs.
 - [Development and releases](docs/maintenance.md) — repository structure, validation and publishing.
 
