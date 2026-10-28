@@ -9,3 +9,7 @@ export { getOverlayCoordinator, usesOverlayBackdrop, type OverlayChange, type Ov
 export { getUnprojectedVisibility } from './dom/visibility.js';
 
 export { bindProjectionPlacement, type ProjectionPlacementBinding } from './projection/placement.js';
+
+export { createWebProjectionSurfaces } from './projection/surfaces.js';
+
+export * from './projection/surface.js';

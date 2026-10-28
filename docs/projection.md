@@ -393,3 +393,52 @@ This reduces color loss in wide-gamut content but does not guarantee identical L
 Glass appearance: native compositing and conversion to integer PNG can still change
 pixels. Higher precision also increases capture memory and image size. The existing
 fallback policy applies if preparation fails. Android retains its platform capture path.
+
+### Managing renderer surfaces
+
+Advanced renderers can register their source-to-fallback mapping with
+`createWebProjectionSurface`. The Engine reuses DOM scopes, prepares images and
+coordinates cover, restoration acknowledgement, failure and disposal. Normal native
+registration does not require this lower-level API.
+
+```ts
+const surfaces = createWebProjectionSurfaces<HTMLElement, WebProjectionSurface>();
+const projection = await surfaces.ensure(page, () =>
+  createWebProjectionSurface(transport, {
+    namespace: 'my-renderer',
+    target: (source) => source.element,
+    wake: scheduleUpdate,
+    blocked: () => transitionIsActive,
+  }),
+);
+surfaces.consider(acceptedRevision, sources);
+projection?.begin(); // The framework reports a covering layer or motion.
+projection?.end(); // Requests restoration; keeps the image until Native is ready.
+surfaces.updated(token, restoredIDs, acceptedRevision);
+await surfaces.delete(page);
+await surfaces.destroy();
+```
+
+The renderer supplies Native IDs and frames, source ownership, placement policy and
+accepted update acknowledgements. Framework lifecycle events remain outside the
+Engine; it does not infer modal semantics from arbitrary DOM mutations.
+
+For renderer-owned fallback proxies, `canRelocate(target)` explicitly permits
+`begin(layer)` to place those hosts in a supplied overlay layer. The Engine restores
+their parent and sibling order after restoration, failure or disposal. Application
+DOM is not relocated by default, and an application reparenting a proxy takes
+precedence over restoring its old location.
+
+A collection shares appearance, resize, orientation and document visibility
+listeners across its surfaces, and ignores Engine-owned image events. Renderers can
+exclude their own proxy events with `ignoreTarget`. `followMotion(moving, target)`
+uses the renderer's existing moving-element map to rebase images only while their
+own hosts animate; ancestor transforms already move the images without polling.
+All listeners and scheduled frames are removed at disposal.
+
+Repeated `ensure` calls share pending creation or the existing projection. Deletion,
+DOM disconnection or renderer disposal prevents a late result from becoming active;
+the Engine destroys it instead. A failed creation may be retried. The renderer
+signals page retirement through its existing lifecycle and can inspect `keys()`
+and `values()` during its normal update pass. The collection does not install a
+second DOM mutation observer or a continuous polling loop.
