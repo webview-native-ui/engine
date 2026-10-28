@@ -14,6 +14,7 @@ export const getUnprojectedVisibility = (element: HTMLElement): string => {
       if (
         attribute.name === 'data-native-ui-snapshot-source' ||
         attribute.name === 'data-native-ui-snapshot-prepared' ||
+        attribute.name === 'data-native-ui-snapshot-content' ||
         attribute.name.startsWith('data-native-ui-session-')
       )
         markers.push({ node, name: attribute.name, value: attribute.value });

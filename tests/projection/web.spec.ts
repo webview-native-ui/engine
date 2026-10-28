@@ -1407,3 +1407,27 @@ test('hiding fallback content does not cancel its other CSS transitions', async 
   await page.evaluate(() => (window as any).manager.destroy());
   expect(await page.evaluate(() => (window as any).opacityTransition?.playState)).toBe('running');
 });
+
+test('renderer visibility ignores projection hiding across an open shadow boundary', async ({ page }) => {
+  await prepare(page);
+  await page.evaluate(() => {
+    const source = document.querySelector<HTMLElement>('#source')!;
+    source.attachShadow({ mode: 'open' }).innerHTML = '<span id="fallback">Fallback</span>';
+    (window as any).manager.begin();
+  });
+  await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-content', '');
+  const read = () =>
+    page.evaluate(() => {
+      const source = document.querySelector<HTMLElement>('#source')!;
+      const child = source.shadowRoot!.querySelector<HTMLElement>('#fallback')!;
+      return {
+        host: (window as any).engine.getUnprojectedVisibility(source),
+        child: (window as any).engine.getUnprojectedVisibility(child),
+        projected: getComputedStyle(child).visibility,
+        marker: source.hasAttribute('data-native-ui-snapshot-content'),
+      };
+    });
+  expect(await read()).toEqual({ host: 'visible', child: 'visible', projected: 'hidden', marker: true });
+  await page.evaluate(() => (document.querySelector<HTMLElement>('#scroll')!.style.visibility = 'hidden'));
+  expect(await read()).toEqual({ host: 'hidden', child: 'hidden', projected: 'hidden', marker: true });
+});
