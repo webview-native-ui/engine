@@ -4,6 +4,8 @@ Add Web projection and restoration to an existing Capacitor plugin without chang
 
 This guide covers dependencies, registration, notifications and teardown. See [projection behavior](projection.md) for shared DOM requirements, capture policies and advanced integration.
 
+Choose a destination using the shared [selector and element support table](projection.md#supported-selectors-and-destination-elements): a sized `span` can be used directly; an HTML `select` needs a wrapper.
+
 ## Requirements
 
 This package declares support for Capacitor 8 (`>=8.0.0 <9`). The Engine library requires iOS 15+ and Android API 23+; the consuming Capacitor version or SDK may require a higher minimum. Composited Android capture requires API 26+ and the WebView features described in the [projection reference](projection.md#dom-and-native-surface-requirements).

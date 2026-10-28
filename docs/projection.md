@@ -40,6 +40,56 @@ The container does not have to exist at registration time. A missing DOM waits w
 
 A Web Component host can be the destination, for example `projectionSelector: 'native-ad[placement="home"]'`. Give the host a layout box (`display: block` with the intended dimensions); the engine observes insertion, removal and selector attribute changes. The selector runs in the document and does not search inside shadow roots. The engine suppresses fallback content and pseudo-elements in the light DOM and open shadow roots during projection. Closed shadow content cannot be inspected and must inherit the host's `visibility`; provide a container whose shadow/slot structure can display the inserted image.
 
+### Supported selectors and destination elements
+
+Selector matching and image presentation have separate requirements. `projectionSelector` uses `document.querySelectorAll()` and must match **exactly one HTML element**. A valid selector does not make every matching element a supported projection container.
+
+| Selector or destination                                                             | Support                               | Requirements                                                                                                                                                                                                                   |
+| ----------------------------------------------------------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `#player`, `.ad-slot`, `[data-placement="home"]`, `native-ad[placement="home"]`     | Supported                             | Use a valid CSS selector with exactly one match. Prefer a stable ID or placement attribute.                                                                                                                                    |
+| Descendant/child selectors, such as `#player > .surface`                            | Supported                             | The matched element is the destination, not a root for discovering more surfaces.                                                                                                                                              |
+| No matches, or more than one match                                                  | No active binding                     | Native content is hidden until the selector resolves to one destination. Use a distinct selector and registration for each independent surface.                                                                                |
+| `::before`, `::after`, `::part(...)`, `::slotted(...)`                              | Not selectable destinations           | Pseudo-elements are not DOM elements returned by `querySelectorAll()`. Select the host/container instead.                                                                                                                      |
+| Elements inside a ShadowRoot or another document/iframe                             | Not reached by `projectionSelector`   | Document queries do not cross those boundaries. A Web Component host in the document can be selected. The low-level scope API accepts a direct reference to a supported HTML element, including one inside an open ShadowRoot. |
+| `div`, `section`, `nav`, `button`, `a`                                              | Supported as containers               | Provide a measurable layout box in the intended layer. Preserve a useful Web fallback.                                                                                                                                         |
+| `span`                                                                              | Supported with suitable layout        | Use `display: inline-block` or `block` and the intended dimensions. A plain inline span's width/height do not define a reliable projection box; avoid text that wraps across multiple inline fragments.                        |
+| `select`, `textarea`, `input`                                                       | Not supported directly                | These controls do not provide an ordinary container for the projected image. Select a wrapper containing the control.                                                                                                          |
+| `img`, `canvas`, `video`, `audio`, `iframe`, `embed`, `object`                      | Not supported directly                | Select their existing fallback container. Child insertion is not a supported way to replace these elements' visible content.                                                                                                   |
+| Void elements: `br`, `hr`, `area`, `base`, `link`, `meta`, `source`, `track`, `wbr` | Not supported                         | Use a container with a layout box.                                                                                                                                                                                             |
+| SVG/MathML elements                                                                 | Not supported directly                | The scope must be an HTML element. Use an HTML wrapper around the SVG or MathML.                                                                                                                                               |
+| Custom element with no ShadowRoot                                                   | Supported with suitable layout        | Its light DOM must be able to display the inserted image. Give the host a layout box.                                                                                                                                          |
+| Custom element with an open ShadowRoot, including Ionic components                  | Conditional                           | The image is inserted into the open root. Host sizing, clipping, transforms and ancestor effects still apply; verify the particular component. An `ion-select` host is different from a native HTML `select`.                  |
+| Custom element with a closed ShadowRoot                                             | Conditional; not generally guaranteed | The Engine can only insert into light DOM. The component must expose a suitable slot and its hidden fallback content must inherit host visibility. Otherwise use an accessible outer container.                                |
+
+`createWebProjectionScope()` explicitly rejects the unsupported control, media and void tags listed above with a `TypeError`. Tags not on that rejection list are not automatically safe: for example, `option`, `optgroup`, table internals and `display: contents` elements are not general-purpose image containers. Prefer an ordinary HTML wrapper when the element has special child-rendering rules or no usable layout box. `display: none` and zero-sized placeholders cannot supply visible projection geometry. The same single-box requirement applies to other inline containers such as `a`. CSS selectors must be valid for the target WebView; use `CSS.escape()` when constructing an identifier selector from arbitrary text.
+
+For example, a `select` can remain the existing Web fallback inside a selected wrapper:
+
+```html
+<span id="seat-projection" class="projection-container">
+  <select aria-label="Seat">
+    <option value="any">Any seat</option>
+    <option value="window">Window seat</option>
+  </select>
+</span>
+```
+
+```css
+.projection-container {
+  display: inline-block;
+  width: 12rem;
+  height: 2.75rem;
+}
+.projection-container > select {
+  width: 100%;
+  height: 100%;
+}
+```
+
+Use `projectionSelector: '#seat-projection'`, not `'#seat-projection > select'`. The plugin still owns the native control and value/event synchronization. The Engine preserves the existing select and its value/listeners, hides its rendering while the prepared image is shown, and restores it when Web fallback is needed. The projected image is noninteractive; it is not a working select replacement. Put the wrapper in the intended overlay/layer before registering it. Apply styles to the authored control rather than every child, since the Engine also inserts an image child.
+
+### Native surface and capture requirements
+
 For independently moving AdMob slots, retain one registration per loaded native view/surface, use a slot-specific selector and filter the plugin's notifications through `receiveListeners.match` (`match: ["slotKey": slotKey, "loadId": loadId]` / `match = mapOf("slotKey" to slotKey, "loadId" to loadId)`). Dispose the registration when a loaded ad is replaced, even if its host view is reused. Keep SDK loading, impression and click handling in the ad plugin. Supply `canCapture` with its existing capture eligibility checks (for example, test-ad / opaque-background / no-video restrictions); the engine does not grant permission to snapshot an SDK view.
 
 For SDK consumers without an equivalent Web fallback, set `failedFallback: .native`
@@ -180,7 +230,7 @@ The container, bridge and update callbacks above belong to the consuming plugin.
 
 The engine prepares a noninteractive `img` inside the fallback container (directly inside its open ShadowRoot when present) while Native is visible. It reuses the decoded image and DOM node across handoffs, and releases them when the scope is retired or destroyed. The image is `inert`, hidden from accessibility and excluded from hit testing. The existing fallback and its children are never cloned, replaced, removed or assigned `inert`/`aria-hidden`; their listeners, values and application changes survive projection. Both `::before` and `::after` remain available to the application.
 
-Supply an existing container such as `div`, `button` or a custom element. Replaced/void elements such as `img`, `input` and `video` remain unsupported as scopes; use their existing fallback container. The renderer may move the same container between parents, but must not replace a low-level scope's element or let two managers control it simultaneously. Notify the manager through `moved()` when changing its placement during projection.
+Supply an existing container that meets the [selector and destination requirements](#supported-selectors-and-destination-elements). In particular, select a wrapper around HTML form controls such as `select` or replaced elements such as `img`, rather than those elements themselves. The renderer may move the same container between parents, but must not replace a low-level scope's element or let two managers control it simultaneously. Notify the manager through `moved()` when changing its placement during projection.
 
 The image is absolutely positioned within the fallback, which retains its layout box. As with the previous pseudo-element presentation, static hosts become positioned while the image is visible. Host and ancestor clipping, transforms and filters still apply. Open ShadowRoot insertion bypasses internal slot wrappers, not the host's own clipping. Closed shadow roots cannot be inspected; provide a fallback container that can render the image.
 

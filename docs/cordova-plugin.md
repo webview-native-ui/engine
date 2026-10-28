@@ -4,6 +4,8 @@ The same npm package, Swift library and Android AAR support Capacitor and Cordov
 
 The consuming plugin still owns its native view and the corresponding DOM, including placement, size and stacking order. Supply an existing selector such as `native-ad` or `#player`. The DOM may be added after initialization. Image preparation, scroll handling, overlays and restoration use the common Engine implementation.
 
+Choose a destination using the shared [selector and element support table](projection.md#supported-selectors-and-destination-elements): a sized `span` can be used directly; an HTML `select` needs a wrapper.
+
 ## Requirements
 
 The integration is verified with cordova-ios 8.1.1 and cordova-android 15.1.0 using their standard WebViews. The Engine itself requires iOS 15+ and Android API 23+; the Cordova host or SDK may require a higher minimum. Composited Android capture requires API 26+.
