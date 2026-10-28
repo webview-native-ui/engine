@@ -29,23 +29,32 @@ WebView Native UI Engine makes that work reusable. It lets applications combine 
 
 Use the live native view where it belongs, and a prepared visual projection in the DOM when the Web layer needs to own presentation. Restore the interactive native view when it can take over again. An existing DOM container gives the Web projection its place in the application's layout and layer structure.
 
-The Engine coordinates this handoff; the integrating renderer still creates and positions its views. A projected image preserves appearance, not live interaction or video. Capture availability and layout support determine when a projection can be used, with an explicit fallback when it cannot. See [projection behavior](docs/projection.md) for the detailed contract and limits.
+The Engine coordinates this handoff; the integrating renderer still creates and positions its views. A projected image preserves appearance, not live interaction or video. Capture availability and layout support determine when a projection can be used, with an explicit fallback when it cannot. See [concepts and limits](docs/concepts.md) for the detailed contract and limits.
 
-## Integration
+## Choose your starting point
 
-Applications gain these capabilities through plugins that integrate the Engine. Capacitor and Cordova plugin authors add it as a library dependency while retaining their existing native controls and public APIs. The same Engine supports iOS and Android. Ionic and Angular are not required; Ionic overlay coordination is optional.
+Applications gain these capabilities through plugins that integrate the Engine.
+Plugin authors retain their existing native controls and public APIs; the Engine
+supplies the coordination between native and Web presentation. It supports iOS
+and Android with Capacitor or Cordova. Ionic and Angular are not required.
 
-- [Capacitor plugin guide](docs/capacitor-plugin.md) — install dependencies and add registration, events and teardown to your existing plugin.
-- [Cordova plugin guide](docs/cordova-plugin.md) — integrate the same Engine with Cordova's lifecycle and resource handler, without a Capacitor dependency.
+| Your goal                                            | Read                                                 |
+| ---------------------------------------------------- | ---------------------------------------------------- |
+| Decide whether this approach fits your UI            | [Concepts, examples and tradeoffs](docs/concepts.md) |
+| Add support to a Capacitor plugin                    | [Capacitor plugin guide](docs/capacitor-plugin.md)   |
+| Add support to a Cordova plugin                      | [Cordova plugin guide](docs/cordova-plugin.md)       |
+| Coordinate multiple controls across pages and modals | [Renderer guide](docs/renderer-guide.md)             |
+| Cover an Engine-enabled plugin with Ionic overlays   | [Ionic overlay guide](docs/ionic-overlays.md)        |
 
-Native registration starts the Web runtime; applications do not need a separate Engine initializer for the base integration. Keep your plugin's normal API and notifications.
+Native registration starts the Web runtime; the base integration needs no separate
+application-side Engine initializer. The API is pre-1.0: pin matching Engine
+versions across npm and native dependencies. Android placement requires API 23+,
+with composited snapshots available from API 26+.
 
-The current API is pre-1.0. Use matching, pinned Engine versions across npm and native dependencies. Android placement requires API 23+, with composited snapshots available from API 26+.
-
-## Further reading
+## Reference and contributing
 
 - [Projection container support](docs/projection-containers.md) — supported HTML and Ionic destinations, sizing conditions and wrapper examples.
-- [Projection behavior and advanced integration](docs/projection.md) — DOM requirements, lifecycle, fallback policies, optional Ionic support and lower-level APIs.
+- [Projection reference](docs/projection.md) — lifecycle contracts, native transport, capture policies and platform limits.
 - [Development and releases](docs/maintenance.md) — repository structure, validation and publishing.
 
 ## License
