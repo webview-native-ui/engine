@@ -63,7 +63,10 @@ const boot = async (
             w.calls.push(request);
             if (request.action === 'visibility' && !request.visible && w.holdHide) {
               w.holdHide = false;
-              return new Promise((resolve) => w.pendingHide.push(resolve));
+              return new Promise((resolve, reject) => {
+                w.pendingHide.push(resolve);
+                w.rejectHide = reject;
+              });
             }
             if (request.action === 'track' && w.holdTrack)
               return new Promise((_resolve, reject) => {
@@ -179,6 +182,53 @@ test('replacing a DOM creates a new fixed scope; another slot event cannot move 
   await page.evaluate(() => (window as any).events.moving({ slot: 2 }));
   await expect(page.locator('#slot')).not.toHaveAttribute('data-native-ui-snapshot-visible');
 });
+
+for (const pending of ['native drag', 'draw acknowledgement'] as const) {
+  test(`DOM replacement retires a pending ${pending} without waiting for its completion`, async ({ page }) => {
+    await boot(page);
+    await expect(page.locator('#slot')).toHaveAttribute('data-native-ui-snapshot', /.+/);
+    await page.evaluate((pending) => {
+      const w = window as any;
+      if (pending === 'native drag') w.interaction({ active: true, precovered: 'pixels' });
+      else {
+        w.holdResume = true;
+        w.events.moving({ slot: 1 });
+        w.events.shown({ slot: 1 });
+      }
+    }, pending);
+    if (pending === 'draw acknowledgement') await expect.poll(() => page.evaluate(() => (window as any).pendingResume.length)).toBe(1);
+    await page.evaluate(() => {
+      const w = window as any;
+      w.old = document.querySelector('#slot');
+      w.old.remove();
+    });
+    await expect.poll(() => page.evaluate(() => (window as any).old.hasAttribute('data-native-ui-snapshot'))).toBe(false);
+    await expect.poll(() => page.evaluate(() => (window as any).calls.at(-1))).toEqual({ action: 'visibility', visible: false });
+    await page.evaluate(() => {
+      const replacement = document.createElement('div');
+      replacement.id = 'slot';
+      replacement.style.cssText = 'width:120px;height:40px';
+      document.body.append(replacement);
+    });
+    await expect(page.locator('#slot')).toHaveAttribute('data-native-ui-snapshot', /.+/);
+    // A new surface must be able to complete its own handoff before the old ACK arrives.
+    await page.evaluate(() => {
+      const w = window as any;
+      w.holdResume = false;
+      w.events.moving({ slot: 1 });
+    });
+    await expect(page.locator('#slot')).toHaveAttribute('data-native-ui-snapshot-visible', '');
+    await page.evaluate(() => (window as any).events.shown({ slot: 1 }));
+    await expect(page.locator('#slot')).not.toHaveAttribute('data-native-ui-snapshot-visible');
+    await page.evaluate(() => {
+      const w = window as any;
+      w.pendingResume.shift()?.({});
+      w.interaction({ active: false });
+    });
+    await expect(page.locator('#slot')).toHaveAttribute('data-native-ui-session-surface', 'native');
+    expect(await page.evaluate(() => (window as any).old.hasAttribute('data-native-ui-session-surface'))).toBe(false);
+  });
+}
 
 test('automatic scroll restoration cannot override explicit none', async ({ page }) => {
   await boot(page);
@@ -931,3 +981,40 @@ test('native hide retires a pending idle image immediately and cannot clear its 
   await page.evaluate(() => (window as any).pendingRelease.shift()({}));
   await expect(page.locator('#slot')).toHaveAttribute('data-native-ui-snapshot', /.+/);
 });
+
+for (const outcome of ['resolve', 'reject'] as const) {
+  test(`a retired selector cannot resume when its pending hide will ${outcome}`, async ({ page }) => {
+    await boot(page, true, '#slot', 'native');
+    await expect(page.locator('#slot')).toHaveAttribute('data-native-ui-snapshot', /.+/);
+    await page.evaluate(() => {
+      const w = window as any;
+      w.holdResume = true;
+      w.events.moving({ slot: 1 });
+      w.events.shown({ slot: 1 });
+    });
+    await expect.poll(() => page.evaluate(() => (window as any).pendingResume.length)).toBe(1);
+    await page.evaluate(() => {
+      const w = window as any;
+      w.holdHide = true;
+      w.retirementStart = w.calls.length;
+      document.querySelector('#slot')!.id = 'departed';
+    });
+    await expect.poll(() => page.evaluate(() => (window as any).pendingHide.length)).toBe(1);
+    await page.evaluate(() => (window as any).pendingResume.shift()({}));
+    await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(await page.evaluate(() => (window as any).calls.filter((c: any) => c.action === 'resume').length)).toBe(1);
+    await page.evaluate((outcome) => {
+      const w = window as any;
+      if (outcome === 'reject') w.rejectHide(new Error('Hide reply unavailable'));
+      else w.pendingHide.shift()({});
+    }, outcome);
+    await expect(page.locator('#departed')).not.toHaveAttribute('data-native-ui-snapshot');
+    await expect(page.locator('#departed')).not.toHaveAttribute('data-native-ui-session-surface');
+    expect(
+      await page.evaluate(() => {
+        const w = window as any;
+        return w.calls.slice(w.retirementStart).some((c: any) => c.action === 'visibility' && c.visible);
+      }),
+    ).toBe(false);
+  });
+}
