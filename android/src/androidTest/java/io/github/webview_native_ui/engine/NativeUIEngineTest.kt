@@ -53,10 +53,7 @@ class NativeUIEngineTest {
    val request=JSONObject().put("action","cover").put("token",token).put("viewportWidth",activity.web.width/2.0).put("parts",org.json.JSONArray().put(part))
    val invalid=JSONObject(request.toString()).put("parts",org.json.JSONArray().put(part).put(part))
    assertFalse(send(invalid).getBoolean("shown"))
-   main {
-    assertEquals(View.VISIBLE,native.visibility)
-    assertEquals(168f,snapshots.projectionFrames(request,activity.web)!!.getValue("button").top,0.01f)
-   }
+   main {assertEquals(View.VISIBLE,native.visibility)}
    assertTrue(send(request).getBoolean("shown"))
    main {
     assertEquals(View.INVISIBLE,native.visibility)

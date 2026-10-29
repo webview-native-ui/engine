@@ -34,10 +34,13 @@ frameworks report their own transition lifecycle through notifications.
 
 ## Dependencies
 
+Replace `<engine-version>` in every dependency below with the same published
+release. Read that release tag’s documentation so the examples match its APIs.
+
 Use the same Engine release for the Web package and native libraries. The API is pre-1.0; pin versions and retain dependency lockfiles.
 
 ```sh
-npm install --save-exact @webview-native-ui/engine@0.0.1
+npm install --save-exact '@webview-native-ui/engine@<engine-version>'
 ```
 
 Declare the native dependencies in the consuming plugin as well. npm installation alone does not link either native library.
@@ -45,7 +48,7 @@ Declare the native dependencies in the consuming plugin as well. npm installatio
 For Swift Package Manager:
 
 ```swift
-.package(url: "https://github.com/webview-native-ui/engine.git", exact: "0.0.1")
+.package(url: "https://github.com/webview-native-ui/engine.git", exact: "<engine-version>")
 // In the plugin target's dependencies:
 .product(name: "WebViewNativeUIEngine", package: "engine")
 ```
@@ -54,7 +57,7 @@ For the plugin's Android Gradle configuration:
 
 ```groovy
 dependencies {
-    implementation 'io.github.webview-native-ui:engine:0.0.1'
+    implementation 'io.github.webview-native-ui:engine:<engine-version>'
 }
 ```
 

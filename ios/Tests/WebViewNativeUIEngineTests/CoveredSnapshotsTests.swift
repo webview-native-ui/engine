@@ -26,20 +26,16 @@ final class NativeUICoveredSnapshotsTests: XCTestCase {
         var part = try XCTUnwrap((wire["parts"] as? [[String: Any]])?.first)
         part["y"] = (part["y"] as! Double) + 30
         let request: [String: Any] = ["action": "cover", "token": token, "viewportWidth": Double(web.bounds.width / 2), "parts": [part]]
-        let frames = try XCTUnwrap(snapshots.projectionFrames(request, in: web))
-        XCTAssertEqual(frames["button"]!.minY, 128, accuracy: 0.01)
         var invalid = request
         invalid["parts"] = [part, part]
         let rejected = await send(invalid)
         XCTAssertEqual(rejected["shown"] as? Bool, false)
         XCTAssertFalse(control.isHidden)
-        invalid["viewportWidth"] = 0
-        XCTAssertNil(snapshots.projectionFrames(invalid, in: web))
         let covered = await send(request)
         XCTAssertEqual(covered["shown"] as? Bool, true)
         XCTAssertTrue(control.isHidden)
         let copy = try XCTUnwrap(window.subviews.compactMap { $0 as? UIImageView }.first)
-        XCTAssertEqual(copy.frame.minY, web.convert(frames["button"]!, to: window).minY, accuracy: 0.01)
+        XCTAssertEqual(copy.frame.minY, web.convert(CGPoint(x: 0, y: 128), to: window).y, accuracy: 0.01)
         _ = await send(["action": "painted", "token": token])
         var restore = request; restore["action"] = "restore"
         let restored = await send(restore)

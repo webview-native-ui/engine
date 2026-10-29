@@ -223,32 +223,17 @@ iOS or `restoreViews()` on Android to undo only the Engine's hiding changes. Thi
 is not a command to lay out or reveal arbitrary plugin content. Keep the normal
 visibility and placement policy in the renderer.
 
-The primitives below remain available for integrations that also own native
-placement during a handoff. The built-in `NativeUIProjection` registration uses
-the same destination validation and snapshot operations while retaining its
-registration-specific placement and opaque-view behavior.
+### Direct snapshot primitives
 
-When using the primitives directly instead of `handle`, convert request `parts` from CSS pixels to native frames using `webView.bounds.width / viewportWidth` on iOS or `webView.width / viewportWidth` on Android, mapping each part's IDs to its rectangle. Pass these as `destinationFrames` for both `cover` and `restore`. A retained image can move before its first cover or after a failed return copy; always use the supplied coordinates. When `parts` is absent, pass `nil` / `null` to retain the captured placement. The high-level `NativeUIProjection` registration handles this conversion automatically.
+Use these only when your integration owns native placement during handoff. `NativeUIProjection` uses the same operations with registration-specific placement and opaque-view policies. Do not duplicate conversion or copy retirement when forwarding requests to `handle`.
 
-A transient surface keeps its image while its sources retain the same sizes and positions relative to their projection scopes. Moving the whole scope can reuse pixels; moving a source inside a fixed scope invalidates the cached layout.
+- Convert destination `parts` from CSS pixels using `webView.bounds.width / viewportWidth` on iOS or `webView.width / viewportWidth` on Android. Pass frames to `cover` and `restore`; absent cover parts retain captured placement. Neither operation captures new pixels.
+- `transient: true` separates a moving foreground surface from the background's `coveringToken`. Reuse pixels while source sizes and positions relative to their scope remain unchanged; movement within a fixed scope invalidates the layout.
+- Retire the entry copy after Web drawing readiness: `retireCopy(token)` on iOS, `retireCopyAfterWebDraw` on Android.
+- For return, call `restore`, undo Engine hiding with `restoreControls()` / `restoreViews()`, and apply normal native layout. Retire the return copy after the accepted native update and Web drawing readiness, using `retireCopy` with `entry: false` / `entry = false`. Android can forward `painted` and `restored` to `handle` to reuse readiness and rejection handling.
+- Release tokens with `release(token)`. Use `reset()` only for owner teardown, and Android `close()` to dispose the encoder. Never reset another surface's captures.
 
-`transient: true` is for a moving foreground surface: it does not replace the background's `coveringToken`. Retire the entry copy with `retireCopy(token)` after Web image readiness. Before applying a normal native update, undo the engine's visibility changes with iOS `restoreControls()` / Android `restoreViews()`. For return, `restore` installs the cached return image, the plugin renders underneath it, and `retireCopy(token, entry: false)` retires it after the corresponding acknowledgement/readiness. These platform-native names remain idiomatic; the lifecycle is the same. `cover` is an entry operation, not a method to repeat on each normal update.
-
-Token cleanup uses `release(token)`; owner teardown uses `reset()` (and Android `close()` when disposing its encoder). A surface manager must not reset another surface's captures. Web fallback remains the renderer's responsibility when a capture or native placement is unavailable.
-
-The optional `eligible(source)` and `current(sources)` callbacks keep framework-specific surface selection outside the engine. `transient: true` supports a moving surface whose return image must be rebased. Arbitrary CSS transforms are not supported by native scroll tracking; such movement can use this image path.
-
-The image transport accepts `WebProjectionRequest` and returns prepared token/parts or `{ shown: false }`. Parts use local `file:` URLs and CSS-pixel viewport coordinates. Requests use the plugin's existing ordered bridge:
-
-| Action     | Native responsibility                                                                                                                                                                                       |
-| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `prepare`  | Validate the current revision and IDs, then `NativeUICoveredSnapshots.prepare` using actual rendered frames.                                                                                                |
-| `cover`    | Validate the token and complete native surface ownership; create the entry copy at supplied frames (or captured frames when absent) and hide the associated native views. Return `shown: false` on failure. |
-| `painted`  | Retire only that token's entry copy.                                                                                                                                                                        |
-| `restore`  | Rebase the prepared return copy to supplied frames. Never capture here.                                                                                                                                     |
-| `restored` | Retire only that token's return copy after the native update ACK and Web paint boundary.                                                                                                                    |
-| `release`  | Release the named token, files and associated temporary views.                                                                                                                                              |
-| `reset`    | Owner teardown only; release all native capture resources.                                                                                                                                                  |
+Missing captures or placement use the renderer's ordinary fallback. See the [Web request contract](renderer-guide.md#multiple-fallbacks-in-one-native-transaction) for payloads.
 
 Use `NativeUICoveredSnapshots.observe` to notify the JS listener when interaction starts/ends. On iOS, captures rasterize the visible window with `drawHierarchy(in:afterScreenUpdates:)`, including the background under the clipped native component. Screen snapshot views are display replicas and are not used as bitmap sources. UIKit rasterization can differ from the live compositor for materials such as Liquid Glass; validate the appearance on physical devices with the backgrounds your plugin supports. Cache validity therefore includes layout and the plugin's visual-change notifications. The engine does not capture continuously or guarantee every possible renderer can be captured.
 
