@@ -36,14 +36,10 @@ jobs:
           RELEASE_TAG: ${{ inputs.tag || github.event.release.tag_name }}
         with:
           script: |
-            const { readFileSync } = await import('node:fs');
-            const { execFileSync } = await import('node:child_process');
-            const version = JSON.parse(readFileSync('package.json', 'utf8')).version;
-            if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version) || process.env.RELEASE_TAG !== `v${version}`) throw new Error('Tag must match package version');
-            const sha = execFileSync('git', ['rev-parse', 'HEAD'], {encoding:'utf8'}).trim();
-            execFileSync('git', ['merge-base', '--is-ancestor', sha, 'origin/main']);
+            const { verifyReleaseTag } = await import(`${process.cwd()}/scripts/native-ui-engine-release/release-tag.mjs`);
+            const { sha } = verifyReleaseTag(process.env.RELEASE_TAG);
             const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
-              ...context.repo, workflow_id: 'native-ui-engine.yml', head_sha: sha, event: 'push', branch: 'main', per_page: 100,
+              ...context.repo, workflow_id: 'native-ui-engine.yml', head_sha: sha, event: 'workflow_dispatch', branch: process.env.RELEASE_TAG, per_page: 100,
             });
             const latest = runs.sort((a,b) => b.run_number-a.run_number)[0];
             if (!latest || latest.status !== 'completed' || latest.conclusion !== 'success') throw new Error('Exact release commit must pass CI');
@@ -55,13 +51,14 @@ jobs:
             const sha = execFileSync('git', ['rev-parse', 'HEAD'], {encoding:'utf8'}).trim();
             const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
               ...context.repo, workflow_id: 'native-ui-engine-release.yml', head_sha: sha,
-              event: 'workflow_dispatch', branch: 'main', per_page: 100,
+              event: 'workflow_dispatch', branch: `v${JSON.parse((await import('node:fs')).readFileSync('package.json', 'utf8')).version}`, per_page: 100,
             });
             const accepted = runs.find(run => run.status === 'completed' && run.conclusion === 'success');
             if (!accepted) throw new Error('Exact release commit must have a successful Maven publication workflow');
             core.info(`Maven publication accepted: ${accepted.html_url}. Central distribution may still be pending.`);
       - run: npm ci
       - run: npm run build
+      - run: git diff --exit-code -- runtime/native-ui-engine.js ios/Sources/WebViewNativeUIEngine/Resources/native-ui-engine.js
       - run: npm run test:package
       - run: node --test scripts/native-ui-engine-release/npm-artifact.test.mjs
       - name: Check existing npm artifact

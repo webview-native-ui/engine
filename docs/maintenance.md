@@ -13,7 +13,7 @@ The public entry points are `src/index.ts` and `src/ionic.ts`, with shared contr
 - `src/projection/`: image handoff, projection ownership, events and styles.
 - `src/dom/`: geometry, scrolling, visibility and overlay coordination.
 
-`npm run build` bundles `src/native/bootstrap.ts` into `runtime/native-ui-engine.js`, the shared WebView runtime. Android packages this file directly as an asset. The build also copies it into `ios/Sources/WebViewNativeUIEngine/Resources` because SwiftPM requires resources inside the target directory. Both generated files are committed so native consumers do not need Node.js. Edit the TypeScript source, not either generated file; CI checks regeneration and verifies the runtime included in npm and Maven archives.
+`npm run build` bundles `src/native/bootstrap.ts` into `runtime/native-ui-engine.js`, the shared WebView runtime. Android packages this file directly as an asset. The build also copies it into `ios/Sources/WebViewNativeUIEngine/Resources` because SwiftPM requires resources inside the target directory. Both generated files are ignored during development and included in release tags so SwiftPM consumers do not need Node.js. Run `npm run build` before building a source checkout with Xcode. Edit the TypeScript source, not either generated file; CI checks regeneration and verifies the runtime included in npm and Maven archives.
 
 Browser tests mirror these groups under `tests/`. `tests/cordova/` contains the real native consumer fixture.
 
@@ -40,7 +40,7 @@ CI-only setup, packaging commands and GitHub outputs are defined in `.github/wor
 
 ## Maven publication
 
-The `Native UI Engine Maven Release` workflow is manually dispatched on `main` with the exact engine package version. That commit must first pass `Native UI Engine` CI. It signs an AAR, source archive, generated Kotlin API documentation and Maven metadata, uploads once, and completes when Central reports `PUBLISHING` or `PUBLISHED`. The deployment ID and state changes are recorded in the run summary. `PUBLISHING` means validation passed and Central accepted publication; it does not guarantee that artifacts can already be downloaded. This workflow does not wait for distribution. The npm release checks that this workflow succeeded for the exact release commit; it does not wait for Maven Central distribution. Existing coordinates are never overwritten; if an upload times out, inspect the recorded deployment in Central before taking further action.
+The `Native UI Engine Maven Release` workflow is manually dispatched on the release tag with the exact engine package version. The tagged commit must first pass `Native UI Engine` CI. It signs an AAR, source archive, generated Kotlin API documentation and Maven metadata, uploads once, and completes when Central reports `PUBLISHING` or `PUBLISHED`. The deployment ID and state changes are recorded in the run summary. `PUBLISHING` means validation passed and Central accepted publication; it does not guarantee that artifacts can already be downloaded. This workflow does not wait for distribution. The npm release checks that this workflow succeeded for the exact release commit; it does not wait for Maven Central distribution. Existing coordinates are never overwritten; if an upload times out, inspect the recorded deployment in Central before taking further action.
 
 Configure the repository's Actions secrets with `CENTRAL_USERNAME`, `CENTRAL_PASSWORD` (a Central user token), `MAVEN_SIGNING_KEY` (ASCII-armored private key) and `MAVEN_SIGNING_PASSWORD`. The signing public key must be available to Central. GitHub secrets are scoped to this repository.
 
@@ -53,12 +53,30 @@ versions across these distributions.
 
 The npm organization `webview-native-ui` and Maven Central namespace `io.github.webview-native-ui` are registered. Maintain npm trusted publishing for `webview-native-ui/engine`, workflow `release.yml`, and provision the Maven secrets above in this repository. Credentials are not copied by moving source files.
 
-1. Prepare the next version and release notes on `main`; use `npm run release` to create a standard `vX.Y.Z` tag/GitHub release. Keep the GitHub release as a draft until the Maven publication workflow succeeds.
-2. After that main commit passes CI, dispatch `native-ui-engine-release.yml` with the exact package version.
-3. Central `PUBLISHING` is an accepted upload, not download readiness. Once the Maven publication workflow succeeds, publish the prepared GitHub release. Note any pending Android artifact distribution in the release notes. `release.yml` verifies the tag, package version, CI and Maven publication acceptance before npm publication (`next` for prereleases, `latest` otherwise).
+1. Run **Prepare release** (`prepare-release.yml`) on `main` and select `major`, `minor`, `patch` or `revision`. No local build, commit or tag is needed.
+2. The workflow increments the version using npm, builds and verifies the package, and pushes a version-only main commit plus a separate release commit/tag containing the generated resources. It explicitly starts `Native UI Engine` validation on that tag and creates a GitHub Release draft with generated release notes.
+3. Review and edit the release notes. After tag validation passes, dispatch `native-ui-engine-release.yml` on that tag with the exact package version.
+4. Once Maven publication succeeds, publish the GitHub Release draft. Central `PUBLISHING` means upload acceptance, not download readiness; mention any pending Android distribution in the notes. `release.yml` verifies the tag, package version, tag CI and Maven acceptance before publishing to npm (`next` for revisions, `latest` for stable releases).
+
+Version increments follow npm SemVer rules; `revision` maps to `prerelease`:
+
+| Current   | Selection | Next      |
+| --------- | --------- | --------- |
+| `1.2.3`   | major     | `2.0.0`   |
+| `1.2.3`   | minor     | `1.3.0`   |
+| `1.2.3`   | patch     | `1.2.4`   |
+| `1.2.3`   | revision  | `1.2.4-0` |
+| `1.2.4-0` | revision  | `1.2.4-1` |
+| `1.2.4-2` | patch     | `1.2.4`   |
+| `1.3.0-2` | minor     | `1.3.0`   |
+| `2.0.0-2` | major     | `2.0.0`   |
+
+Generated runtime commits never enter main's history. The CI preparation pushes main and the release tag atomically, without force. Publication accepts only a tagged child of main that adds the two generated resources and changes no other files. npm rebuilds and checks the runtime before publication; Maven packages the runtime from the same tested tag.
+
+If preparation fails before pushing, rerun it. If main and the tag were already pushed, do not rerun preparation (that requests another version) or move the tag. Manually run `Native UI Engine` on the existing tag if validation was not started, and create the release draft for that tag if it is missing. This also recovers a failure between the push, validation dispatch and draft creation. Existing tags and published artifacts are never overwritten.
 
 No build or test command publishes a package. Existing npm/Maven versions are never overwritten.
 
-To rerun release verification for an existing tag, dispatch `release.yml` with that tag. It checks the original tagged commit and skips npm publication only when the existing package contents match. Keep the tag unchanged. Release tooling uses the Node.js 24 bundled npm, matching CI.
+To rerun release verification for an existing tag, select that tag as both the workflow ref and the `tag` input: `gh workflow run release.yml --ref vX.Y.Z -f tag=vX.Y.Z`. This uses the workflow saved in that release, including for older tags that predate the release-only commit layout. It checks the original tagged commit and skips npm publication only when the existing package contents match. Keep the tag unchanged. Release tooling uses the Node.js 24 bundled npm, matching CI.
 
 [Documentation overview](README.md)

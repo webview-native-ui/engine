@@ -1,5 +1,5 @@
 import { build } from 'esbuild';
-import { copyFile } from 'node:fs/promises';
+import { copyFile, mkdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 const runtime = new URL('../runtime/native-ui-engine.js', import.meta.url);
 await build({
@@ -13,4 +13,5 @@ await build({
 });
 
 // SwiftPM resources must live inside the Swift target; ship a generated copy.
+await mkdir(new URL('../ios/Sources/WebViewNativeUIEngine/Resources/', import.meta.url), { recursive: true });
 await copyFile(runtime, new URL('../ios/Sources/WebViewNativeUIEngine/Resources/native-ui-engine.js', import.meta.url));

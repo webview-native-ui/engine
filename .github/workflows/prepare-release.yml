@@ -1,0 +1,77 @@
+name: Prepare release
+on:
+  workflow_dispatch:
+    inputs:
+      increment:
+        description: 'SemVer increment (revision = numeric prerelease)'
+        type: choice
+        required: true
+        default: patch
+        options: [major, minor, patch, revision]
+permissions:
+  contents: read
+concurrency:
+  group: engine-release-preparation
+  cancel-in-progress: false
+jobs:
+  prepare:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Select the next version
+        id: version
+        env:
+          INCREMENT: ${{ inputs.increment }}
+        run: |
+          case "$INCREMENT" in
+            major|minor|patch) BUMP="$INCREMENT" ;;
+            revision) BUMP=prerelease ;;
+            *) exit 1 ;;
+          esac
+          npm version "$BUMP" --no-git-tag-version --ignore-scripts
+          VERSION=$(node -p 'require("./package.json").version')
+          TAG="v$VERSION"
+          if git show-ref --verify --quiet "refs/tags/$TAG"; then
+            echo "::error::Release tag $TAG already exists; never overwrite it"
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+      - run: npm run build
+      - run: npm run test:package
+      - name: Commit version metadata and the release-only runtime
+        env:
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add package.json package-lock.json
+          git commit -m "chore: release $RELEASE_TAG"
+          SOURCE_COMMIT=$(git rev-parse HEAD)
+          git switch --detach
+          git add -f runtime/native-ui-engine.js ios/Sources/WebViewNativeUIEngine/Resources/native-ui-engine.js
+          git commit -m "build: native runtime for $RELEASE_TAG"
+          git tag -a "$RELEASE_TAG" -m "$RELEASE_TAG"
+          git push --atomic origin "$SOURCE_COMMIT:refs/heads/main" "refs/tags/$RELEASE_TAG"
+      - name: Start release validation and prepare release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          # Pushes made by GITHUB_TOKEN do not trigger another push workflow.
+          gh workflow run native-ui-engine.yml --ref "$RELEASE_TAG"
+          PRERELEASE=false
+          if [[ "$RELEASE_TAG" == *-* ]]; then PRERELEASE=true; fi
+          RELEASE_URL=$(gh release create "$RELEASE_TAG" --verify-tag --draft --generate-notes --title "$RELEASE_TAG" --prerelease="$PRERELEASE")
+          printf 'Review [release notes](%s), wait for tag validation, then run Maven publication on this tag before publishing the GitHub release.\n' "$RELEASE_URL" >> "$GITHUB_STEP_SUMMARY"
