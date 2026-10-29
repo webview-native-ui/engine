@@ -64,23 +64,14 @@ jobs:
           git tag -a "$RELEASE_TAG" -m "$RELEASE_TAG"
           git push --atomic origin "$SOURCE_COMMIT:refs/heads/main" "refs/tags/$RELEASE_TAG"
       - name: Start release validation and prepare release notes
-        uses: actions/github-script@v8
         env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ steps.version.outputs.tag }}
-        with:
-          script: |
-            const tag = process.env.RELEASE_TAG;
-            // Pushes made by GITHUB_TOKEN do not trigger another push workflow.
-            await github.rest.actions.createWorkflowDispatch({
-              ...context.repo, workflow_id: 'native-ui-engine.yml', ref: tag,
-            });
-            const { data: notes } = await github.rest.repos.generateReleaseNotes({
-              ...context.repo, tag_name: tag,
-            });
-            const { data: release } = await github.rest.repos.createRelease({
-              ...context.repo, tag_name: tag, name: tag,
-              body: notes.body, draft: true, prerelease: tag.includes('-'),
-            });
-            await core.summary.addHeading(`Prepared ${tag}`)
-              .addRaw(`Review [release notes](${release.html_url}), wait for tag validation, then run Maven publication on this tag before publishing the GitHub release.\n`)
-              .write();
+        run: |
+          # Pushes made by GITHUB_TOKEN do not trigger another push workflow.
+          gh workflow run native-ui-engine.yml --ref "$RELEASE_TAG"
+          PRERELEASE=false
+          if [[ "$RELEASE_TAG" == *-* ]]; then PRERELEASE=true; fi
+          RELEASE_URL=$(gh release create "$RELEASE_TAG" --verify-tag --draft --generate-notes --title "$RELEASE_TAG" --prerelease="$PRERELEASE")
+          printf 'Review [release notes](%s), wait for tag validation, then run Maven publication on this tag before publishing the GitHub release.\n' "$RELEASE_URL" >> "$GITHUB_STEP_SUMMARY"
