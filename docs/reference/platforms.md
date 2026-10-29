@@ -88,6 +88,46 @@ Glass appearance: native compositing and conversion to integer PNG can still cha
 pixels. Higher precision also increases capture memory and image size. The existing
 fallback policy applies if preparation fails. Android retains its platform capture path.
 
+### Liquid Glass capture differences
+
+A captured Liquid Glass control can look different from the live native control
+when it is projected into the WebView. Reflective edge highlights and background
+refraction or blur are not fully preserved by the capture path. Higher color
+precision alone does not resolve this difference.
+
+![Device screenshots comparing captured and live UIKit tab bars on iPhone and iPad](../assets/ios-native-capture-comparison.png)
+
+Left: **iPhone 15 Pro Max, iOS 27.2**. Right: **iPad mini (6th generation),
+iPadOS 27.2**. Each device screenshot shows the captured **16-bit Display P3 PNG
+in WKWebView above** and the **live UIKit tab bar below**, at the same size within
+that device. The screenshots were placed side by side without rescaling or changing
+their shared color profile. These are physical-device results, not Simulator captures.
+
+The system screenshot preserves the live appearance, but the application-level
+capture does not reproduce it completely. On the tested iPhone, the difference was
+also present when the unencoded captured image was displayed in a native
+`UIImageView`, before PNG encoding or WebView display. Drawing the entire
+`UIWindow` into a full-window bitmap and then cropping it did not improve the
+result compared with the Engine's cropped bitmap.
+
+System screenshots are evidence for this comparison, not an alternative Engine
+capture backend. These screenshots were obtained through developer tooling with
+Developer Mode enabled on the devices. Application screen-capture APIs such as
+ReplayKit require user consent; manually taking a screenshot also requires user
+action. Cropping a system screenshot would preserve its captured pixels, but does
+not remove these acquisition requirements. The Engine therefore does not adopt
+this route for automatic UI handoffs: ordinary projection must not depend on
+Developer Mode, screenshot actions, or a screen-recording permission flow. See
+[Apple's ReplayKit security documentation](https://support.apple.com/guide/security/replaykit-security-seca5fc039dd/web).
+
+We have reported this limitation to Apple and requested a supported way to capture
+the complete appearance without starting a screen-recording session. See the
+[Apple Developer Forums discussion](https://developer.apple.com/forums/thread/853543).
+Apple suggested capturing an ancestor that includes the necessary background;
+the full-window comparison above tests that approach. This remains an observed
+capture limitation, not a confirmed fix or a commitment from Apple. Validate
+translucent controls on physical devices with the backgrounds your plugin supports.
+
 ## Temporary storage and application permissions
 
 Prepared images stay in the app's private temporary storage. iOS uses `FileManager.default.temporaryDirectory`. On Android, construct `NativeUISnapshots` with a directory inside `context.cacheDir`; do not use shared or external storage. Neither platform needs a photo-library or storage permission prompt for this path. No Capacitor Filesystem plugin is required. See [Apple's sandbox directories](https://developer.apple.com/library/archive/documentation/FileManagement/Conceptual/FileSystemProgrammingGuide/FileSystemOverview/FileSystemOverview.html) and [Android's app-specific storage](https://developer.android.com/training/data-storage/app-specific).
