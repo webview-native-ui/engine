@@ -13,3 +13,5 @@ export { bindProjectionPlacement, type ProjectionPlacementBinding } from './proj
 export { createWebProjectionSurfaces } from './projection/surfaces.js';
 
 export * from './projection/surface.js';
+
+export { createNativeUpdateQueue, type NativeUpdateSender } from './native/updates.js';
