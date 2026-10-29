@@ -79,7 +79,7 @@ public final class NativeUIProjection: NSObject, WKScriptMessageHandler {
 
     public convenience init(webView: WKWebView?, plugin: String, projectionSelector: String,
                             receiveListeners: ReceiveListeners = .init(),
-                            allowedOrigins: Set<String> = ["capacitor://localhost", "app://localhost", "https://localhost", "http://localhost"],
+                            allowedOrigins: Set<String>? = nil,
                             failedFallback: FailedFallback = .web, runtime: Runtime = .capacitor,
                             captureDelayMs: Double = 50,
                             values: [String: ValueBinding] = [:], readValues: (() -> [String: Any])? = nil,
@@ -91,12 +91,14 @@ public final class NativeUIProjection: NSObject, WKScriptMessageHandler {
     }
     init(webView: WKWebView?, plugin: String, projectionSelector: String,
          receiveListeners: ReceiveListeners = .init(),
-         allowedOrigins: Set<String> = ["capacitor://localhost", "app://localhost", "https://localhost", "http://localhost"],
+         allowedOrigins: Set<String>? = nil,
          failedFallback: FailedFallback = .web, runtime: Runtime = .capacitor,
          captureDelayMs: Double = 50,
          values: [String: ValueBinding] = [:], readValues: (() -> [String: Any])? = nil,
          canCapture: @escaping () -> Bool = { true }, snapshots: NativeUICoveredSnapshots,
          view: @escaping () -> UIView?) throws {
+        let allowedOrigins = try allowedOrigins
+            ?? (runtime == .capacitor ? ProjectionOrigins.configured() : ProjectionOrigins.defaults)
         // JSONSerialization produces valid UTF-8.
         // swiftlint:disable:next force_unwrapping
         self.allowedOriginsJSON = String(data: try JSONSerialization.data(withJSONObject: Array(allowedOrigins)), encoding: .utf8)!

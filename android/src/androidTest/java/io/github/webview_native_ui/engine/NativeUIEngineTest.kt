@@ -16,6 +16,48 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class NativeUIEngineTest {
+    @Test
+    fun configuredOriginsExcludeNavigationDestinations() {
+        val config =
+            JSONObject(
+                """{"server":{"androidScheme":"https","hostname":"app.example","url":"http://user:password@DEV.example:8080/path?query=1#fragment","allowNavigation":["untrusted.example","*"]}}"""
+            )
+        assertEquals(setOf("http://dev.example:8080"), ProjectionOrigins.configured(config))
+        assertEquals(ProjectionOrigins.defaults, ProjectionOrigins.configured(JSONObject()))
+        assertEquals(
+            setOf("https://localhost"),
+            ProjectionOrigins.configured(JSONObject("""{"server":{}}""")),
+        )
+    }
+
+    @Test
+    fun reservedSchemeUsesCapacitorFallback() {
+        assertEquals(
+            setOf("https://localhost"),
+            ProjectionOrigins.configured(JSONObject("""{"server":{"androidScheme":"file"}}""")),
+        )
+    }
+
+    @Test
+    fun configuredURLNormalizesDefaultPortAndRejectsWildcard() {
+        assertEquals(
+            setOf("https://example.com"),
+            ProjectionOrigins.configured(
+                JSONObject("""{"server":{"url":"https://EXAMPLE.com:443/path"}}""")
+            ),
+        )
+        try {
+            ProjectionOrigins.configured(
+                JSONObject("""{"server":{"url":"https://*.example.com"}}""")
+            )
+            fail("Wildcard accepted")
+        } catch (_: IllegalArgumentException) {}
+        assertEquals(
+            setOf("https://app.example"),
+            ProjectionOrigins.configured(JSONObject("""{"server":{"hostname":"app.example"}}""")),
+        )
+    }
+
     private val instrumentation
         get() = InstrumentationRegistry.getInstrumentation()
 
@@ -1770,8 +1812,11 @@ class NativeUIEngineTest {
             main {
                 NativeUIProjection.install(activity.web)
                 try {
-                    NativeUIProjection.install(activity.web, setOf("https://unrelated.example"))
-                    fail("Changed origins accepted")
+                    NativeUIProjection.install(
+                        activity.web,
+                        setOf("https://localhost/path", "http://localhost"),
+                    )
+                    fail("Explicit origins were normalized")
                 } catch (_: IllegalArgumentException) {}
                 first =
                     NativeUIProjection(

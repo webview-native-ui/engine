@@ -5,6 +5,37 @@ import WebKit
 @testable import WebViewNativeUIEngine
 
 final class NativeUIProjectionTests: XCTestCase {
+    func testConfiguredApplicationOriginsExcludeNavigationDestinations() throws {
+        let origins = try ProjectionOrigins.configured(["server": [
+            "iosScheme": "myapp", "hostname": "app.example",
+            "url": "https://User:password@DEV.example:443/path?query=1#fragment",
+            "allowNavigation": ["untrusted.example", "*"]
+        ]])
+        XCTAssertEqual(origins, ["https://dev.example"])
+        XCTAssertEqual(try ProjectionOrigins.configured(["server": ["iosScheme": "myapp", "hostname": "app.example"]]), ["myapp://app.example"])
+        XCTAssertEqual(try ProjectionOrigins.configured([:]), ProjectionOrigins.defaults)
+        XCTAssertEqual(try ProjectionOrigins.configured(["server": [:]]), ["capacitor://localhost"])
+    }
+
+    func testReservedSchemeUsesCapacitorFallback() throws {
+        XCTAssertEqual(try ProjectionOrigins.configured(["server": ["iosScheme": "https"]]), ["capacitor://localhost"])
+    }
+
+    func testConfiguredURLPreservesPortAndRejectsWildcard() throws {
+        XCTAssertEqual(try ProjectionOrigins.configured(["server": ["url": "http://LOCALHOST:8080/path"]]), ["http://localhost:8080"])
+        XCTAssertThrowsError(try ProjectionOrigins.configured(["server": ["url": "https://*.example.com"]]))
+    }
+
+    func testReadsBundledCapacitorConfiguration() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".bundle")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try Data("{\"server\":{\"hostname\":\"configured.example\"}}".utf8)
+            .write(to: directory.appendingPathComponent("capacitor.config.json"))
+        let bundle = try XCTUnwrap(Bundle(url: directory))
+        XCTAssertEqual(try ProjectionOrigins.configured(in: bundle), ["capacitor://configured.example"])
+    }
+
     @MainActor func testMissingWebViewThrowsDuringInitialization() {
         XCTAssertThrowsError(try NativeUIProjection(
             webView: nil, plugin: "Fixture", projectionSelector: "#slot", view: { nil }
@@ -30,7 +61,7 @@ final class NativeUIProjectionTests: XCTestCase {
           window.testEvents = {};
           window.Capacitor = {
             addListener: (plugin, name, listener) => { testEvents[name] = listener; return { remove: async () => { delete testEvents[name]; } }; },
-            convertFileSrc: url => 'capacitor://localhost/_capacitor_file_' + url.replace('file://', '')
+            convertFileSrc: url => 'capacitor://configured.example/_capacitor_file_' + url.replace('file://', '')
           };
         """, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         let window = UIWindow(frame: UIScreen.main.bounds)
@@ -51,10 +82,11 @@ final class NativeUIProjectionTests: XCTestCase {
                                                     update: ["updated"],
                                                     projection: .init(native: ["shown"], web: ["moving"], none: ["hidden"])
                                                   ),
+                                                  allowedOrigins: try ProjectionOrigins.configured(["server": ["hostname": "configured.example"]]),
                                                   readValues: { ["label": button.title(for: .normal) ?? ""] },
                                                   canCapture: { false }, view: { surface })
         defer { registration.destroy(); window.isHidden = true }
-        web.load(URLRequest(url: URL(string: "capacitor://localhost/fixture")!))
+        web.load(URLRequest(url: URL(string: "capacitor://configured.example/fixture")!))
         try await wait(web,
                        "document.querySelector('#slot')?.getAttributeNames()" +
                         ".some(n => n.startsWith('data-native-ui-session-')" +
