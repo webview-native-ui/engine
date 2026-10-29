@@ -42,11 +42,11 @@ updates.destroy();
 
 `renderer` represents the integration's existing code. `send` is only for
 replaceable state, called sequentially inside an update pass, never clicks,
-selection actions, purchases or SDK requests. A failed send requests one fresh
+selection actions, purchases or SDK requests. A failed send skips the remaining sends in that pass and requests one fresh
 pass, not a replay of its payload. If that also fails, `reconnect: true` waits for
 an external handshake; without it the queue reports terminal failure. An invalid
 acknowledgement waits for reconciliation immediately. After reconciliation, another
-failed retry or invalid acknowledgement is terminal; a successful send resets the
+failed retry or invalid acknowledgement is terminal; a fully successful update pass resets the
 recovery budget. The queue does not install a connection poller or subscriptions.
 
 Keep operation timeouts in the transport. A timeout does not cancel an underlying

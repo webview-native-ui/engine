@@ -18,6 +18,7 @@ export const createNativeUpdateQueue = (
   let retrying = false;
   let waiting = false;
   let reconciled = false;
+  let passFailed = false;
   const request = () => {
     if (stopped) return;
     dirty = true;
@@ -29,12 +30,13 @@ export const createNativeUpdateQueue = (
     dirty = false;
   };
   const send: NativeUpdateSender = async (operation, validate) => {
-    if (stopped || waiting) return;
+    if (stopped || waiting || passFailed) return;
     let result;
     try {
       result = await operation();
     } catch (error) {
       if (stopped) return;
+      passFailed = true;
       if (retrying) waitForConnection(error);
       else {
         retrying = true;
@@ -47,10 +49,10 @@ export const createNativeUpdateQueue = (
     try {
       validate?.(result);
     } catch (error) {
+      passFailed = true;
       waitForConnection(error);
       return;
     }
-    retrying = waiting = reconciled = false;
     return result;
   };
   const run = async () => {
@@ -58,8 +60,10 @@ export const createNativeUpdateQueue = (
     if (stopped || waiting) return;
     dirty = false;
     running = true;
+    passFailed = false;
     try {
       await options.update(send);
+      if (!passFailed) retrying = waiting = reconciled = false;
     } catch (error) {
       if (stopped) return;
       // Retire the queue before reporting terminal failure; no late update can restart it.
