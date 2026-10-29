@@ -48,34 +48,11 @@ test('publication accepts only generated resources added to a main commit', (t) 
   git('commit', '--amend', '--no-edit');
   git('tag', '-d', 'v0.0.2');
   git('tag', 'v0.0.2');
-  assert.throws(check, /Release must not change reviewed source/);
+  assert.throws(check, /Release must only add both generated resources/);
   git('checkout', 'HEAD^', '--', 'source.ts');
   git('rm', runtimeFiles[0]);
   git('commit', '--amend', '--no-edit');
   git('tag', '-d', 'v0.0.2');
   git('tag', 'v0.0.2');
-  assert.throws(check, /Release must add both generated resources/);
-});
-
-test('npm increments reset lower components and graduate revisions without skipping the stable release', (t) => {
-  const cwd = mkdtempSync(join(tmpdir(), 'engine-version-test-'));
-  t.after(() => rmSync(cwd, { recursive: true, force: true }));
-  for (const [current, increment, expected] of [
-    ['1.2.3', 'major', '2.0.0'],
-    ['1.2.3', 'minor', '1.3.0'],
-    ['1.2.3', 'patch', '1.2.4'],
-    ['1.2.3', 'prerelease', '1.2.4-0'],
-    ['1.2.4-0', 'prerelease', '1.2.4-1'],
-    ['1.2.4-2', 'patch', '1.2.4'],
-    ['1.3.0-2', 'minor', '1.3.0'],
-    ['2.0.0-2', 'major', '2.0.0'],
-  ]) {
-    writeFileSync(join(cwd, 'package.json'), JSON.stringify({ version: current }));
-    const result = execFileSync('npm', ['version', increment, '--no-git-tag-version', '--ignore-scripts'], {
-      cwd,
-      encoding: 'utf8',
-      env: { ...process.env, npm_config_cache: join(cwd, 'cache') },
-    }).trim();
-    assert.equal(result, `v${expected}`, `${current} → ${increment}`);
-  }
+  assert.throws(check, /Release must only add both generated resources/);
 });

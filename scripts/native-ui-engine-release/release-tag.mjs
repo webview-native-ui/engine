@@ -15,10 +15,9 @@ export function verifyReleaseTag(tag) {
   assert.equal(parents.length, 1, 'Release must have one source parent');
   git('merge-base', '--is-ancestor', parents[0], 'origin/main');
   assert.deepEqual(
-    git('diff', '--name-only', '--diff-filter=A', parents[0], sha).split('\n').sort(),
-    runtimeFiles,
-    'Release must add both generated resources',
+    git('diff', '--name-status', '--no-renames', parents[0], sha).split('\n').sort(),
+    runtimeFiles.map((file) => `A\t${file}`),
+    'Release must only add both generated resources',
   );
-  assert.deepEqual(git('diff', '--name-only', parents[0], sha).split('\n').sort(), runtimeFiles, 'Release must not change reviewed source');
   return { sha, version };
 }

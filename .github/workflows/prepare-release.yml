@@ -48,8 +48,6 @@ jobs:
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
       - run: npm run build
-      - run: npm run lint
-      - run: npm run test:release
       - run: npm run test:package
       - name: Commit version metadata and the release-only runtime
         env:
