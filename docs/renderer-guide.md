@@ -137,8 +137,10 @@ available without delaying overlay startup.
 
 The Engine coordinates ownership, but only the consuming application can verify
 its layer choices and native placement. Implement the native side using the
-[native handoff contract](projection.md#native-handoff-on-both-platforms), including
-current destination frames and accepted update acknowledgements.
+[native handoff contract](projection.md#native-handoff-on-both-platforms), using `NativeUICoveredSnapshots.handle` on iOS and `NativeUISnapshots.handle` on
+Android. Supply eligible native bounds and complete views allowed to hide; Engine
+validates requests and converts destination coordinates. Your renderer still
+applies normal native layout and reports accepted update acknowledgements.
 
 ## Low-level Web projection
 

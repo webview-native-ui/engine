@@ -3,6 +3,55 @@ import UIKit
 @testable import WebViewNativeUIEngine
 
 final class NativeUICoveredSnapshotsTests: XCTestCase {
+    @MainActor func testRequestHandoffValidatesDestinationsAndRetainsRendererVisibility() async throws {
+        let window = SnapshotTestWindow(frame: UIScreen.main.bounds)
+        window.rootViewController = UIViewController()
+        window.makeKeyAndVisible()
+        let web = window.rootViewController!.view!
+        web.frame = window.bounds
+        window.layoutIfNeeded()
+        let control = UIView()
+        let snapshots = NativeUICoveredSnapshots()
+        defer { snapshots.reset(); window.isHidden = true }
+        func send(_ request: [String: Any]) async -> [String: Any] {
+            await withCheckedContinuation { continuation in
+                snapshots.handle(request, in: web, frames: { ids, revision in
+                    revision == 7 && ids == ["button"] ? ["button": CGRect(x: 20, y: 80, width: 60, height: 44)] : [:]
+                }, views: { ids in ids == ["button"] ? [control, control] : nil }, complete: { continuation.resume(returning: $0) })
+            }
+        }
+        let capture = await send(["action": "prepare", "ids": ["button"], "revision": 7, "viewportWidth": Double(web.bounds.width / 2)])
+        let token = try XCTUnwrap(capture["token"] as? String)
+        let wire = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONSerialization.data(withJSONObject: capture)) as? [String: Any])
+        var part = try XCTUnwrap((wire["parts"] as? [[String: Any]])?.first)
+        part["y"] = (part["y"] as! Double) + 30
+        let request: [String: Any] = ["action": "cover", "token": token, "viewportWidth": Double(web.bounds.width / 2), "parts": [part]]
+        var invalid = request
+        invalid["parts"] = [part, part]
+        let rejected = await send(invalid)
+        XCTAssertEqual(rejected["shown"] as? Bool, false)
+        XCTAssertFalse(control.isHidden)
+        let covered = await send(request)
+        XCTAssertEqual(covered["shown"] as? Bool, true)
+        XCTAssertTrue(control.isHidden)
+        let copy = try XCTUnwrap(window.subviews.compactMap { $0 as? UIImageView }.first)
+        XCTAssertEqual(copy.frame.minY, web.convert(CGPoint(x: 0, y: 128), to: window).y, accuracy: 0.01)
+        _ = await send(["action": "painted", "token": token])
+        var restore = request; restore["action"] = "restore"
+        let restored = await send(restore)
+        XCTAssertEqual(restored["shown"] as? Bool, true)
+        _ = await send(["action": "painted", "token": token])
+        XCTAssertFalse(window.subviews.compactMap { $0 as? UIImageView }.isEmpty)
+        snapshots.restoreControls() // The renderer performs its normal native update.
+        XCTAssertFalse(control.isHidden)
+        _ = await send(["action": "restored", "token": token])
+        XCTAssertTrue(window.subviews.compactMap { $0 as? UIImageView }.isEmpty)
+        _ = await send(["action": "release", "token": token])
+        let stale = await send(request)
+        XCTAssertEqual(stale["shown"] as? Bool, false)
+        XCTAssertFalse(control.isHidden)
+    }
+
     @MainActor func testPreparedImageContainsVisibleWindowPixels() async throws {
         let owner = UIViewController()
         let window = SnapshotTestWindow(frame: UIScreen.main.bounds)

@@ -30,8 +30,11 @@ Choose a [supported container](projection-containers.md) before wiring its selec
 
 ## Install inside a plugin
 
+Replace `<engine-version>` in every dependency below with the same published
+release. Read that release tag’s documentation so the examples match its APIs.
+
 ```sh
-npm install --save-exact @webview-native-ui/engine@0.0.1
+npm install --save-exact '@webview-native-ui/engine@<engine-version>'
 ```
 
 The npm archive contains TypeScript declarations, ESM, Swift sources and a podspec. Native dependencies must also be declared by the consuming plugin; an npm dependency alone links neither the Swift library nor the Android AAR.
@@ -39,12 +42,12 @@ The npm archive contains TypeScript declarations, ESM, Swift sources and a podsp
 The primary native distribution is Swift Package Manager. Depend on the repository-root library from your plugin:
 
 ```swift
-.package(url: "https://github.com/webview-native-ui/engine.git", exact: "0.0.1")
+.package(url: "https://github.com/webview-native-ui/engine.git", exact: "<engine-version>")
 // In the plugin target's dependencies:
 .product(name: "WebViewNativeUIEngine", package: "engine")
 ```
 
-The new coordinates start at `0.0.1`. While the API is pre-1.0, pin the same Engine release across npm, SwiftPM, Gradle and CocoaPods, and upgrade deliberately. Applications should retain their dependency lockfiles for reproducible builds.
+While the API is pre-1.0, pin the same Engine release across npm, SwiftPM, Gradle and CocoaPods, and upgrade deliberately. Applications should retain their dependency lockfiles for reproducible builds.
 
 SwiftPM resolves this repository's version tags such as `v0.0.1`. For unreleased integration tests, use a local checkout or an explicit tested commit.
 
@@ -56,7 +59,7 @@ In the consuming plugin's `android/build.gradle`, add the Engine version matchin
 
 ```groovy
 dependencies {
-    implementation 'io.github.webview-native-ui:engine:0.0.1'
+    implementation 'io.github.webview-native-ui:engine:<engine-version>'
 }
 ```
 
@@ -78,13 +81,13 @@ If the build uses project-level repositories instead, add them to its existing `
 CocoaPods uses the Swift sources and podspec shipped in npm; no CocoaPods Trunk publication is required. The plugin maintainer declares the matching dependency in the plugin's podspec:
 
 ```ruby
-s.dependency 'WebViewNativeUIEngine', '0.0.1'
+s.dependency 'WebViewNativeUIEngine', '<engine-version>'
 ```
 
 The maintainer must also document this one-time application setup. Install the matching engine version as a direct npm dependency, then add the local pod **inside the application's target, outside `def capacitor_pods`**, which Capacitor regenerates:
 
 ```sh
-npm install --save-exact @webview-native-ui/engine@0.0.1
+npm install --save-exact '@webview-native-ui/engine@<engine-version>'
 ```
 
 ```ruby
