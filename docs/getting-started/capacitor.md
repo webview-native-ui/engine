@@ -1,6 +1,6 @@
 # Capacitor plugin integration
 
-Add Web projection and restoration to an existing Capacitor plugin without changing its public `registerPlugin()` export. The plugin keeps its native renderer and application API; the Engine coordinates its native view with a DOM fallback.
+Let an existing Capacitor plugin's native components coexist with Web layouts, navigation and overlays without changing its public `registerPlugin()` export. The plugin keeps its native renderer and application API; registration connects each native view to its DOM container using the [shared presentation model](../concepts.md).
 
 This guide covers dependencies, registration, notifications and teardown. Start with
 [native initialization](initialization.md) for the minimal call, required inputs
@@ -40,9 +40,9 @@ The primary native distribution is Swift Package Manager. Depend on the reposito
 .product(name: "WebViewNativeUIEngine", package: "engine")
 ```
 
-While the API is pre-1.0, pin the same Engine release across npm, SwiftPM, Gradle and CocoaPods, and upgrade deliberately. Applications should retain their dependency lockfiles for reproducible builds.
+Use the same Engine release across npm, SwiftPM, Gradle and CocoaPods, and upgrade deliberately. Applications should retain their dependency lockfiles for reproducible builds.
 
-SwiftPM resolves this repository's version tags such as `v0.0.1`. For unreleased integration tests, use a local checkout or an explicit tested commit.
+SwiftPM resolves this repository's version tags such as `v1.0.0`. For unreleased integration tests, use a local checkout or an explicit tested commit.
 
 `import WebViewNativeUIEngine` requires no Capacitor registration. The npm companion supplies DOM measurement and Web image handoff; SwiftPM resolves the native dependency independently of npm hoisting.
 

@@ -1,59 +1,56 @@
-# WebView Native UI Engine
+# Beyond the WebView.
 
-**Bring Web UI above the native layer.**
+**Bring Native UI seamlessly into Web apps.**
 
-_Visually, through seamless native-to-Web projection._
+Build your screens with the flexibility of the Web and the controls and capabilities of native platforms. WebView Native UI Engine helps them work together as one experience, while keeping your Web layouts and navigation.
+
+## Web UI. Native UI. One experience.
+
+A native component should feel like part of the screen around it. For example:
+
+- **Scroll together.** A native ad moves with the surrounding Web content as the reader scrolls through a feed.
+- **Layer together.** A Web alert appears over native navigation controls. Close it, and those controls are ready for native interaction again.
+
+Scrolling and overlays are examples of a broader goal: letting Web UI and Native UI coexist throughout the screen's lifecycle.
 
 ![Conceptual view of a Web overlay above a native surface and WebView content](docs/assets/hero.png)
 
-_Conceptual view. Native appearance is projected into the Web layer during overlay presentation._
+_Conceptual view of overlay presentation. The Engine projects native appearance into the Web layer; it does not reorder the actual native view within the DOM._
 
-Build WebView apps where native controls and Web content share the same scrolling screens, transitions and overlays.
+[Watch the 23-second demo](docs/assets/beyond-the-webview.mp4): native controls beneath a Web alert, followed by a native ad scrolling with Web content. Recorded on iOS Simulator.
 
-## Beyond the WebView boundary
+## Built for plugin developers
 
-WebView apps combine the Web's flexible layouts with access to native platform capabilities. But native UI and the Web page live in separate rendering layers. A native control placed above the WebView does not automatically participate in DOM scrolling, clipping or stacking order. A Web modal cannot simply cover it with a higher `z-index`.
+WebView Native UI Engine is a library for **Capacitor and Cordova plugin developers**. Integrate it into a plugin to bring native components into Web-driven screens, without making each application build its own coordination between rendering layers.
 
-Crossing that boundary takes more than a bridge call. It requires coordinating placement, appearance, input, rendering and restoration across two rendering systems on each platform. Rebuilding that coordination for every component makes otherwise useful designs expensive to deliver and maintain.
+A native view above a WebView does not automatically participate in DOM scrolling, clipping or stacking order. A Web modal cannot simply cover it with a higher `z-index`. The Engine coordinates presentation across that boundary, so you can focus on the controls and native capabilities your plugin provides.
 
-WebView Native UI Engine makes that work reusable. It lets applications combine native UI with Web-driven screens and interactions, while sharing the machinery that moves presentation between the two layers. The goal is to expand what a WebView app can be built to do—and make that practical to ship.
+Use it for toolbars, tab bars, controls and capturable SDK views. Keep your existing plugin API and business logic; applications gain these capabilities through the plugins they use.
 
-## What this makes possible
+## How it works
 
-- **Native UI within Web-designed screens.** Combine native toolbars, tab bars, player controls and eligible SDK views with the application's DOM layout and navigation.
-- **Web overlays that coexist with native content.** Present modals and other overlays over native surfaces, then return to the interactive native UI when they close.
-- **Scrolling and transitions that retain native appearance.** Carry the native surface's captured appearance through Web-layer movement, without recreating its styling in CSS.
-- **Shared infrastructure across components and platforms.** Reuse the same projection and restoration lifecycle on iOS and Android instead of implementing it independently in every integration.
+The plugin supplies a native view and a DOM container that defines its place in the Web layout. The Engine coordinates DOM measurement, supported native scroll tracking and the handoff between native and Web presentation.
 
-## The approach
+When the Web layer needs to own presentation, the Engine displays a prepared image of the native component in that container. When native presentation can resume, it coordinates placement and restoration of the interactive view.
 
-Use the live native view where it belongs, and a prepared visual projection in the DOM when the Web layer needs to own presentation. Restore the interactive native view when it can take over again. An existing DOM container gives the Web projection its place in the application's layout and layer structure.
+The image is a temporary visual projection, not a second interactive control. It does not forward clicks or play live video. Capture eligibility and platform rendering limits still apply, including differences in Liquid Glass highlights. When a suitable image is unavailable, the integration uses its configured Web fallback. See [concepts and limits](docs/concepts.md) and [platform support](docs/reference/platforms.md) before choosing a component.
 
-The Engine coordinates this handoff; the integrating renderer still creates and positions its views. A projected image preserves appearance, not live interaction or video. Capture availability and layout support determine when a projection can be used, with an explicit fallback when it cannot. See [concepts and limits](docs/concepts.md) for the detailed contract and limits.
+## Start building
 
-## Choose your starting point
+The Engine supports **iOS and Android**. Ionic and Angular are optional. Start with a native view and its DOM container, then connect the lifecycle notifications your UI needs. The integration guides cover runtime startup and optional framework support.
 
-Applications gain these capabilities through plugins that integrate the Engine.
-Plugin authors retain their existing native controls and public APIs; the Engine
-supplies the coordination between native and Web presentation. It supports iOS
-and Android with Capacitor or Cordova. Ionic and Angular are not required.
+| Start here                                                     | Why                                                                                   |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| [Basic initialization](docs/getting-started/initialization.md) | Register a native view and its DOM container with the minimum required setup.         |
+| [Capacitor plugin guide](docs/getting-started/capacitor.md)    | Connect the Engine to an existing Capacitor plugin.                                   |
+| [Cordova plugin guide](docs/getting-started/cordova.md)        | Use the same lifecycle through Cordova's native hooks.                                |
+| [Documentation](docs/README.md)                                | Find optional settings, renderer APIs and reference by the problem you need to solve. |
 
-| Start here                                                     | Purpose                                                                              |
-| -------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| [Documentation](docs/README.md)                                | Reading order: basic initialization, optional behavior, advanced APIs and reference. |
-| [Concepts and limits](docs/concepts.md)                        | Decide whether projection fits your component.                                       |
-| [Basic initialization](docs/getting-started/initialization.md) | Minimum setup and required inputs, before framework-specific integration.            |
+Use matching Engine versions across npm and native dependencies, and retain dependency lockfiles for reproducible builds. Android placement requires API 23+, with composited snapshots available from API 26+.
 
-Native registration starts the Web runtime; the base integration needs no separate
-application-side Engine initializer. The API is pre-1.0: pin matching Engine
-versions across npm and native dependencies. Android placement requires API 23+,
-with composited snapshots available from API 26+.
+## Contributing
 
-## Reference and contributing
-
-The [documentation index](docs/README.md) links to configuration, advanced APIs,
-container support and platform contracts. For repository development and publishing,
-see [development and releases](docs/maintenance.md).
+For repository development, verification and publishing, see [development and releases](docs/maintenance.md).
 
 ## License
 

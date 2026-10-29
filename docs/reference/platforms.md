@@ -100,8 +100,8 @@ precision alone does not resolve this difference.
 Left: **iPhone 15 Pro Max, iOS 27.2**. Right: **iPad mini (6th generation),
 iPadOS 27.2**. Each device screenshot shows the captured **16-bit Display P3 PNG
 in WKWebView above** and the **live UIKit tab bar below**, at the same size within
-that device. The screenshots were placed side by side without rescaling or changing
-their shared color profile. These are physical-device results, not Simulator captures.
+that device. For this comparison, the iPhone screenshot was resized to match the iPad
+screenshot's height; their shared color profile was preserved. These are physical-device results, not Simulator captures.
 
 The system screenshot preserves the live appearance, but the application-level
 capture does not reproduce it completely. On the tested iPhone, the difference was

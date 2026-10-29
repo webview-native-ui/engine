@@ -1,21 +1,46 @@
 # Native UI in Web-driven screens
 
-Use the Engine when a native view must coexist with Web scrolling, transitions or
-overlays. A native tab bar, for example, can remain interactive during normal use,
-yet visually sit beneath a Web modal when that modal opens. The application keeps
-its Web navigation and layout instead of recreating the entire screen natively.
+The goal is to combine the flexibility of Web layouts and navigation with native
+controls and capabilities in one screen. Applications keep their Web-driven UI;
+plugins supply native components. The Engine coordinates presentation between
+them so each component can coexist with the surrounding screen throughout layout
+changes, interaction and navigation.
 
 ## Why a bridge call is not enough
 
-A native view above a WebView is outside the DOM stacking tree. Increasing a Web
-modal's `z-index` cannot cover it. Hiding the native view reveals whatever the Web
-page draws underneath, which may look different; showing it again before layout
-has settled can expose the wrong position.
+Creating a native view does not give it a place in the DOM. A view above the
+WebView does not automatically follow a scrolling container or participate in
+its clipping and stacking order. A higher Web `z-index` cannot cover it. Simply
+hiding and showing it can reveal a different appearance or restore it at an
+outdated position.
 
-The Engine handles the visual handoff between those layers. It prepares an image
-while native content is available, presents that image in the application's DOM
-when needed, and keeps it until native restoration is acknowledged. Preparation
-is separate from presentation so opening an overlay does not wait for capture.
+The shared integration model is a native view paired with a DOM container. The
+container identifies where the component belongs in the Web screen. The plugin
+provides native content and reports changes; the Engine coordinates measurement,
+prepared appearance and the handoff between presentation layers.
+
+## What coexistence looks like
+
+These situations share the same presentation model. Each integration connects the lifecycle and value notifications it needs:
+
+| Situation                                                | Desired experience                                                                 | How the shared model helps                                                                                           |
+| -------------------------------------------------------- | ---------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| An eligible native advertisement sits in a Web feed      | It stays aligned with the content as the reader scrolls.                           | The DOM container supplies geometry; supported native tracking or temporary Web projection follows the movement.     |
+| A Web alert opens over native navigation controls        | The alert covers their appearance, then native interaction returns when it closes. | Lifecycle notifications or the Ionic adapter request coverage; the Engine coordinates image handoff and restoration. |
+| A page or modal changes layout                           | Its native controls return at the current location rather than an old rectangle.   | Geometry and restoration are coordinated with the owning container's lifetime.                                       |
+| A native toggle changes while its Web fallback is hidden | Returning to HTML does not reveal the old value.                                   | Optional value bindings reflect component data independently of presentation.                                        |
+
+Scrolling does not always mean moving a live native view. Supported iOS overflow
+layouts can use native scroll bindings; Android uses temporary image presentation,
+and unsupported layouts follow the configured fallback policy. Images do not
+provide live SDK interaction. See [platform limits](reference/platforms.md) and
+[scroll binding constraints](advanced/native-handoff.md#native-scroll-tracking).
+
+The Engine prepares images while native content is available and retains them
+through the handoff until native restoration is acknowledged. Preparation is
+separate from presentation so opening an overlay does not wait for capture.
+Application-specific lifecycle decisions still need notifications; registering a
+view does not automatically detect every framework's overlays.
 
 ## Three presentations, with different purposes
 
@@ -91,7 +116,7 @@ does not promise pixel-identical capture of every native view.
 
 Validate your actual backgrounds, overlay transitions and restoration on supported
 devices. If capture is unavailable, decide what the user should see in the Web
-fallback before integrating. Read the [capture and platform reference](reference/projection.md)
-for eligibility, timing, storage and failure policies.
+fallback before integrating. Read the [capture and platform reference](reference/platforms.md)
+and [projection contract](reference/projection.md) for eligibility and failure policies.
 
 [Documentation overview](README.md)

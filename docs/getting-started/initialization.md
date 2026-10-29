@@ -2,7 +2,10 @@
 
 Start with `NativeUIProjection` when a plugin owns a native view and a corresponding
 Web container. Registration starts the runtime, binds that container and coordinates
-image handoff and restoration. You do not need the renderer APIs for this route.
+presentation between the native view and the Web layout. This is the same starting
+point for a component in a scrolling feed or beneath a Web overlay. You do not need
+the renderer APIs for this route. See [the shared model](../concepts.md) for how
+these situations relate and where platform limits apply.
 
 Use the [Capacitor](capacitor.md) or [Cordova](cordova.md) guide for
 dependency installation, plugin lifecycle hooks and notification forwarding.

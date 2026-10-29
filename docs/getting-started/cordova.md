@@ -1,5 +1,7 @@
 # Cordova plugin integration
 
+Let a Cordova plugin's native components coexist with Web layouts, navigation and overlays using the [same presentation model](../concepts.md) as Capacitor.
+
 The same npm package, Swift library and Android AAR support Capacitor and Cordova. Engine is a library used by plugin maintainers, not a separately registered Cordova plugin. A Cordova application does not need `@capacitor/core` or a Capacitor native SDK.
 
 The consuming plugin still owns its native view and the corresponding DOM, including placement, size and stacking order. Supply an existing selector such as `native-ad` or `#player`. The DOM may be added after initialization. Image preparation, scroll handling, overlays and restoration use the common Engine implementation.
@@ -32,7 +34,7 @@ frameworks report their own transition lifecycle through notifications.
 Replace `<engine-version>` in every dependency below with the same published
 release. Read that release tag’s documentation so the examples match its APIs.
 
-Use the same Engine release for the Web package and native libraries. The API is pre-1.0; pin versions and retain dependency lockfiles.
+Use the same Engine release for the Web package and native libraries. Pin matching versions and retain dependency lockfiles for reproducible builds.
 
 ```sh
 npm install --save-exact '@webview-native-ui/engine@<engine-version>'
