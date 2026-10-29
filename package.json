@@ -35,7 +35,7 @@
     "prepublishOnly": "npm run build",
     "test:release": "node --test scripts/native-ui-engine-release/*.test.mjs",
     "test:package": "node scripts/verify-package.mjs",
-    "release": "np --no-publish --no-tests --branch main",
+    "release": "npm_config_git_tag_version=false np --no-publish --no-tests --branch main",
     "test:cordova": "node scripts/verify-cordova.mjs",
     "format:check": "prettier --check \"**/*.{ts,js,mjs,cjs,json,md,yml,yaml,html}\"",
     "swiftlint": "node-swiftlint",
@@ -43,8 +43,7 @@
     "format:swift": "swiftlint version && node-swiftlint --fix --format --no-cache",
     "lint:android": "android/gradlew -p android ktfmtCheck lintRelease",
     "format:kotlin": "android/gradlew -p android ktfmtFormat",
-    "version": "npm run build && npm run test:package && git add -f runtime/native-ui-engine.js ios/Sources/WebViewNativeUIEngine/Resources/native-ui-engine.js",
-    "postversion": "git rm --cached runtime/native-ui-engine.js ios/Sources/WebViewNativeUIEngine/Resources/native-ui-engine.js && git commit -m \"chore: keep generated runtime out of development\""
+    "version": "npm run build && npm run test:package && node scripts/prepare-release-tag.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

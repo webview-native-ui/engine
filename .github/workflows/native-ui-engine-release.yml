@@ -34,15 +34,12 @@ jobs:
           RELEASE_VERSION: ${{ inputs.version }}
         with:
           script: |
-            const { readFileSync } = await import('node:fs');
-            const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
-            if (pkg.version !== process.env.RELEASE_VERSION || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(pkg.version)) throw new Error('Version must match the engine package.json');
-            if (context.ref !== `refs/tags/v${pkg.version}`) throw new Error('Run from the matching release tag');
-            const { execFileSync } = await import('node:child_process');
-            execFileSync('git', ['merge-base', '--is-ancestor', context.sha, 'origin/main']);
+            const { verifyReleaseTag } = await import(`${process.cwd()}/scripts/native-ui-engine-release/release-tag.mjs`);
+            const { sha, version } = verifyReleaseTag(context.ref.replace('refs/tags/', ''));
+            if (version !== process.env.RELEASE_VERSION) throw new Error('Version must match the release tag');
             const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
-              ...context.repo, workflow_id: 'native-ui-engine.yml', head_sha: context.sha,
-              event: 'push', branch: `v${pkg.version}`, per_page: 100,
+              ...context.repo, workflow_id: 'native-ui-engine.yml', head_sha: sha,
+              event: 'push', branch: `v${version}`, per_page: 100,
             });
             const latest = runs.sort((a, b) => b.run_number - a.run_number)[0];
             if (!latest || latest.status !== 'completed' || latest.conclusion !== 'success') {
