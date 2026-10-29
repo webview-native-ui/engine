@@ -86,7 +86,8 @@ public final class NativeUIProjection: NSObject, WKScriptMessageHandler {
                             canCapture: @escaping () -> Bool = { true }, view: @escaping () -> UIView?) throws {
         try self.init(webView: webView, plugin: plugin, projectionSelector: projectionSelector,
                       receiveListeners: receiveListeners, allowedOrigins: allowedOrigins, failedFallback: failedFallback, runtime: runtime,
-                      captureDelayMs: captureDelayMs, values: values, readValues: readValues, canCapture: canCapture, snapshots: NativeUICoveredSnapshots(), view: view)
+                      captureDelayMs: captureDelayMs, values: values, readValues: readValues, canCapture: canCapture,
+                      snapshots: NativeUICoveredSnapshots(), view: view)
     }
     init(webView: WKWebView?, plugin: String, projectionSelector: String,
          receiveListeners: ReceiveListeners = .init(),
@@ -110,7 +111,8 @@ public final class NativeUIProjection: NSObject, WKScriptMessageHandler {
         guard captureDelayMs.isFinite, captureDelayMs >= 0, captureDelayMs <= 2147483647,
               !projectionSelector.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw ProjectionError.invalidConfiguration }
         var config: [String: Any] = ["id": id, "plugin": plugin, "projectionSelector": projectionSelector,
-                                     "captureDelayMs": captureDelayMs, "receiveListeners": receiveListeners.configuration, "failedFallback": failedFallback.rawValue, "runtime": runtime.rawValue]
+                                     "captureDelayMs": captureDelayMs, "receiveListeners": receiveListeners.configuration,
+                                     "failedFallback": failedFallback.rawValue, "runtime": runtime.rawValue]
         if readValues != nil { config["values"] = values.mapValues { $0.configuration } }
         // JSONSerialization produces valid UTF-8.
         // swiftlint:disable:next force_unwrapping
@@ -204,11 +206,19 @@ public final class NativeUIProjection: NSObject, WKScriptMessageHandler {
             guard !current.isEmpty, current.values.allSatisfy({ $0.layer.mask == nil }) else { complete(["tracked": false]); return }
             let nodes = current.map { id, view -> NativeUIScrollNode in
                 let frame = view.convert(view.bounds, to: webView)
-                return NativeUIScrollNode(id: id, scroll: NativeUIScrollPlacement(id: placement.id,
-                                                                                  offsetX: placement.offsetX, offsetY: placement.offsetY, viewport: placement.viewport, clip: placement.clip,
-                                                                                  contentWidth: placement.contentWidth, contentHeight: placement.contentHeight,
-                                                                                  frame: NativeUIFrame(x: frame.minX/scale-placement.viewport.x+placement.offsetX,
-                                                                                                       y: frame.minY/scale-placement.viewport.y+placement.offsetY, width: frame.width/scale, height: frame.height/scale)))
+                return NativeUIScrollNode(
+                    id: id,
+                    scroll: NativeUIScrollPlacement(
+                        id: placement.id, offsetX: placement.offsetX, offsetY: placement.offsetY,
+                        viewport: placement.viewport, clip: placement.clip,
+                        contentWidth: placement.contentWidth, contentHeight: placement.contentHeight,
+                        frame: NativeUIFrame(
+                            x: frame.minX/scale-placement.viewport.x+placement.offsetX,
+                            y: frame.minY/scale-placement.viewport.y+placement.offsetY,
+                            width: frame.width/scale, height: frame.height/scale
+                        )
+                    )
+                )
             }
             let rejected = scrolling.replace(nodes, in: webView, scale: scale) { [weak self, weak webView] id, frame, clip in
                 guard let self, let webView, self.visible, !self.snapshots.hidesNativeControls,
@@ -225,7 +235,8 @@ public final class NativeUIProjection: NSObject, WKScriptMessageHandler {
             }
             complete(["tracked": rejected.isEmpty])
         case "prepare":
-            guard visible, canCapture(), let ids = request["ids"] as? [String], let width = request["viewportWidth"] as? Double, width.isFinite, width > 0,
+            guard visible, canCapture(), let ids = request["ids"] as? [String],
+                  let width = request["viewportWidth"] as? Double, width.isFinite, width > 0,
                   let window = webView.window else { complete([:]); return }
             let selected = views().filter { ids.contains($0.key) }
             guard selected.count == ids.count else { complete([:]); return }
@@ -244,7 +255,11 @@ public final class NativeUIProjection: NSObject, WKScriptMessageHandler {
                         guard let ids = part["ids"] as? [String], let x = part["x"] as? CGFloat, let y = part["y"] as? CGFloat,
                               let w = part["width"] as? CGFloat, let h = part["height"] as? CGFloat else { continue }
                         let image = CGRect(x: x*scale, y: y*scale, width: w*scale, height: h*scale)
-                        for id in ids { if let view = selected[id] { entries[id] = Anchor(native: view.convert(view.bounds, to: webView), image: image) } }
+                        for id in ids {
+                            if let view = selected[id] {
+                                entries[id] = Anchor(native: view.convert(view.bounds, to: webView), image: image)
+                            }
+                        }
                     }
                     self.anchors[token] = entries
                 }
@@ -256,17 +271,23 @@ public final class NativeUIProjection: NSObject, WKScriptMessageHandler {
             let frames = request["parts"] == nil ? nil : snapshots.projectionFrames(request, in: webView)
             guard request["parts"] == nil || frames != nil else { complete(["shown": false]); return }
             restoreAccepted = true
-            complete(["shown": valid && snapshots.cover(token, in: webView, views: Array(Dictionary(grouping: selected.values, by: { ObjectIdentifier($0) }).values.compactMap { $0.first }), transient: true, frames: frames)])
+            complete(["shown": valid && snapshots.cover(
+                token, in: webView,
+                views: Array(Dictionary(grouping: selected.values, by: { ObjectIdentifier($0) }).values.compactMap { $0.first }),
+                transient: true, frames: frames
+            )])
         case "restore":
             restoreAccepted = false
             guard let frames = snapshots.projectionFrames(request, in: webView) else { complete(["shown": false]); return }
             let current = views()
             // Preserve renderer-owned constraints. Translation follows the corresponding DOM's movement.
             for (id, frame) in frames {
-                guard let view = current[id], captured[token]?[id] === view, let anchor = anchors[token]?[id] else { complete(["shown": false]); return }
+                guard let view = current[id], captured[token]?[id] === view, let anchor = anchors[token]?[id]
+                else { complete(["shown": false]); return }
                 let old = view.convert(view.bounds, to: webView)
                 guard abs(old.width-anchor.native.width) < 0.1, abs(old.height-anchor.native.height) < 0.1,
-                      abs(frame.width-anchor.image.width) < 0.1, abs(frame.height-anchor.image.height) < 0.1 else { complete(["shown": false]); return }
+                      abs(frame.width-anchor.image.width) < 0.1, abs(frame.height-anchor.image.height) < 0.1
+                else { complete(["shown": false]); return }
             }
             for (id, frame) in frames {
                 guard let view = current[id], let parent = view.superview, let anchor = anchors[token]?[id] else { continue }

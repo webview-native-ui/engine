@@ -155,8 +155,10 @@ final class NativeUICoveredSnapshotsTests: XCTestCase {
             var rgba = [Float](repeating: 0, count: 4)
             try rgba.withUnsafeMutableBytes { bytes in
                 let context = try XCTUnwrap(CGContext(data: bytes.baseAddress, width: 1, height: 1,
-                                                      bitsPerComponent: 32, bytesPerRow: 16, space: CGColorSpace(name: CGColorSpace.extendedDisplayP3)!,
-                                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.floatComponents.rawValue | CGBitmapInfo.byteOrder32Little.rawValue))
+                                                      bitsPerComponent: 32, bytesPerRow: 16,
+                                                      space: CGColorSpace(name: CGColorSpace.extendedDisplayP3)!,
+                                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue |
+                                                        CGBitmapInfo.floatComponents.rawValue | CGBitmapInfo.byteOrder32Little.rawValue))
                 context.draw(sample, in: CGRect(x: 0, y: 0, width: 1, height: 1))
             }
             samples.append(rgba[0])

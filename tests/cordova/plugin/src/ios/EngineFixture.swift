@@ -14,7 +14,10 @@ final class EngineFixture: CDVPlugin {
         web.superview?.addSubview(native)
         do {
             projection = try NativeUIProjection(webView: web, plugin: "EngineFixture", projectionSelector: "#slot",
-                                                receiveListeners: .init(update: ["updated"], projection: .init(native: ["native"], web: ["web"], none: ["none"])),
+                                                receiveListeners: .init(
+                                                    update: ["updated"],
+                                                    projection: .init(native: ["native"], web: ["web"], none: ["none"])
+                                                ),
                                                 runtime: .cordova, view: { [weak self] in self?.native })
         } catch { print("Engine init: \(error)") }
     }
@@ -22,7 +25,10 @@ final class EngineFixture: CDVPlugin {
         let rect = command.arguments[0] as! [String: Double]
         if let web = webView as? WKWebView, let parent = native.superview {
             let scale = web.bounds.width / rect["viewport"]!
-            native.frame = web.convert(CGRect(x: rect["x"]!*scale, y: rect["y"]!*scale, width: rect["width"]!*scale, height: rect["height"]!*scale), to: parent)
+            native.frame = web.convert(
+                CGRect(x: rect["x"]!*scale, y: rect["y"]!*scale, width: rect["width"]!*scale, height: rect["height"]!*scale),
+                to: parent
+            )
             projection?.receive("updated")
         }
         commandDelegate.send(CDVPluginResult(status: CDVCommandStatus_OK), callbackId: command.callbackId)

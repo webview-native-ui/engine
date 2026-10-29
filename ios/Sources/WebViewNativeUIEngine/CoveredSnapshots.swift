@@ -149,7 +149,8 @@ public final class NativeUICoveredSnapshots {
               let outputSpace = CGColorSpace(name: CGColorSpace.displayP3),
               let context = CGContext(data: nil, width: Int(bounds.width * scale), height: Int(bounds.height * scale),
                                       bitsPerComponent: 16, bytesPerRow: 0, space: space,
-                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.floatComponents.rawValue | CGBitmapInfo.byteOrder16Little.rawValue)
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue |
+                                        CGBitmapInfo.floatComponents.rawValue | CGBitmapInfo.byteOrder16Little.rawValue)
         else { complete([:]); return }
         context.translateBy(x: 0, y: bounds.height * scale)
         context.scaleBy(x: scale, y: -scale)
