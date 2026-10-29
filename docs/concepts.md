@@ -29,7 +29,7 @@ A projection is not a second live control. It does not forward clicks, animate
 video, or reorder the actual native view beneath individual DOM elements. The
 configured destinations `native`, `web` and `none` express where content should
 belong; the Engine chooses the handoff mechanism. See the
-[projection contract](projection.md#projection-contract) for exact precedence and
+[projection contract](reference/projection.md#projection-contract) for exact precedence and
 restoration rules.
 
 ## Why the integration supplies a DOM container
@@ -41,18 +41,21 @@ hold a Web fallback; its content and listeners survive projection.
 
 For an ad, this might be a `native-ad` element in a scrolling feed. For a tab bar,
 it might be a fallback navigation container below the page's overlay layer.
-Choose a [supported container](projection-containers.md) with the intended layout
+Choose a [supported container](reference/containers.md) with the intended layout
 box. The Engine neither creates the application layout nor supplies an ad or tab
 bar implementation.
 
 ## Choose the smallest integration that fits
 
-| What you are building                                                                           | Start here                                    | Why this route                                                                                                     |
-| ----------------------------------------------------------------------------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| A Capacitor plugin exposing a native view, such as a tab bar or a capturable advertisement view | [Capacitor plugin guide](capacitor-plugin.md) | Native registration owns runtime startup, measurements and handoff acknowledgements; keep the existing plugin API. |
-| A Cordova plugin with the same need                                                             | [Cordova plugin guide](cordova-plugin.md)     | The same lifecycle uses Cordova's native hooks and resource handler.                                               |
-| A renderer already batching many controls across pages and modals                               | [Renderer guide](renderer-guide.md)           | Group controls by lifecycle while retaining the renderer's existing placement and update protocol.                 |
-| An Ionic application using an Engine-enabled plugin                                             | [Ionic overlay guide](ionic-overlays.md)      | One shared monitor connects Ionic overlay lifecycle to projection coverage.                                        |
+| What you are building                                                                           | Start here                                             | Why this route                                                                                                     |
+| ----------------------------------------------------------------------------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
+| A Capacitor plugin exposing a native view, such as a tab bar or a capturable advertisement view | [Capacitor plugin guide](getting-started/capacitor.md) | Native registration owns runtime startup, measurements and handoff acknowledgements; keep the existing plugin API. |
+| A Cordova plugin with the same need                                                             | [Cordova plugin guide](getting-started/cordova.md)     | The same lifecycle uses Cordova's native hooks and resource handler.                                               |
+| A renderer already batching many controls across pages and modals                               | [Renderer guide](advanced/renderer.md)                 | Group controls by lifecycle while retaining the renderer's existing placement and update protocol.                 |
+| An Ionic application using an Engine-enabled plugin                                             | [Ionic overlay guide](configuration/ionic-overlays.md) | One shared monitor connects Ionic overlay lifecycle to projection coverage.                                        |
+
+See [native initialization](getting-started/initialization.md) for the minimal registration
+and a guide to optional settings versus advanced APIs.
 
 A Web modal alone does not require the renderer APIs. Start with native
 `NativeUIProjection` registration unless you already own multi-control
@@ -72,8 +75,8 @@ use their own transition notifications; Ionic is optional.
 
 A DOM container does not necessarily contain an interactive Web replacement: a button plugin may provide an HTML button as its fallback, while an advertising plugin may leave the container empty when native content is unavailable. Image handoff is explicit and noninteractive. The engine never forwards clicks through an image or replaces SDK click/impression handling.
 
-Native registrations can also [reflect current component values](value-bindings.md)
-into their fallback host. This is independent of [presentation intent](projection-state.md):
+Native registrations can also [reflect current component values](configuration/values.md)
+into their fallback host. This is independent of [presentation intent](reference/state.md):
 a selected tab is component data, while `native`, `web` and `none` describe where
 it belongs. Application events and framework form integration remain with the
 component adapter.
@@ -88,5 +91,7 @@ does not promise pixel-identical capture of every native view.
 
 Validate your actual backgrounds, overlay transitions and restoration on supported
 devices. If capture is unavailable, decide what the user should see in the Web
-fallback before integrating. Read the [capture and platform reference](projection.md)
+fallback before integrating. Read the [capture and platform reference](reference/projection.md)
 for eligibility, timing, storage and failure policies.
+
+[Documentation overview](README.md)

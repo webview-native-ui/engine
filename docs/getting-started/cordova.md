@@ -4,19 +4,14 @@ The same npm package, Swift library and Android AAR support Capacitor and Cordov
 
 The consuming plugin still owns its native view and the corresponding DOM, including placement, size and stacking order. Supply an existing selector such as `native-ad` or `#player`. The DOM may be added after initialization. Image preparation, scroll handling, overlays and restoration use the common Engine implementation.
 
-## What this integration gives you
+See [native initialization](initialization.md) for required inputs and ownership. The platform examples below add Cordova-specific
+startup, notification forwarding and teardown. Set `runtime` to Cordova even
+though it is optional in the constructor.
 
-A native control can remain interactive during normal use, then yield its visual
-presentation to a prepared image when a Web overlay or unsupported motion needs
-the DOM layer. Once native placement is ready again, the Engine restores the live
-view. This avoids rebuilding capture, image readiness and restoration coordination
-inside each plugin. See [concepts and limits](concepts.md) before choosing a fallback
-for content that cannot be captured.
-
-The steps below connect three things: your native view, an existing DOM container
-at the intended Web layer, and notifications describing successful appearance or
-presentation changes. The Engine needs those notifications because a native API
-call alone does not tell it when your control's visible state has changed.
+For a Cordova plugin showing a native advertisement in a feed, the application
+already owns a DOM slot and the plugin owns SDK interaction. This route connects
+that slot to projection without adding a Capacitor dependency or replacing the
+SDK's click handling; capture must still be allowed for the loaded content.
 
 ## Requirements
 
@@ -28,8 +23,8 @@ Provide a laid-out container such as `native-ad` or `#player` in the layer where
 the projected appearance should live. It may be inserted after registration, but
 must exist when projection starts. The native view's rectangle cannot identify
 its intended place in the DOM stacking tree. Check the
-[container support table](projection-containers.md) before choosing the selector.
-For Ionic applications, add [overlay support](ionic-overlays.md) once; other
+[container support table](../reference/containers.md) before choosing the selector.
+For Ionic applications, add [overlay support](../configuration/ionic-overlays.md) once; other
 frameworks report their own transition lifecycle through notifications.
 
 ## Dependencies
@@ -193,25 +188,17 @@ class ExamplePlugin : CordovaPlugin() {
 }
 ```
 
-Use `projection?.receive(eventName, data)` at the existing notification point, as on iOS. Native view creation and placement remain on the UI thread. If the renderer loads asynchronously, keep `install(web)` in `pluginInitialize()` and create the registration after the view is ready. Close the old registration before replacing that renderer.
+Use `projection?.receive(eventName, data)` at the existing notification point, as on iOS. See the shared [notification contract](../configuration/events.md) for update and destination semantics. Native view creation and placement remain on the UI thread. If the renderer loads asynchronously, keep `install(web)` in `pluginInitialize()` and create the registration after the view is ready. Close the old registration before replacing that renderer.
 
 The `PathHandler` delegates same-origin image requests to Engine. It serves only the registration's PNG files in app-private cache storage; unrelated paths return `null`. If the plugin already has a handler, combine them with `projection?.handleResource(path) ?: existingHandler.handle(path)`. For multiple registrations, delegate to the matching owner. Keep the handler installed for the WebView lifetime. No WebViewClient replacement or storage permission is needed.
 
 The defaults support Cordova's `https://localhost` and `http://localhost`. If the hostname changes, pass the same explicit origin set to `install` and each registration. Wildcard origins and `file://` app origins are not supported by this integration.
 
-## Component state and values
-
-See [projection state](projection-state.md) for the presentation intent exposed on
-the container. To keep a Web fallback or application adapter aligned with native
-selection and input, configure [value bindings](value-bindings.md) in the native
-registration. These are separate concerns; neither requires an application-side
-plugin wrapper.
-
 ## Lifetime and verification
 
 Keep the registration for the WebView lifetime. Engine reconnects after a document reload and clears the old document's image state. If the plugin destroys its native UI in `onReset`, update its view provider and emit the appropriate destination; do not leave a registration pointing at a destroyed view. Dispose registrations when the plugin/WebView is destroyed.
 
-Capacitor registrations retain their existing default. The Cordova integration requires the standard Cordova WebView resource handler. Running a Cordova plugin inside a Capacitor app is not covered by this integration; the host must use the Capacitor integration instead. See the shared [DOM and native surface requirements](projection.md#dom-and-native-surface-requirements) for selector, layout and capture rules. [Ionic overlay support](ionic-overlays.md) remains optional; plain Cordova apps need not enable it.
+The Cordova integration requires the standard Cordova WebView resource handler. Running a Cordova plugin inside a Capacitor app is not covered by this integration; the host must use the Capacitor integration instead. See the shared [DOM and native surface requirements](../reference/projection.md#dom-and-native-surface-requirements) for selector, layout and capture rules. [Ionic overlay support](../configuration/ionic-overlays.md) remains optional; plain Cordova apps need not enable it.
 
 The integration fixture uses Cordova CLI 13, cordova-ios 8.1.1 and cordova-android 15.1.0 with their standard WebViews. It checks actual PNG handoff, native restoration and hidden-state retention across document reload, not merely JS bridge mocks. Older Cordova releases and custom WebView engines require separate verification.
 
@@ -224,14 +211,9 @@ npm run test:cordova -- android emulator-5554
 
 The script creates a disposable app, uses local SwiftPM/Maven Engine artifacts, and records the application result in the printed temporary directory. It never publishes to npm or Maven. Android requires JDK 21+, SDK 36 and `ANDROID_HOME`; iOS requires Xcode.
 
-## Animated native controls
+## Next: choose optional behavior
 
-Native appearance updates prepare replacement images after a 50 ms debounce by default.
-If your control continues animating after its update notification, set `captureDelayMs`
-on the native registration (Swift: `captureDelayMs: 600`; Kotlin: `captureDelayMs = 600`).
-This changes background image preparation, not overlay presentation timing.
-See [capture timing](projection.md#capture-timing) for the cache behavior and measured guidance.
-
-## Integrating with DOM inspection
-
-The engine keeps a reusable image inside the fallback container, using its open ShadowRoot when available. No placement option is needed. If the renderer inspects child elements, exclude nodes marked `data-native-ui-projection-node`. See [DOM requirements](projection.md#dom-and-native-surface-requirements).
+Use the [configuration guide](../configuration/README.md) for notification routing,
+value reflection, capture timing and fallback policy. These shared settings are
+not additional platform setup. For a renderer that already batches controls, see
+[advanced APIs](../advanced/README.md).

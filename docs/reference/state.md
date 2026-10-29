@@ -2,7 +2,12 @@
 
 Projection state answers **where the component should be presented**. It is
 independent of its value, such as a toggle's checked state or a selected tab.
-See [value bindings](value-bindings.md) for that connection.
+See [value bindings](../configuration/values.md) for that connection.
+
+For example, a tab bar unexpectedly remains hidden after dismissing a modal.
+Inspect this attribute to distinguish a remaining `web` request from a `native`
+request whose restoration is still pending. It helps diagnose the ownership
+choice; it is not permission to reveal the bar or discard its image early.
 
 A selector-based `NativeUIProjection` registration writes the read-only
 `data-native-ui-destination` attribute on its current DOM container:

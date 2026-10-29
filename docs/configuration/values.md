@@ -3,14 +3,20 @@
 A native toggle, tab selection or text control can change while its Web fallback
 is hidden. Reflect its current values so that the fallback and application can
 observe the same selection when they become visible. This is separate from
-[projection state](projection-state.md): a selected tab is component data, not a
+[projection state](../reference/state.md): a selected tab is component data, not a
 request to move its rendering between native and Web.
+
+For example, a user turns a native toggle on while its Web fallback is hidden.
+If capture later becomes unavailable, an unchanged fallback would show it off.
+Return the current boolean through `readValues` and map it to the supported host's
+`checked` property. Application form notifications still use the component's
+existing adapter; the Engine only keeps the displayed data aligned.
 
 Configure this connection in the plugin's existing `NativeUIProjection`
 initialization. No application-side wrapper is required. These options work with
 both Capacitor and Cordova registrations. Values are applied to the same element
 matched by `projectionSelector`, not a child control or a separate binding target.
-Choose a [supported projection container](projection-containers.md): for example,
+Choose a [supported projection container](../reference/containers.md): for example,
 an `ion-toggle` or an application custom element exposing `checked` or `value`.
 HTML `input`, `select` and `textarea` are not direct projection containers. When
 using a wrapper around one, its own attribute observer or property setter must

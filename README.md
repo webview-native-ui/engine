@@ -38,13 +38,11 @@ Plugin authors retain their existing native controls and public APIs; the Engine
 supplies the coordination between native and Web presentation. It supports iOS
 and Android with Capacitor or Cordova. Ionic and Angular are not required.
 
-| Your goal                                            | Read                                                 |
-| ---------------------------------------------------- | ---------------------------------------------------- |
-| Decide whether this approach fits your UI            | [Concepts, examples and tradeoffs](docs/concepts.md) |
-| Add support to a Capacitor plugin                    | [Capacitor plugin guide](docs/capacitor-plugin.md)   |
-| Add support to a Cordova plugin                      | [Cordova plugin guide](docs/cordova-plugin.md)       |
-| Coordinate multiple controls across pages and modals | [Renderer guide](docs/renderer-guide.md)             |
-| Cover an Engine-enabled plugin with Ionic overlays   | [Ionic overlay guide](docs/ionic-overlays.md)        |
+| Start here                                                     | Purpose                                                                              |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| [Documentation](docs/README.md)                                | Reading order: basic initialization, optional behavior, advanced APIs and reference. |
+| [Concepts and limits](docs/concepts.md)                        | Decide whether projection fits your component.                                       |
+| [Basic initialization](docs/getting-started/initialization.md) | Minimum setup and required inputs, before framework-specific integration.            |
 
 Native registration starts the Web runtime; the base integration needs no separate
 application-side Engine initializer. The API is pre-1.0: pin matching Engine
@@ -53,11 +51,9 @@ with composited snapshots available from API 26+.
 
 ## Reference and contributing
 
-- [Projection container support](docs/projection-containers.md) — supported HTML and Ionic destinations, sizing conditions and wrapper examples.
-- [Projection state](docs/projection-state.md) — observe presentation intent independently of component data.
-- [Value bindings](docs/value-bindings.md) — reflect native values into attributes or component properties.
-- [Projection reference](docs/projection.md) — lifecycle contracts, native transport, capture policies and platform limits.
-- [Development and releases](docs/maintenance.md) — repository structure, validation and publishing.
+The [documentation index](docs/README.md) links to configuration, advanced APIs,
+container support and platform contracts. For repository development and publishing,
+see [development and releases](docs/maintenance.md).
 
 ## License
 

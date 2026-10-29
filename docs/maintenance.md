@@ -1,5 +1,10 @@
 # Development and releases
 
+Use this guide when changing or publishing the Engine itself. A native consumer
+may build without Node.js, so source changes must regenerate the bundled runtime.
+A release may reach npm before Maven artifacts are downloadable, so publication
+acceptance and consumer download readiness are checked separately below.
+
 ## Development
 
 The public entry points are `src/index.ts` and `src/ionic.ts`, with shared contracts in `src/types.ts`. Implementation is grouped by responsibility:
@@ -51,3 +56,5 @@ The npm organization `webview-native-ui` and Maven Central namespace `io.github.
 No build or test command publishes a package. Existing npm/Maven versions are never overwritten.
 
 To rerun release verification for an existing tag, dispatch `release.yml` with that tag. It checks the original tagged commit and skips npm publication only when the existing package contents match. Keep the tag unchanged. Release tooling uses the Node.js 24 bundled npm, matching CI.
+
+[Documentation overview](README.md)
