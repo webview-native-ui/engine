@@ -1,3 +1,5 @@
+// Test fixtures fail immediately when required setup values are missing.
+// swiftlint:disable force_unwrapping force_cast
 import XCTest
 import WebKit
 @testable import WebViewNativeUIEngine
@@ -5,12 +7,12 @@ import WebKit
 final class NativeUIScrollTrackerTests: XCTestCase {
     private func node(_ id: String = "counter", y: Double = 400, reuse: Bool = false) throws -> NativeUIScrollNode {
         let value: [String: Any] = ["id": id, "kind": "extension", "x": 10, "y": y + 80, "width": 240, "height": 60,
-            "items": [], "dark": false, "rtl": false,
-            "extension": ["name": "counter", "props": "{}", "actions": ["increment": "button"]],
-            "scroll": ["id": "scroll", "reuse": reuse, "offsetX": 0, "offsetY": 0, "viewport": ["x": 0, "y": 80, "width": 320, "height": 500],
-                       "clip": ["x": 0, "y": 100, "width": 320, "height": 480],
-                       "contentWidth": 320, "contentHeight": 1200,
-                       "frame": ["x": 10, "y": y, "width": 240, "height": 60]]]
+                                    "items": [], "dark": false, "rtl": false,
+                                    "extension": ["name": "counter", "props": "{}", "actions": ["increment": "button"]],
+                                    "scroll": ["id": "scroll", "reuse": reuse, "offsetX": 0, "offsetY": 0, "viewport": ["x": 0, "y": 80, "width": 320, "height": 500],
+                                               "clip": ["x": 0, "y": 100, "width": 320, "height": 480],
+                                               "contentWidth": 320, "contentHeight": 1200,
+                                               "frame": ["x": 10, "y": y, "width": 240, "height": 60]]]
         return try JSONDecoder().decode(NativeUIScrollNode.self, from: JSONSerialization.data(withJSONObject: value))
     }
 
@@ -31,11 +33,11 @@ final class NativeUIScrollTrackerTests: XCTestCase {
         var updates = 0
         var frames: [String: CGRect] = [:]
         var tracker: NativeUIScrollTracker? = try XCTUnwrap(NativeUIScrollTracker(webView: web,
-            nodes: [node(), node("second", y: 600)], scale: 1) { id, frame, clip in
-                updates += 1
-                frames[id] = frame
-                if id == "counter" { controller.place(frame, clip: clip) }
-            })
+                                                                                  nodes: [node(), node("second", y: 600)], scale: 1) { id, frame, clip in
+            updates += 1
+            frames[id] = frame
+            if id == "counter" { controller.place(frame, clip: clip) }
+        })
         tracker?.update()
         XCTAssertEqual(frames["counter"], CGRect(x: 10, y: 480, width: 240, height: 60))
         scroll.contentOffset.y = 420
@@ -174,3 +176,5 @@ private final class TrackingScrollView: UIScrollView {
     var moving = false
     override var isDragging: Bool { moving }
 }
+
+// swiftlint:enable force_unwrapping force_cast

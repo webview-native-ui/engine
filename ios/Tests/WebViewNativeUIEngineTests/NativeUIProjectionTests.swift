@@ -1,3 +1,5 @@
+// Test fixtures fail immediately when required setup values are missing.
+// swiftlint:disable force_unwrapping force_cast
 import XCTest
 import WebKit
 @testable import WebViewNativeUIEngine
@@ -12,7 +14,7 @@ final class NativeUIProjectionTests: XCTestCase {
     @MainActor func testConvenienceInitializerForwardsNativeFailurePolicy() throws {
         let web = WKWebView()
         let registration = try NativeUIProjection(webView: web, plugin: "Fixture", projectionSelector: "#slot",
-            failedFallback: .native, captureDelayMs: 600, canCapture: { false }, view: { nil })
+                                                  failedFallback: .native, captureDelayMs: 600, canCapture: { false }, view: { nil })
         defer { registration.destroy() }
         XCTAssertTrue(web.configuration.userContentController.userScripts.contains {
             $0.source.contains("\"failedFallback\":\"native\"") && $0.source.contains("\"captureDelayMs\":600")
@@ -45,9 +47,9 @@ final class NativeUIProjectionTests: XCTestCase {
         hidden.frame.origin = CGPoint(x: 0, y: 60)
         surface.addSubview(hidden)
         let registration = try NativeUIProjection(webView: web, plugin: "Fixture", projectionSelector: "#slot",
-            receiveListeners: .init(update: ["updated"], projection: .init(native: ["shown"], web: ["moving"], none: ["hidden"])),
-            readValues: { ["label": button.title(for: .normal) ?? ""] },
-            canCapture: { false }, view: { surface })
+                                                  receiveListeners: .init(update: ["updated"], projection: .init(native: ["shown"], web: ["moving"], none: ["hidden"])),
+                                                  readValues: { ["label": button.title(for: .normal) ?? ""] },
+                                                  canCapture: { false }, view: { surface })
         defer { registration.destroy(); window.isHidden = true }
         web.load(URLRequest(url: URL(string: "capacitor://localhost/fixture")!))
         try await wait(web, "document.querySelector('#slot')?.getAttributeNames().some(n => n.startsWith('data-native-ui-session-') && document.querySelector('#slot').getAttribute(n)==='native') === true", timeout: 30)
@@ -104,7 +106,7 @@ final class NativeUIProjectionTests: XCTestCase {
         owner.view.addSubview(first); owner.view.addSubview(second)
         var current = first
         let registration = try NativeUIProjection(webView: web, plugin: "Fixture", projectionSelector: "#absent",
-            canCapture: { false }, view: { current })
+                                                  canCapture: { false }, view: { current })
         defer { registration.destroy(); window.isHidden = true }
         web.load(URLRequest(url: URL(string: "capacitor://localhost/fixture")!))
         try await wait(web, "document.readyState === 'complete' && location.host === 'localhost'")
@@ -170,10 +172,10 @@ final class NativeUIProjectionTests: XCTestCase {
         button.backgroundColor = .red; button.setTitle("Native", for: .normal)
         owner.view.addSubview(button)
         let registration = try NativeUIProjection(webView: web, plugin: "Fixture", projectionSelector: "#slot",
-            receiveListeners: .init(projection: .init(native: ["shown"], web: ["moving"])),
-            // SnapshotTestWindow supplies deterministic pixels in hostless XCTest.
-            // Capture, file transport and handoff use the production path.
-            snapshots: NativeUICoveredSnapshots(), view: { button })
+                                                  receiveListeners: .init(projection: .init(native: ["shown"], web: ["moving"])),
+                                                  // SnapshotTestWindow supplies deterministic pixels in hostless XCTest.
+                                                  // Capture, file transport and handoff use the production path.
+                                                  snapshots: NativeUICoveredSnapshots(), view: { button })
         defer { registration.destroy(); window.isHidden = true }
         web.load(URLRequest(url: URL(string: "capacitor://localhost/fixture")!))
         for _ in 0..<3 {
@@ -204,7 +206,7 @@ final class NativeUIProjectionTests: XCTestCase {
         owner.view.addSubview(web)
         let native = UIView(frame: CGRect(x: 20, y: 100, width: 100, height: 40)); owner.view.addSubview(native)
         let registration = try NativeUIProjection(webView: web, plugin: "Fixture", projectionSelector: "#slot",
-            receiveListeners: .init(projection: .init(native: ["shown"], web: ["moving"], none: ["hidden"]), match: ["slot": "one"]), canCapture: { false }, view: { native })
+                                                  receiveListeners: .init(projection: .init(native: ["shown"], web: ["moving"], none: ["hidden"]), match: ["slot": "one"]), canCapture: { false }, view: { native })
         defer { registration.destroy(); window.isHidden = true }
         // A notification during startup has no subscriber yet; the current state remains authoritative.
         registration.receive("hidden", data: ["slot": "one"])
@@ -241,7 +243,7 @@ final class NativeUIProjectionTests: XCTestCase {
         let web = WKWebView(frame: window.bounds, configuration: configuration)
         owner.view.addSubview(web)
         let registration = try NativeUIProjection(webView: web, plugin: "Fixture", projectionSelector: "#slot",
-            receiveListeners: .init(update: ["updated"]), runtime: .cordova, view: { nil })
+                                                  receiveListeners: .init(update: ["updated"]), runtime: .cordova, view: { nil })
         defer { registration.destroy(); window.isHidden = true }
         web.load(URLRequest(url: URL(string: "capacitor://localhost/fixture")!))
         // A cold CI simulator may need tens of seconds to launch WebKit processes.
@@ -259,6 +261,40 @@ final class NativeUIProjectionTests: XCTestCase {
         registration.destroy()
         let calls = try await web.evaluateJavaScript("calls.length") as? Int
         XCTAssertEqual(calls, 0, "Native data and lifecycle messages must obey the allowed origin after navigation")
+    }
+
+    @MainActor func testHideAndImmediateTeardownPreservesRendererVisibility() async throws {
+        for capture in [false, true] {
+            let configuration = WKWebViewConfiguration()
+            configuration.setURLSchemeHandler(ProjectionFixture(), forURLScheme: "capacitor")
+            configuration.userContentController.addUserScript(WKUserScript(source: """
+              window.Capacitor = { convertFileSrc: url => 'capacitor://localhost/_capacitor_file_' + url.replace('file://', '') };
+            """, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+            let window = SnapshotTestWindow(frame: UIScreen.main.bounds)
+            let owner = UIViewController(); window.rootViewController = owner; window.makeKeyAndVisible()
+            let web = WKWebView(frame: window.bounds, configuration: configuration)
+            owner.view.addSubview(web)
+            let native = UIView(frame: CGRect(x: 20, y: 100, width: 100, height: 40))
+            native.backgroundColor = .red; owner.view.addSubview(native)
+            var current: UIView? = native
+            let registration = try NativeUIProjection(webView: web, plugin: "Fixture", projectionSelector: "#slot",
+                                                      receiveListeners: .init(projection: .init(web: ["moving"], none: ["hidden"])),
+                                                      runtime: .cordova, canCapture: { capture }, view: { current })
+            defer { registration.destroy(); window.isHidden = true }
+            web.load(URLRequest(url: URL(string: "capacitor://localhost/fixture")!))
+            try await wait(web, "document.querySelector('#slot')?.getAttribute('data-native-ui-destination') === 'native'", timeout: 30)
+            if capture { try await wait(web, "document.querySelector('#slot').hasAttribute('data-native-ui-snapshot')") }
+            registration.receive("moving")
+            try await wait(web, "document.querySelector('#slot')?.getAttribute('data-native-ui-destination') === 'web'")
+            for _ in 0..<100 where !native.isHidden { try await Task.sleep(nanoseconds: 20_000_000) }
+            XCTAssertTrue(native.isHidden)
+            // Plugin hide and teardown occur before the Web runtime can acknowledge the notification.
+            native.isHidden = true
+            registration.receive("hidden")
+            current = nil
+            registration.destroy()
+            XCTAssertTrue(native.isHidden, "Teardown must not undo renderer hide (capture: \(capture))")
+        }
     }
 
     @MainActor private func wait(_ web: WKWebView, _ expression: String, timeout: TimeInterval = 8) async throws {
@@ -291,3 +327,5 @@ private final class ProjectionFixture: NSObject, WKURLSchemeHandler {
     }
     func webView(_ webView: WKWebView, stop urlSchemeTask: WKURLSchemeTask) {}
 }
+
+// swiftlint:enable force_unwrapping force_cast

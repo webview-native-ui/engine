@@ -78,12 +78,12 @@ public final class NativeUIProjection: NSObject, WKScriptMessageHandler {
     private var captured: [String: [String: UIView]] = [:]
 
     public convenience init(webView: WKWebView?, plugin: String, projectionSelector: String,
-                receiveListeners: ReceiveListeners = .init(),
-                allowedOrigins: Set<String> = ["capacitor://localhost", "app://localhost", "https://localhost", "http://localhost"],
-                failedFallback: FailedFallback = .web, runtime: Runtime = .capacitor,
-                captureDelayMs: Double = 50,
-                values: [String: ValueBinding] = [:], readValues: (() -> [String: Any])? = nil,
-                canCapture: @escaping () -> Bool = { true }, view: @escaping () -> UIView?) throws {
+                            receiveListeners: ReceiveListeners = .init(),
+                            allowedOrigins: Set<String> = ["capacitor://localhost", "app://localhost", "https://localhost", "http://localhost"],
+                            failedFallback: FailedFallback = .web, runtime: Runtime = .capacitor,
+                            captureDelayMs: Double = 50,
+                            values: [String: ValueBinding] = [:], readValues: (() -> [String: Any])? = nil,
+                            canCapture: @escaping () -> Bool = { true }, view: @escaping () -> UIView?) throws {
         try self.init(webView: webView, plugin: plugin, projectionSelector: projectionSelector,
                       receiveListeners: receiveListeners, allowedOrigins: allowedOrigins, failedFallback: failedFallback, runtime: runtime,
                       captureDelayMs: captureDelayMs, values: values, readValues: readValues, canCapture: canCapture, snapshots: NativeUICoveredSnapshots(), view: view)
@@ -96,6 +96,8 @@ public final class NativeUIProjection: NSObject, WKScriptMessageHandler {
          values: [String: ValueBinding] = [:], readValues: (() -> [String: Any])? = nil,
          canCapture: @escaping () -> Bool = { true }, snapshots: NativeUICoveredSnapshots,
          view: @escaping () -> UIView?) throws {
+        // JSONSerialization produces valid UTF-8.
+        // swiftlint:disable:next force_unwrapping
         self.allowedOriginsJSON = String(data: try JSONSerialization.data(withJSONObject: Array(allowedOrigins)), encoding: .utf8)!
         self.runtime = runtime
         self.snapshots = snapshots
@@ -110,6 +112,8 @@ public final class NativeUIProjection: NSObject, WKScriptMessageHandler {
         var config: [String: Any] = ["id": id, "plugin": plugin, "projectionSelector": projectionSelector,
                                      "captureDelayMs": captureDelayMs, "receiveListeners": receiveListeners.configuration, "failedFallback": failedFallback.rawValue, "runtime": runtime.rawValue]
         if readValues != nil { config["values"] = values.mapValues { $0.configuration } }
+        // JSONSerialization produces valid UTF-8.
+        // swiftlint:disable:next force_unwrapping
         let json = String(data: try JSONSerialization.data(withJSONObject: config), encoding: .utf8)!
         let allowed = allowedOriginsJSON
         let runtime = try Self.runtime()
@@ -125,8 +129,8 @@ public final class NativeUIProjection: NSObject, WKScriptMessageHandler {
     public func receive(_ eventName: String, data: [String: Any]? = nil) {
         guard receiveListeners.match.allSatisfy({ key, expected in
             guard let actual = data?[key] else { return false }
-            if let a = actual as? NSNumber, let b = expected as? NSNumber {
-                return CFGetTypeID(a) == CFGetTypeID(b) && a == b
+            if let actualNumber = actual as? NSNumber, let expectedNumber = expected as? NSNumber {
+                return CFGetTypeID(actualNumber) == CFGetTypeID(expectedNumber) && actualNumber == expectedNumber
             }
             return (actual as? String).map { $0 == expected as? String } ?? false
         }) else { return }
@@ -201,10 +205,10 @@ public final class NativeUIProjection: NSObject, WKScriptMessageHandler {
             let nodes = current.map { id, view -> NativeUIScrollNode in
                 let frame = view.convert(view.bounds, to: webView)
                 return NativeUIScrollNode(id: id, scroll: NativeUIScrollPlacement(id: placement.id,
-                    offsetX: placement.offsetX, offsetY: placement.offsetY, viewport: placement.viewport, clip: placement.clip,
-                    contentWidth: placement.contentWidth, contentHeight: placement.contentHeight,
-                    frame: NativeUIFrame(x: frame.minX/scale-placement.viewport.x+placement.offsetX,
-                        y: frame.minY/scale-placement.viewport.y+placement.offsetY, width: frame.width/scale, height: frame.height/scale)))
+                                                                                  offsetX: placement.offsetX, offsetY: placement.offsetY, viewport: placement.viewport, clip: placement.clip,
+                                                                                  contentWidth: placement.contentWidth, contentHeight: placement.contentHeight,
+                                                                                  frame: NativeUIFrame(x: frame.minX/scale-placement.viewport.x+placement.offsetX,
+                                                                                                       y: frame.minY/scale-placement.viewport.y+placement.offsetY, width: frame.width/scale, height: frame.height/scale)))
             }
             let rejected = scrolling.replace(nodes, in: webView, scale: scale) { [weak self, weak webView] id, frame, clip in
                 guard let self, let webView, self.visible, !self.snapshots.hidesNativeControls,
@@ -269,7 +273,7 @@ public final class NativeUIProjection: NSObject, WKScriptMessageHandler {
                 let old = view.convert(view.bounds, to: webView)
                 let from = parent.convert(CGPoint(x: old.midX, y: old.midY), from: webView)
                 let to = parent.convert(CGPoint(x: anchor.native.midX+frame.minX-anchor.image.minX,
-                                               y: anchor.native.midY+frame.minY-anchor.image.minY), from: webView)
+                                                y: anchor.native.midY+frame.minY-anchor.image.minY), from: webView)
                 view.transform.tx += to.x-from.x; view.transform.ty += to.y-from.y
             }
             restoreAccepted = snapshots.restore(in: webView, token: token, frames: frames)
@@ -306,8 +310,8 @@ public final class NativeUIProjection: NSObject, WKScriptMessageHandler {
         guard let data = try? JSONSerialization.data(withJSONObject: values), let json = String(data: data, encoding: .utf8) else { return }
         evaluate("globalThis.WebViewNativeUIEngineRuntime?.receive(...\(json))")
     }
-    /// Call with the plugin's teardown. Does not destroy the renderer's views or DOM.
     deinit { destroy() }
+    /// Call with the plugin's teardown. Does not destroy the renderer's views or DOM.
     public func destroy() {
         guard !closed else { return }
         closed = true
@@ -318,8 +322,13 @@ public final class NativeUIProjection: NSObject, WKScriptMessageHandler {
             controller.removeAllUserScripts()
             remaining.forEach { controller.addUserScript($0) }
         }
+        // A successful hide notification can precede its Web acknowledgement and teardown.
+        let keepHidden = (recordedDestination ?? destination) == "none"
+        let visibility = keepHidden
+            ? (Array(views().values) + hiddenByProjection + captured.values.flatMap { $0.values }).map { ($0, $0.isHidden) }
+            : []
         snapshots.reset(); resetScrolling(); captured.removeAll(); anchors.removeAll()
-        if destination != "none" { hiddenByProjection.forEach { $0.isHidden = false } }
+        if keepHidden { visibility.forEach { $0.0.isHidden = $0.1 } } else { hiddenByProjection.forEach { $0.isHidden = false } }
         hiddenByProjection.removeAll()
     }
 }
