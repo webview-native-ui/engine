@@ -79,6 +79,10 @@ const boot = async (
             if (request.action === 'cover' && w.failCover) return { shown: false };
             if (request.action === 'prepare')
               return { token: 'pixels', parts: [{ ids: ['view'], url: 'file:///pixels.png', x: 8, y: 8, width: 120, height: 40 }] };
+            if (request.action === 'release' && w.holdInitialRelease && !request.placement)
+              return new Promise((resolve) => {
+                w.pendingInitialRelease = resolve;
+              });
             if (request.action === 'release' && w.nativeCoverUnclaimed && !request.placement) return { requiresPlacement: true };
             if (request.action === 'release' && w.holdRelease) return new Promise((resolve) => w.pendingRelease.push(resolve));
             if (request.action === 'release' && w.failRelease) throw new Error('Native release failed');
@@ -671,8 +675,13 @@ test('scroll with a prepared image still restores through the native placement a
   expect(calls.some((c: any) => c.action === 'resume')).toBe(true);
 });
 
-const bindPlacement = async (page: import('@playwright/test').Page, enabled = true, early = false) => {
-  await boot(page, true, '#slot', 'native', false, 'view', enabled, early);
+const bindPlacement = async (
+  page: import('@playwright/test').Page,
+  enabled = true,
+  early = false,
+  fallback: 'native' | 'web' = 'native',
+) => {
+  await boot(page, true, '#slot', fallback, false, 'view', enabled, early);
   await expect(page.locator('#slot')).toHaveAttribute('data-native-ui-snapshot', /.+/);
   await page.evaluate(() => {
     const w = window as any;
@@ -1165,4 +1174,81 @@ test('late custom element definitions receive current values through setters wit
   });
   expect(await page.evaluate(() => (window as any).reads)).toEqual(['attributes', 'slot']);
   expect(await page.evaluate(() => (window as any).assignments)).toEqual([['current', 'latest']]);
+});
+
+for (const hide of [false, true]) {
+  test(`idle retirement waits for placement and draw before reconciliation (hide: ${hide})`, async ({ page }) => {
+    await bindPlacement(page, true, true);
+    await page.evaluate(() => {
+      const w = window as any;
+      w.noCapture = w.holdInitialRelease = w.nativeCoverUnclaimed = w.holdRelease = true;
+      w.calls = [];
+      document.querySelector<HTMLElement>('#slot')!.style.width = '130px';
+    });
+    await expect.poll(() => page.evaluate(() => !!(window as any).pendingInitialRelease)).toBe(true);
+    await page.evaluate(() => document.dispatchEvent(new Event('scroll')));
+    await page.waitForTimeout(150);
+    expect(await page.evaluate(() => (window as any).calls.some((c: any) => c.action === 'visibility' && c.visible))).toBe(false);
+    await page.evaluate(() => (window as any).pendingInitialRelease({ requiresPlacement: true }));
+    await expect.poll(() => page.evaluate(() => (window as any).pendingRelease.length)).toBe(1);
+    expect(await page.evaluate(() => (window as any).measureCount)).toBe(1);
+    expect(await page.evaluate(() => (window as any).calls.some((c: any) => c.action === 'visibility' && c.visible))).toBe(false);
+    if (hide) {
+      await page.evaluate(() => (window as any).session.hide());
+      await expect(page.locator('#slot')).not.toHaveAttribute('data-native-ui-snapshot');
+    }
+    await page.evaluate(() => (window as any).pendingRelease.shift()({}));
+    if (hide) await page.waitForTimeout(100);
+    await expect
+      .poll(() => page.evaluate(() => (window as any).calls.some((c: any) => c.action === 'visibility' && c.visible)))
+      .toBe(!hide);
+  });
+}
+
+test('newer retirement also blocks native reconciliation', async ({ page }) => {
+  await bindPlacement(page, true, true);
+  await page.evaluate(() => {
+    const w = window as any;
+    w.holdInitialRelease = true;
+    w.calls = [];
+    document.querySelector<HTMLElement>('#slot')!.style.width = '130px';
+  });
+  await expect.poll(() => page.evaluate(() => !!(window as any).pendingInitialRelease)).toBe(true);
+  await page.evaluate(() => {
+    const w = window as any;
+    w.firstRelease = w.pendingInitialRelease;
+    w.pendingInitialRelease = undefined;
+    w.events.updated({ slot: 1 });
+  });
+  await expect.poll(() => page.evaluate(() => (window as any).calls.filter((c: any) => c.action === 'prepare').length)).toBeGreaterThan(0);
+  await page.waitForTimeout(100);
+  await page.evaluate(() => {
+    document.querySelector<HTMLElement>('#slot')!.style.width = '140px';
+  });
+  await expect.poll(() => page.evaluate(() => !!(window as any).pendingInitialRelease)).toBe(true);
+  await page.evaluate(() => (window as any).firstRelease({}));
+  await page.waitForTimeout(100);
+  expect(await page.evaluate(() => (window as any).calls.some((c: any) => c.action === 'visibility' && c.visible))).toBe(false);
+  await page.evaluate(() => (window as any).pendingInitialRelease({}));
+});
+
+test('Web fallback cancels an idle reveal without waiting for the native hide acknowledgement', async ({ page }) => {
+  await bindPlacement(page, true, true, 'web');
+  await page.evaluate(() => {
+    const w = window as any;
+    w.noCapture = w.holdInitialRelease = w.holdHide = true;
+    w.calls = [];
+    document.querySelector<HTMLElement>('#slot')!.style.width = '130px';
+  });
+  await expect.poll(() => page.evaluate(() => !!(window as any).pendingInitialRelease)).toBe(true);
+  await page.waitForTimeout(50);
+  await page.evaluate(() => document.dispatchEvent(new Event('scroll')));
+  await expect.poll(() => page.evaluate(() => (window as any).pendingHide.length)).toBe(1);
+  expect(await page.evaluate(() => (window as any).calls.some((c: any) => c.action === 'visibility' && c.visible))).toBe(false);
+  await expect(page.locator('#slot')).not.toHaveAttribute('data-native-ui-session-surface');
+  await page.evaluate(() => {
+    const w = window as any;
+    w.pendingHide.shift()({});
+    w.pendingInitialRelease({});
+  });
 });
