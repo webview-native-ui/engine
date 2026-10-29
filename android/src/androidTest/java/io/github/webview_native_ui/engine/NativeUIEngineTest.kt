@@ -1199,6 +1199,123 @@ class NativeUIEngineTest {
     }
 
     @Test
+    fun immediateHideAndClosePreserveRendererVisibility() {
+        org.junit.Assume.assumeTrue(android.os.Build.VERSION.SDK_INT >= 26)
+        val activity = activity()
+        val receive =
+            NativeUIProjection::class
+                .java
+                .getDeclaredMethod("receive", JSONObject::class.java)
+                .apply { isAccessible = true }
+        val idField =
+            NativeUIProjection::class.java.getDeclaredField("id").apply { isAccessible = true }
+        val capturedField =
+            NativeUIProjection::class.java.getDeclaredField("captured").apply {
+                isAccessible = true
+            }
+        try {
+            val ready = CountDownLatch(1)
+            main {
+                activity.web.evaluateJavascript(
+                    "globalThis.WebViewNativeUIEngineRuntime={start:async()=>{},receive:()=>{},stop:()=>{}}"
+                ) {
+                    ready.countDown()
+                }
+            }
+            assertTrue(ready.await(3, TimeUnit.SECONDS))
+            for (image in listOf(false, true)) for (hidden in listOf(View.INVISIBLE, View.GONE)) {
+                lateinit var registration: NativeUIProjection
+                lateinit var native: View
+                var current: View? = null
+                var seq = 0
+                fun request(payload: JSONObject) {
+                    receive.invoke(
+                        registration,
+                        JSONObject()
+                            .put("key", "${idField.get(registration)}:fixture:${++seq}")
+                            .put("request", payload),
+                    )
+                }
+                main {
+                    native = View(activity)
+                    native.setBackgroundColor(Color.RED)
+                    activity.root.addView(
+                        native,
+                        FrameLayout.LayoutParams(100, 80).apply {
+                            leftMargin = 80
+                            topMargin = 100
+                        },
+                    )
+                    current = native
+                    registration =
+                        NativeUIProjection(
+                            activity.window,
+                            activity.web,
+                            "Fixture",
+                            "#missing",
+                            receiveListeners =
+                                NativeUIProjection.ReceiveListeners(
+                                    projection =
+                                        NativeUIProjection.ReceiveListeners.Projection(
+                                            none = listOf("hidden")
+                                        )
+                                ),
+                            view = { current },
+                        )
+                }
+                try {
+                    instrumentation.waitForIdleSync()
+                    if (image) {
+                        main {
+                            request(
+                                JSONObject()
+                                    .put("action", "prepare")
+                                    .put("ids", org.json.JSONArray().put("view"))
+                                    .put("viewportWidth", activity.web.width)
+                            )
+                        }
+                        var token: String? = null
+                        val deadline = System.currentTimeMillis() + 10000
+                        while (token == null && System.currentTimeMillis() < deadline) {
+                            main {
+                                token =
+                                    (capturedField.get(registration) as Map<*, *>)
+                                        .keys
+                                        .firstOrNull() as? String
+                            }
+                            Thread.sleep(20)
+                        }
+                        assertNotNull("Image must be prepared before covering", token)
+                        main { request(JSONObject().put("action", "cover").put("token", token)) }
+                    } else
+                        main {
+                            request(JSONObject().put("action", "visibility").put("visible", false))
+                        }
+                    main {
+                        assertEquals(View.INVISIBLE, native.visibility)
+                        native.visibility = hidden
+                        current = null
+                        registration.receive("hidden")
+                        registration.close()
+                        assertEquals(
+                            "Close must preserve a hide before its Web acknowledgement (image=$image)",
+                            hidden,
+                            native.visibility,
+                        )
+                    }
+                } finally {
+                    main {
+                        registration.close()
+                        activity.root.removeView(native)
+                    }
+                }
+            }
+        } finally {
+            main { activity.finish() }
+        }
+    }
+
+    @Test
     fun nativeInitializationOwnsImagesEventsAndTeardown() =
         nativeInitialization(NativeUIProjection.CaptureMode.COMPOSITED)
 
