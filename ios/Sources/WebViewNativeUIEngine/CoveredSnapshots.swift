@@ -39,9 +39,8 @@ public final class NativeUICoveredSnapshots {
                   let revision = request["revision"] as? Int,
                   let width = request["viewportWidth"] as? Double, width.isFinite, width > 0 else { complete([:]); return }
             let expected = Set(ids)
-            let firstFrames = frames(expected, revision)
-            guard Set(firstFrames.keys) == expected else { complete([:]); return }
-            var initial: [String: CGRect]? = firstFrames
+            var initial: [String: CGRect]? = frames(expected, revision)
+            guard Set(initial!.keys) == expected else { complete([:]); return }
             prepare(frames: {
                 let measured = initial ?? frames(expected, revision)
                 initial = nil
@@ -54,7 +53,7 @@ public final class NativeUICoveredSnapshots {
                   request["parts"] == nil || destination != nil else { complete(["shown": false]); return }
             var seen = Set<ObjectIdentifier>()
             complete(["shown": cover(token, in: webView, views: selected.filter { seen.insert(ObjectIdentifier($0)).inserted },
-                                     transient: request["transient"] as? Bool == true, frames: destination)])
+                                      transient: request["transient"] as? Bool == true, frames: destination)])
         case "restore":
             guard let destination = projectionFrames(request, in: webView) else { complete(["shown": false]); return }
             complete(["shown": restore(in: webView, token: token, frames: destination)])
@@ -106,7 +105,7 @@ public final class NativeUICoveredSnapshots {
     // Gesture release can keep changing SwiftUI button bounds after touchesEnded.
     // Wait off the presentation path for unchanged rendered geometry, not a guessed delay.
     public func prepare(frames: @escaping () -> [String: CGRect], in webView: UIView, viewportWidth: CGFloat,
-                        complete: @escaping ([String: Any]) -> Void) {
+                 complete: @escaping ([String: Any]) -> Void) {
         let stamp = generation
         let start = CACurrentMediaTime()
         func sample(_ previous: [String: CGRect], _ stable: Int) {
@@ -123,7 +122,7 @@ public final class NativeUICoveredSnapshots {
     }
 
     private func capture(frames: [String: CGRect], in webView: UIView, viewportWidth: CGFloat,
-                         complete: @escaping ([String: Any]) -> Void) {
+                 complete: @escaping ([String: Any]) -> Void) {
         guard !touching, let window = webView.window, !frames.isEmpty,
               viewportWidth > 0, webView.bounds.width > 0 else { complete([:]); return }
         let stamp = generation
@@ -148,9 +147,8 @@ public final class NativeUICoveredSnapshots {
         guard let space = CGColorSpace(name: CGColorSpace.extendedDisplayP3),
               let outputSpace = CGColorSpace(name: CGColorSpace.displayP3),
               let context = CGContext(data: nil, width: Int(bounds.width * scale), height: Int(bounds.height * scale),
-                                      bitsPerComponent: 16, bytesPerRow: 0, space: space,
-                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue |
-                                        CGBitmapInfo.floatComponents.rawValue | CGBitmapInfo.byteOrder16Little.rawValue)
+                bitsPerComponent: 16, bytesPerRow: 0, space: space,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.floatComponents.rawValue | CGBitmapInfo.byteOrder16Little.rawValue)
         else { complete([:]); return }
         context.translateBy(x: 0, y: bounds.height * scale)
         context.scaleBy(x: scale, y: -scale)
@@ -177,12 +175,12 @@ public final class NativeUICoveredSnapshots {
                 for (index, crop) in crops.enumerated() {
                     guard let pixels = crop.image.cgImage,
                           let png = imageContext.pngRepresentation(of: CIImage(cgImage: pixels), format: .RGBA16,
-                                                                   colorSpace: outputSpace, options: [:]) else { throw CocoaError(.fileWriteUnknown) }
+                            colorSpace: outputSpace, options: [:]) else { throw CocoaError(.fileWriteUnknown) }
                     // Native entry/return copies must use the same encoded pixels as Web,
                     // including gamut clipping performed by integer PNG conversion.
                     guard let source = CGImageSourceCreateWithData(png as CFData, nil),
                           let decoded = CGImageSourceCreateImageAtIndex(source, 0,
-                                                                        [kCGImageSourceShouldCacheImmediately: true] as CFDictionary)
+                            [kCGImageSourceShouldCacheImmediately: true] as CFDictionary)
                     else { throw CocoaError(.fileWriteUnknown) }
                     let image = UIImage(cgImage: decoded, scale: scale, orientation: .up)
                     let file = directory.appendingPathComponent("\(token)-\(index).png")
@@ -299,7 +297,7 @@ public final class NativeUICoveredSnapshots {
     }
 }
 
-// Observes the start of interaction without recognizing or delaying the app's gestures.
+/// Observes the start of interaction without recognizing or delaying the app's gestures.
 private final class SnapshotTouchObserver: UIGestureRecognizer {
     private let changed: (Bool) -> Void
     private var touches = Set<UITouch>()

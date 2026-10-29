@@ -87,17 +87,3 @@ tasks.withType(Jar).configureEach {
 }
 
 android.sourceSets.main.assets.srcDir('../runtime')
-
-// Keep formatting dependencies out of the published library.
-configurations { ktfmt }
-dependencies { ktfmt 'com.facebook:ktfmt:0.61' }
-['ktfmtCheck', 'ktfmtFormat'].each { taskName ->
-    tasks.register(taskName, JavaExec) {
-        classpath = configurations.ktfmt
-        mainClass = 'com.facebook.ktfmt.cli.Main'
-        args '--kotlinlang-style'
-        if (taskName == 'ktfmtCheck') args '--dry-run', '--set-exit-if-changed'
-        args fileTree('src') { include '**/*.kt' }.files.sort()
-        args fileTree('../tests/cordova/plugin/src/android') { include '*.kt' }.files.sort()
-    }
-}

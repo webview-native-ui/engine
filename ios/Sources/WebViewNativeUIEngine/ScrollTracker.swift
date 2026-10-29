@@ -20,7 +20,7 @@ public struct NativeUIScrollPlacement: Decodable, Equatable {
 
     public var isValid: Bool {
         !id.isEmpty && viewport.isValid && clip.isValid && frame.isValid &&
-            offsetX.isFinite && offsetY.isFinite && contentWidth.isFinite && contentHeight.isFinite && contentWidth > 0 && contentHeight > 0
+        offsetX.isFinite && offsetY.isFinite && contentWidth.isFinite && contentHeight.isFinite && contentWidth > 0 && contentHeight > 0
     }
 }
 
@@ -38,11 +38,11 @@ public final class NativeUIScrollTracker {
     private var observation: NSKeyValueObservation?
 
     public init?(webView: WKWebView, nodes: [NativeUIScrollNode], scale: CGFloat,
-                 render: @escaping (String, CGRect, CGRect) -> Void) {
+          render: @escaping (String, CGRect, CGRect) -> Void) {
         guard let placement = nodes.first?.scroll, placement.isValid,
               nodes.allSatisfy({ $0.scroll?.id == placement.id && $0.scroll?.viewport == placement.viewport &&
-                                $0.scroll?.clip == placement.clip && $0.scroll?.contentWidth == placement.contentWidth &&
-                                $0.scroll?.contentHeight == placement.contentHeight }), scale.isFinite, scale > 0 else { return nil }
+                  $0.scroll?.clip == placement.clip && $0.scroll?.contentWidth == placement.contentWidth &&
+                  $0.scroll?.contentHeight == placement.contentHeight }), scale.isFinite, scale > 0 else { return nil }
         let transform = CGAffineTransform(scaleX: scale, y: scale)
         let viewport = placement.viewport.rect.applying(transform)
         let candidates = Self.scrollViews(in: webView).filter { scroll in
@@ -76,9 +76,9 @@ public final class NativeUIScrollTracker {
         guard self.webView === webView, let scrollView, scrollView.isDescendant(of: webView),
               !scrollView.isHidden, scrollView.window != nil, self.scale == scale,
               nodes.allSatisfy({ node in
-                guard let next = node.scroll else { return false }
-                return next.id == placement.id && next.viewport == placement.viewport && next.clip == placement.clip &&
-                    next.contentWidth == placement.contentWidth && next.contentHeight == placement.contentHeight
+                  guard let next = node.scroll else { return false }
+                  return next.id == placement.id && next.viewport == placement.viewport && next.clip == placement.clip &&
+                      next.contentWidth == placement.contentWidth && next.contentHeight == placement.contentHeight
               }) else { return false }
         setFrames(nodes)
         return true
@@ -86,8 +86,6 @@ public final class NativeUIScrollTracker {
 
     private func setFrames(_ nodes: [NativeUIScrollNode]) {
         frames = Dictionary(uniqueKeysWithValues: nodes.map {
-            // init and replace validate every scroll placement before reaching here.
-            // swiftlint:disable:next force_unwrapping
             ($0.id, $0.scroll!.frame.rect.applying(CGAffineTransform(scaleX: scale, y: scale))
                 .offsetBy(dx: contentOrigin.x, dy: contentOrigin.y))
         })

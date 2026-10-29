@@ -11,8 +11,6 @@ public final class NativeUIScrollBindings {
         let previous = trackers
         trackers.removeAll()
         var rejected: [String] = []
-        // The filter guarantees every grouped node has a scroll placement.
-        // swiftlint:disable:next force_unwrapping
         for (id, group) in Dictionary(grouping: nodes.filter { $0.scroll != nil }, by: { $0.scroll!.id }) {
             if group.contains(where: { $0.scroll?.reuse == true }) {
                 if let tracker = previous[id], tracker.replace(group, webView: webView, scale: scale) {
