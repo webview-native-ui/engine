@@ -77,6 +77,6 @@ If preparation fails before pushing, rerun it. If main and the tag were already 
 
 No build or test command publishes a package. Existing npm/Maven versions are never overwritten.
 
-To rerun release verification for an existing tag, dispatch `release.yml` with that tag. It checks the original tagged commit and skips npm publication only when the existing package contents match. Keep the tag unchanged. Release tooling uses the Node.js 24 bundled npm, matching CI.
+To rerun release verification for an existing tag, select that tag as both the workflow ref and the `tag` input: `gh workflow run release.yml --ref vX.Y.Z -f tag=vX.Y.Z`. This uses the workflow saved in that release, including for older tags that predate the release-only commit layout. It checks the original tagged commit and skips npm publication only when the existing package contents match. Keep the tag unchanged. Release tooling uses the Node.js 24 bundled npm, matching CI.
 
 [Documentation overview](README.md)
