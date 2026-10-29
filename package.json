@@ -42,7 +42,9 @@
     "lint:swift": "swiftlint version && node-swiftlint lint --strict --no-cache",
     "format:swift": "swiftlint version && node-swiftlint --fix --format --no-cache",
     "lint:android": "android/gradlew -p android ktfmtCheck lintRelease",
-    "format:kotlin": "android/gradlew -p android ktfmtFormat"
+    "format:kotlin": "android/gradlew -p android ktfmtFormat",
+    "version": "npm run build && npm run test:package && git add -f runtime/native-ui-engine.js ios/Sources/WebViewNativeUIEngine/Resources/native-ui-engine.js",
+    "postversion": "git rm --cached runtime/native-ui-engine.js ios/Sources/WebViewNativeUIEngine/Resources/native-ui-engine.js && git commit -m \"chore: keep generated runtime out of development\""
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
