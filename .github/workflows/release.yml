@@ -39,7 +39,7 @@ jobs:
             const { verifyReleaseTag } = await import(`${process.cwd()}/scripts/native-ui-engine-release/release-tag.mjs`);
             const { sha } = verifyReleaseTag(process.env.RELEASE_TAG);
             const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
-              ...context.repo, workflow_id: 'native-ui-engine.yml', head_sha: sha, event: 'push', branch: process.env.RELEASE_TAG, per_page: 100,
+              ...context.repo, workflow_id: 'native-ui-engine.yml', head_sha: sha, event: 'workflow_dispatch', branch: process.env.RELEASE_TAG, per_page: 100,
             });
             const latest = runs.sort((a,b) => b.run_number-a.run_number)[0];
             if (!latest || latest.status !== 'completed' || latest.conclusion !== 'success') throw new Error('Exact release commit must pass CI');

@@ -39,7 +39,7 @@ jobs:
             if (version !== process.env.RELEASE_VERSION) throw new Error('Version must match the release tag');
             const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
               ...context.repo, workflow_id: 'native-ui-engine.yml', head_sha: sha,
-              event: 'push', branch: `v${version}`, per_page: 100,
+              event: 'workflow_dispatch', branch: `v${version}`, per_page: 100,
             });
             const latest = runs.sort((a, b) => b.run_number - a.run_number)[0];
             if (!latest || latest.status !== 'completed' || latest.conclusion !== 'success') {

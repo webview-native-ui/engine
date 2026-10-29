@@ -53,13 +53,27 @@ versions across these distributions.
 
 The npm organization `webview-native-ui` and Maven Central namespace `io.github.webview-native-ui` are registered. Maintain npm trusted publishing for `webview-native-ui/engine`, workflow `release.yml`, and provision the Maven secrets above in this repository. Credentials are not copied by moving source files.
 
-1. Prepare the next version and release notes on `main`; use `npm run release` to create a standard `vX.Y.Z` tag/GitHub release. Keep the GitHub release as a draft until the Maven publication workflow succeeds.
-2. After the release tag passes CI, dispatch `native-ui-engine-release.yml` on that tag with the exact package version.
-3. Central `PUBLISHING` is an accepted upload, not download readiness. Once the Maven publication workflow succeeds, publish the prepared GitHub release. Note any pending Android artifact distribution in the release notes. `release.yml` verifies the tag, package version, CI and Maven publication acceptance before npm publication (`next` for prereleases, `latest` otherwise).
+1. Run **Prepare release** (`prepare-release.yml`) on `main` and select `major`, `minor`, `patch` or `revision`. No local build, commit or tag is needed.
+2. The workflow increments the version using npm, builds and verifies the package, and pushes a version-only main commit plus a separate release commit/tag containing the generated resources. It explicitly starts `Native UI Engine` validation on that tag and creates a GitHub Release draft with generated release notes.
+3. Review and edit the release notes. After tag validation passes, dispatch `native-ui-engine-release.yml` on that tag with the exact package version.
+4. Once Maven publication succeeds, publish the GitHub Release draft. Central `PUBLISHING` means upload acceptance, not download readiness; mention any pending Android distribution in the notes. `release.yml` verifies the tag, package version, tag CI and Maven acceptance before publishing to npm (`next` for revisions, `latest` for stable releases).
 
-`npm run release` retains `np` for version selection, preflight checks and the GitHub release draft. npm's automatic commit/tag is disabled for this command: the `version` hook builds and verifies the package, commits only version metadata on main, and creates a child commit containing the generated resources using a temporary Git index. The release tag points to that child; it is not merged into main. The hook pushes main and the tag atomically because `np`'s `--follow-tags` does not include tags on commits outside main's ancestry. No existing tag is replaced. Because release tags are outside main’s ancestry, `np`’s ancestor-based change preview can include older changes; prepare release notes by comparing the explicit previous and new version tags.
+Version increments follow npm SemVer rules; `revision` maps to `prerelease`:
 
-Tag CI checks regeneration. Publication accepts only a tag whose parent belongs to main and whose only changes are the two generated resources. npm rebuilds and checks the runtime before publishing; Maven packages the verified runtime from the same tag. If preparation or push fails, inspect the local commit/tag and remote state before retrying; do not overwrite an existing release tag.
+| Current   | Selection | Next      |
+| --------- | --------- | --------- |
+| `1.2.3`   | major     | `2.0.0`   |
+| `1.2.3`   | minor     | `1.3.0`   |
+| `1.2.3`   | patch     | `1.2.4`   |
+| `1.2.3`   | revision  | `1.2.4-0` |
+| `1.2.4-0` | revision  | `1.2.4-1` |
+| `1.2.4-2` | patch     | `1.2.4`   |
+| `1.3.0-2` | minor     | `1.3.0`   |
+| `2.0.0-2` | major     | `2.0.0`   |
+
+Generated runtime commits never enter main's history. The CI preparation pushes main and the release tag atomically, without force. Publication accepts only a tagged child of main that adds the two generated resources and changes no other files. npm rebuilds and checks the runtime before publication; Maven packages the runtime from the same tested tag.
+
+If preparation fails before pushing, rerun it. If main and the tag were already pushed, do not rerun preparation (that requests another version) or move the tag. Manually run `Native UI Engine` on the existing tag if validation was not started, and create the release draft for that tag if it is missing. This also recovers a failure between the push, validation dispatch and draft creation. Existing tags and published artifacts are never overwritten.
 
 No build or test command publishes a package. Existing npm/Maven versions are never overwritten.
 

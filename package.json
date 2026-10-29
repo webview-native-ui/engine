@@ -35,15 +35,13 @@
     "prepublishOnly": "npm run build",
     "test:release": "node --test scripts/native-ui-engine-release/*.test.mjs",
     "test:package": "node scripts/verify-package.mjs",
-    "release": "npm_config_git_tag_version=false np --no-publish --no-tests --branch main",
     "test:cordova": "node scripts/verify-cordova.mjs",
     "format:check": "prettier --check \"**/*.{ts,js,mjs,cjs,json,md,yml,yaml,html}\"",
     "swiftlint": "node-swiftlint",
     "lint:swift": "swiftlint version && node-swiftlint lint --strict --no-cache",
     "format:swift": "swiftlint version && node-swiftlint --fix --format --no-cache",
     "lint:android": "android/gradlew -p android ktfmtCheck lintRelease",
-    "format:kotlin": "android/gradlew -p android ktfmtFormat",
-    "version": "npm run build && npm run test:package && node scripts/prepare-release-tag.mjs"
+    "format:kotlin": "android/gradlew -p android ktfmtFormat"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -52,7 +50,6 @@
     "esbuild": "^0.27.0",
     "eslint": "^10.13.0",
     "globals": "^17.13.0",
-    "np": "^10.2.0",
     "prettier": "^3.6.2",
     "swiftlint": "^2.0.0",
     "typescript": "^5.9.3",
