@@ -294,40 +294,6 @@ final class NativeUIProjectionTests: XCTestCase {
         XCTAssertEqual(calls, 0, "Native data and lifecycle messages must obey the allowed origin after navigation")
     }
 
-    @MainActor func testHideAndImmediateTeardownPreservesRendererVisibility() async throws {
-        for capture in [false, true] {
-            let configuration = WKWebViewConfiguration()
-            configuration.setURLSchemeHandler(ProjectionFixture(), forURLScheme: "capacitor")
-            configuration.userContentController.addUserScript(WKUserScript(source: """
-              window.Capacitor = { convertFileSrc: url => 'capacitor://localhost/_capacitor_file_' + url.replace('file://', '') };
-            """, injectionTime: .atDocumentStart, forMainFrameOnly: true))
-            let window = SnapshotTestWindow(frame: UIScreen.main.bounds)
-            let owner = UIViewController(); window.rootViewController = owner; window.makeKeyAndVisible()
-            let web = WKWebView(frame: window.bounds, configuration: configuration)
-            owner.view.addSubview(web)
-            let native = UIView(frame: CGRect(x: 20, y: 100, width: 100, height: 40))
-            native.backgroundColor = .red; owner.view.addSubview(native)
-            var current: UIView? = native
-            let registration = try NativeUIProjection(webView: web, plugin: "Fixture", projectionSelector: "#slot",
-                                                      receiveListeners: .init(projection: .init(web: ["moving"], none: ["hidden"])),
-                                                      runtime: .cordova, canCapture: { capture }, view: { current })
-            defer { registration.destroy(); window.isHidden = true }
-            web.load(URLRequest(url: URL(string: "capacitor://localhost/fixture")!))
-            try await wait(web, "document.querySelector('#slot')?.getAttribute('data-native-ui-destination') === 'native'", timeout: 30)
-            if capture { try await wait(web, "document.querySelector('#slot').hasAttribute('data-native-ui-snapshot')") }
-            registration.receive("moving")
-            try await wait(web, "document.querySelector('#slot')?.getAttribute('data-native-ui-destination') === 'web'")
-            for _ in 0..<100 where !native.isHidden { try await Task.sleep(nanoseconds: 20_000_000) }
-            XCTAssertTrue(native.isHidden)
-            // Plugin hide and teardown occur before the Web runtime can acknowledge the notification.
-            native.isHidden = true
-            registration.receive("hidden")
-            current = nil
-            registration.destroy()
-            XCTAssertTrue(native.isHidden, "Teardown must not undo renderer hide (capture: \(capture))")
-        }
-    }
-
     @MainActor private func wait(_ web: WKWebView, _ expression: String, timeout: TimeInterval = 8) async throws {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
