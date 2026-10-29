@@ -1,3 +1,5 @@
+// Test fixtures fail immediately when required setup values are missing.
+// swiftlint:disable force_unwrapping force_cast
 import XCTest
 import WebKit
 @testable import WebViewNativeUIEngine
@@ -12,7 +14,7 @@ final class NativeUIProjectionTests: XCTestCase {
     @MainActor func testConvenienceInitializerForwardsNativeFailurePolicy() throws {
         let web = WKWebView()
         let registration = try NativeUIProjection(webView: web, plugin: "Fixture", projectionSelector: "#slot",
-            failedFallback: .native, captureDelayMs: 600, canCapture: { false }, view: { nil })
+                                                  failedFallback: .native, captureDelayMs: 600, canCapture: { false }, view: { nil })
         defer { registration.destroy() }
         XCTAssertTrue(web.configuration.userContentController.userScripts.contains {
             $0.source.contains("\"failedFallback\":\"native\"") && $0.source.contains("\"captureDelayMs\":600")
@@ -45,12 +47,18 @@ final class NativeUIProjectionTests: XCTestCase {
         hidden.frame.origin = CGPoint(x: 0, y: 60)
         surface.addSubview(hidden)
         let registration = try NativeUIProjection(webView: web, plugin: "Fixture", projectionSelector: "#slot",
-            receiveListeners: .init(update: ["updated"], projection: .init(native: ["shown"], web: ["moving"], none: ["hidden"])),
-            readValues: { ["label": button.title(for: .normal) ?? ""] },
-            canCapture: { false }, view: { surface })
+                                                  receiveListeners: .init(
+                                                    update: ["updated"],
+                                                    projection: .init(native: ["shown"], web: ["moving"], none: ["hidden"])
+                                                  ),
+                                                  readValues: { ["label": button.title(for: .normal) ?? ""] },
+                                                  canCapture: { false }, view: { surface })
         defer { registration.destroy(); window.isHidden = true }
         web.load(URLRequest(url: URL(string: "capacitor://localhost/fixture")!))
-        try await wait(web, "document.querySelector('#slot')?.getAttributeNames().some(n => n.startsWith('data-native-ui-session-') && document.querySelector('#slot').getAttribute(n)==='native') === true", timeout: 30)
+        try await wait(web,
+                       "document.querySelector('#slot')?.getAttributeNames()" +
+                        ".some(n => n.startsWith('data-native-ui-session-')" +
+                        " && document.querySelector('#slot').getAttribute(n)==='native') === true", timeout: 30)
         XCTAssertFalse(surface.isHidden)
         try await wait(web, "document.querySelector('#slot')?.dataset.nativeUiValueLabel === 'Native'")
         button.setTitle("Changed", for: .normal)
@@ -63,20 +71,32 @@ final class NativeUIProjectionTests: XCTestCase {
             for _ in 0..<100 where !surface.isHidden { try await Task.sleep(nanoseconds: 20_000_000) }
             XCTAssertTrue(surface.isHidden)
             _ = try await web.evaluateJavaScript("testEvents.shown({})")
-            try await wait(web, "document.querySelector('#slot').getAttributeNames().some(n => n.startsWith('data-native-ui-session-') && document.querySelector('#slot').getAttribute(n)==='native')")
+            try await wait(web,
+                           "document.querySelector('#slot').getAttributeNames()" +
+                            ".some(n => n.startsWith('data-native-ui-session-')" +
+                            " && document.querySelector('#slot').getAttribute(n)==='native')")
             XCTAssertFalse(surface.isHidden)
             XCTAssertTrue(hidden.isHidden, "Do not unhide a renderer-owned hidden view")
         }
         _ = try await web.evaluateJavaScript("testEvents.hidden({})")
-        try await wait(web, "document.querySelector('#slot').getAttributeNames().some(n => n.startsWith('data-native-ui-session-') && document.querySelector('#slot').getAttribute(n)==='none')")
+        try await wait(web,
+                       "document.querySelector('#slot').getAttributeNames()" +
+                        ".some(n => n.startsWith('data-native-ui-session-')" +
+                        " && document.querySelector('#slot').getAttribute(n)==='none')")
         XCTAssertTrue(surface.isHidden)
         let previousDocument = try await web.evaluateJavaScript("testDocument") as! String
         web.reload()
         try await wait(web, "typeof testDocument === 'string' && testDocument !== '\(previousDocument)'")
-        try await wait(web, "document.querySelector('#slot')?.getAttributeNames().some(n => n.startsWith('data-native-ui-session-') && document.querySelector('#slot').getAttribute(n)==='none') === true")
+        try await wait(web,
+                       "document.querySelector('#slot')?.getAttributeNames()" +
+                        ".some(n => n.startsWith('data-native-ui-session-')" +
+                        " && document.querySelector('#slot').getAttribute(n)==='none') === true")
         XCTAssertTrue(surface.isHidden, "Reload must preserve none")
         _ = try await web.evaluateJavaScript("testEvents.shown({})")
-        try await wait(web, "document.querySelector('#slot')?.getAttributeNames().some(n => n.startsWith('data-native-ui-session-') && document.querySelector('#slot').getAttribute(n)==='native') === true")
+        try await wait(web,
+                       "document.querySelector('#slot')?.getAttributeNames()" +
+                        ".some(n => n.startsWith('data-native-ui-session-')" +
+                        " && document.querySelector('#slot').getAttribute(n)==='native') === true")
         XCTAssertFalse(surface.isHidden)
         registration.destroy()
         try await wait(web, "Object.keys(testEvents).length === 0")
@@ -104,7 +124,7 @@ final class NativeUIProjectionTests: XCTestCase {
         owner.view.addSubview(first); owner.view.addSubview(second)
         var current = first
         let registration = try NativeUIProjection(webView: web, plugin: "Fixture", projectionSelector: "#absent",
-            canCapture: { false }, view: { current })
+                                                  canCapture: { false }, view: { current })
         defer { registration.destroy(); window.isHidden = true }
         web.load(URLRequest(url: URL(string: "capacitor://localhost/fixture")!))
         try await wait(web, "document.readyState === 'complete' && location.host === 'localhost'")
@@ -170,10 +190,10 @@ final class NativeUIProjectionTests: XCTestCase {
         button.backgroundColor = .red; button.setTitle("Native", for: .normal)
         owner.view.addSubview(button)
         let registration = try NativeUIProjection(webView: web, plugin: "Fixture", projectionSelector: "#slot",
-            receiveListeners: .init(projection: .init(native: ["shown"], web: ["moving"])),
-            // SnapshotTestWindow supplies deterministic pixels in hostless XCTest.
-            // Capture, file transport and handoff use the production path.
-            snapshots: NativeUICoveredSnapshots(), view: { button })
+                                                  receiveListeners: .init(projection: .init(native: ["shown"], web: ["moving"])),
+                                                  // SnapshotTestWindow supplies deterministic pixels in hostless XCTest.
+                                                  // Capture, file transport and handoff use the production path.
+                                                  snapshots: NativeUICoveredSnapshots(), view: { button })
         defer { registration.destroy(); window.isHidden = true }
         web.load(URLRequest(url: URL(string: "capacitor://localhost/fixture")!))
         for _ in 0..<3 {
@@ -184,7 +204,11 @@ final class NativeUIProjectionTests: XCTestCase {
             try await wait(web, "document.querySelector('#slot').hasAttribute('data-native-ui-snapshot-visible')")
             XCTAssertTrue(button.isHidden)
             _ = try await web.evaluateJavaScript("testEvents.shown({})")
-            try await wait(web, "document.querySelector('#slot').getAttributeNames().some(n => n.startsWith('data-native-ui-session-') && document.querySelector('#slot').getAttribute(n)==='native') && !document.querySelector('#slot').hasAttribute('data-native-ui-snapshot-visible')")
+            try await wait(web,
+                           "document.querySelector('#slot').getAttributeNames()" +
+                            ".some(n => n.startsWith('data-native-ui-session-')" +
+                            " && document.querySelector('#slot').getAttribute(n)==='native')" +
+                            " && !document.querySelector('#slot').hasAttribute('data-native-ui-snapshot-visible')")
             XCTAssertFalse(button.isHidden, "Prepared image handoff must restore the live view")
             XCTAssertEqual(button.frame, CGRect(x: 20, y: 100, width: 100, height: 40))
         }
@@ -204,7 +228,10 @@ final class NativeUIProjectionTests: XCTestCase {
         owner.view.addSubview(web)
         let native = UIView(frame: CGRect(x: 20, y: 100, width: 100, height: 40)); owner.view.addSubview(native)
         let registration = try NativeUIProjection(webView: web, plugin: "Fixture", projectionSelector: "#slot",
-            receiveListeners: .init(projection: .init(native: ["shown"], web: ["moving"], none: ["hidden"]), match: ["slot": "one"]), canCapture: { false }, view: { native })
+                                                  receiveListeners: .init(
+                                                    projection: .init(native: ["shown"], web: ["moving"], none: ["hidden"]),
+                                                    match: ["slot": "one"]
+                                                  ), canCapture: { false }, view: { native })
         defer { registration.destroy(); window.isHidden = true }
         // A notification during startup has no subscriber yet; the current state remains authoritative.
         registration.receive("hidden", data: ["slot": "one"])
@@ -218,10 +245,16 @@ final class NativeUIProjectionTests: XCTestCase {
         XCTAssertEqual(webVisible, true)
         registration.receive("shown", data: ["slot": "one"])
         _ = try await web.evaluateJavaScript("testEvents.shown({slot: 'one'})")
-        try await wait(web, "document.querySelector('#slot').getAttributeNames().some(n=>n.startsWith('data-native-ui-session-') && document.querySelector('#slot').getAttribute(n)==='native')")
+        try await wait(web,
+                       "document.querySelector('#slot').getAttributeNames()" +
+                        ".some(n=>n.startsWith('data-native-ui-session-')" +
+                        " && document.querySelector('#slot').getAttribute(n)==='native')")
         XCTAssertFalse(native.isHidden)
         web.reload()
-        try await wait(web, "document.querySelector('#slot')?.getAttributeNames().some(n=>n.startsWith('data-native-ui-session-') && document.querySelector('#slot').getAttribute(n)==='native') === true")
+        try await wait(web,
+                       "document.querySelector('#slot')?.getAttributeNames()" +
+                        ".some(n=>n.startsWith('data-native-ui-session-')" +
+                        " && document.querySelector('#slot').getAttribute(n)==='native') === true")
         XCTAssertFalse(native.isHidden, "Reconnection must use the latest native notification")
     }
     @MainActor func testCordovaNotificationsAndTeardownDoNotReachUntrustedNavigation() async throws {
@@ -241,7 +274,7 @@ final class NativeUIProjectionTests: XCTestCase {
         let web = WKWebView(frame: window.bounds, configuration: configuration)
         owner.view.addSubview(web)
         let registration = try NativeUIProjection(webView: web, plugin: "Fixture", projectionSelector: "#slot",
-            receiveListeners: .init(update: ["updated"]), runtime: .cordova, view: { nil })
+                                                  receiveListeners: .init(update: ["updated"]), runtime: .cordova, view: { nil })
         defer { registration.destroy(); window.isHidden = true }
         web.load(URLRequest(url: URL(string: "capacitor://localhost/fixture")!))
         // A cold CI simulator may need tens of seconds to launch WebKit processes.
@@ -317,7 +350,10 @@ private final class ProjectionFixture: NSObject, WKURLSchemeHandler {
             }
             data = image; type = "image/png"
         } else {
-            data = Data("<meta name='viewport' content='width=device-width,initial-scale=1'><body><div id='slot' style='position:absolute;left:20px;top:100px;width:100px;height:40px'>Fallback</div></body>".utf8)
+            data = Data((
+                "<meta name='viewport' content='width=device-width,initial-scale=1'><body>" +
+                    "<div id='slot' style='position:absolute;left:20px;top:100px;width:100px;height:40px'>Fallback</div></body>"
+            ).utf8)
             type = "text/html"
         }
         urlSchemeTask.didReceive(URLResponse(url: url, mimeType: type, expectedContentLength: data.count, textEncodingName: nil))
@@ -325,3 +361,5 @@ private final class ProjectionFixture: NSObject, WKURLSchemeHandler {
     }
     func webView(_ webView: WKWebView, stop urlSchemeTask: WKURLSchemeTask) {}
 }
+
+// swiftlint:enable force_unwrapping force_cast

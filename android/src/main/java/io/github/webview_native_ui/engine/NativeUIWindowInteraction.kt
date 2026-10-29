@@ -1,18 +1,19 @@
 package io.github.webview_native_ui.engine
 
 import android.view.MotionEvent
-import android.view.Window
 import android.view.ViewConfiguration
+import android.view.Window
 import java.lang.ref.WeakReference
 import java.util.WeakHashMap
 
 /** One non-consuming observer per window; preserve the application's callback chain. */
-internal class NativeUIWindowInteraction private constructor(
-    private val previous: Window.Callback,
-    private val touchSlop: Int
-) : Window.Callback by previous {
+internal class NativeUIWindowInteraction
+private constructor(private val previous: Window.Callback, private val touchSlop: Int) :
+    Window.Callback by previous {
     private val listeners = linkedSetOf<(Boolean) -> Unit>()
+
     internal data class Drag(val downX: Float, val downY: Float, val dx: Float, val dy: Float)
+
     private val dragListeners = linkedMapOf<(Boolean) -> Unit, (Drag) -> Unit>()
     private var downX = 0f
     private var downY = 0f
@@ -27,12 +28,20 @@ internal class NativeUIWindowInteraction private constructor(
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
         if (event.actionMasked == MotionEvent.ACTION_DOWN) {
-            downX = event.rawX; downY = event.rawY; dragReported = false
+            downX = event.rawX
+            downY = event.rawY
+            dragReported = false
             changed(true)
         }
         if (event.actionMasked == MotionEvent.ACTION_POINTER_DOWN) dragReported = true
-        if (active && !dragReported && event.actionMasked == MotionEvent.ACTION_MOVE && event.pointerCount == 1) {
-            val dx = event.rawX - downX; val dy = event.rawY - downY
+        if (
+            active &&
+                !dragReported &&
+                event.actionMasked == MotionEvent.ACTION_MOVE &&
+                event.pointerCount == 1
+        ) {
+            val dx = event.rawX - downX
+            val dy = event.rawY - downY
             if (dx * dx + dy * dy > touchSlop.toFloat() * touchSlop) {
                 dragReported = true
                 // Before WebView consumes this MOVE: its compositor must not move the
@@ -45,8 +54,12 @@ internal class NativeUIWindowInteraction private constructor(
             handled = previous.dispatchTouchEvent(event)
             return handled
         } finally {
-            if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL ||
-                (event.actionMasked == MotionEvent.ACTION_DOWN && !handled)) changed(false)
+            if (
+                event.actionMasked == MotionEvent.ACTION_UP ||
+                    event.actionMasked == MotionEvent.ACTION_CANCEL ||
+                    (event.actionMasked == MotionEvent.ACTION_DOWN && !handled)
+            )
+                changed(false)
         }
     }
 
@@ -57,12 +70,23 @@ internal class NativeUIWindowInteraction private constructor(
 
     companion object {
         private val observers = WeakHashMap<Window, WeakReference<NativeUIWindowInteraction>>()
-        fun observe(window: Window, drag: ((Drag) -> Unit)? = null, listener: (Boolean) -> Unit): () -> Unit {
+
+        fun observe(
+            window: Window,
+            drag: ((Drag) -> Unit)? = null,
+            listener: (Boolean) -> Unit,
+        ): () -> Unit {
             check(android.os.Looper.myLooper() == android.os.Looper.getMainLooper())
-            val observer = observers[window]?.get() ?: NativeUIWindowInteraction(requireNotNull(window.callback), ViewConfiguration.get(window.context).scaledTouchSlop).also {
-                observers[window] = WeakReference(it)
-                window.callback = it
-            }
+            val observer =
+                observers[window]?.get()
+                    ?: NativeUIWindowInteraction(
+                            requireNotNull(window.callback),
+                            ViewConfiguration.get(window.context).scaledTouchSlop,
+                        )
+                        .also {
+                            observers[window] = WeakReference(it)
+                            window.callback = it
+                        }
             observer.listeners.add(listener)
             if (drag != null) observer.dragListeners[listener] = drag
             listener(observer.active)
