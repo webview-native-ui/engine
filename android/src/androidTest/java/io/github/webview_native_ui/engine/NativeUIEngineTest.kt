@@ -621,7 +621,7 @@ class NativeUIEngineTest {
        native.y=pendingNativeY
        revealCount++
       }
-     },view={native})
+     },readValues={JSONObject().put("label",native.contentDescription?.toString() ?: "")},view={native})
     if(delayCover) registration.awaitWebDraw = { _, current, done -> pendingDraws.add { done(current()) } }
     registration.receive("hidden")
     registration.receive(if(pressOnConnect) "shown" else "moving")
@@ -637,6 +637,9 @@ class NativeUIEngineTest {
    assertTrue("Fixture navigation did not complete",loaded.await(10,TimeUnit.SECONDS))
    waitFor("typeof testEvents?.shown==='function'")
    waitFor("document.querySelector('#slot')!==null")
+   main{native.contentDescription="Current value"}
+   js("testEvents.updated({})")
+   waitFor("document.querySelector('#slot')?.dataset.nativeUiValueLabel==='Current value'")
    if(pressOnConnect) {
     Thread.sleep(500)
     assertEquals("false",js("document.querySelector('#slot').hasAttribute('data-native-ui-snapshot')"))

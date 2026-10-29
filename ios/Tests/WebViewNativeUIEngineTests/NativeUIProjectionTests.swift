@@ -46,11 +46,16 @@ final class NativeUIProjectionTests: XCTestCase {
         surface.addSubview(hidden)
         let registration = try NativeUIProjection(webView: web, plugin: "Fixture", projectionSelector: "#slot",
             receiveListeners: .init(update: ["updated"], projection: .init(native: ["shown"], web: ["moving"], none: ["hidden"])),
+            readValues: { ["label": button.title(for: .normal) ?? ""] },
             canCapture: { false }, view: { surface })
         defer { registration.destroy(); window.isHidden = true }
         web.load(URLRequest(url: URL(string: "capacitor://localhost/fixture")!))
         try await wait(web, "document.querySelector('#slot')?.getAttributeNames().some(n => n.startsWith('data-native-ui-session-') && document.querySelector('#slot').getAttribute(n)==='native') === true", timeout: 30)
         XCTAssertFalse(surface.isHidden)
+        try await wait(web, "document.querySelector('#slot')?.dataset.nativeUiValueLabel === 'Native'")
+        button.setTitle("Changed", for: .normal)
+        _ = try await web.evaluateJavaScript("testEvents.updated({})")
+        try await wait(web, "document.querySelector('#slot')?.dataset.nativeUiValueLabel === 'Changed'")
         for _ in 0..<2 {
             _ = try await web.evaluateJavaScript("testEvents.moving({})")
             try await wait(web, "!document.querySelector('#slot').getAttributeNames().some(n => n.startsWith('data-native-ui-session-'))")

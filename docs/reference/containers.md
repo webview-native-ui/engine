@@ -10,7 +10,7 @@ Choose the existing DOM element that occupies the native surface's intended loca
 - `projectionSelector` uses document CSS selectors (ID, class, attribute or descendant). It must match exactly one element and does not enter Shadow DOM. A missing element can be created later; zero or multiple matches keep Native hidden.
 - The retained image is inserted in the element's open ShadowRoot, or as a light-DOM child otherwise. Closed shadow content must inherit the host's visibility and expose a slot that can display the image.
 - An overlay, collapsed item or inactive page is eligible only while it has a visible layout box. Do not force hidden configuration elements to render just to use them as destinations.
-- Host/ancestor clipping, opacity, transforms and filters still affect the image. The image is noninteractive and freezes the captured appearance. See the [projection reference](projection.md#dom-and-native-surface-requirements) for native capture limits and the [renderer guide](renderer-guide.md#low-level-web-projection) for DOM mutation-observer exclusions.
+- Host/ancestor clipping, opacity, transforms and filters still affect the image. The image is noninteractive and freezes the captured appearance. See the [projection reference](projection.md#dom-and-native-surface-requirements) for native capture limits and the [renderer guide](../advanced/web-projection.md) for DOM mutation-observer exclusions.
 
 ## HTML containers
 
@@ -184,7 +184,11 @@ Select `#seat-projection`, not the HTML `select`:
 </span>
 ```
 
-The control's DOM, value and event listeners survive handoff. The plugin still owns native behavior and value synchronization; the prepared image does not accept input.
+The control's DOM, value and event listeners survive handoff; the prepared image
+does not accept input. Native behavior and application events remain with the
+plugin. Optional [value bindings](../configuration/values.md) reflect native values on the
+selected host. With the wrapper above, that host is the span, not the inner select;
+the wrapper's component adapter must forward reflected values to its control.
 
 ## Verification scope
 

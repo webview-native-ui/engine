@@ -1,5 +1,10 @@
 # Development and releases
 
+Use this guide when changing or publishing the Engine itself. A native consumer
+may build without Node.js, so source changes must regenerate the bundled runtime.
+A release may reach npm before Maven artifacts are downloadable, so publication
+acceptance and consumer download readiness are checked separately below.
+
 ## Development
 
 The public entry points are `src/index.ts` and `src/ionic.ts`, with shared contracts in `src/types.ts`. Implementation is grouped by responsibility:
@@ -39,7 +44,8 @@ For local packaging verification, run `python3 scripts/native-ui-engine-release/
 
 ## Maintainer release setup
 
-This repository starts from the merged Engine implementation at [ionic-theme-ios27 `b218d8b`](https://github.com/rdlabo-dev/ionic-theme-ios27/commit/b218d8bfe0c87c02addc668fee9c7aa333489486). Extraction preserves the merged implementation; Cordova host support is developed in this repository. The renamed package starts at version `0.0.1`. Publish the same version for npm, SwiftPM and Maven; do not reuse the old package coordinates.
+Publish the same version for npm, SwiftPM and Maven; consumers pin matching
+versions across these distributions.
 
 The npm organization `webview-native-ui` and Maven Central namespace `io.github.webview-native-ui` are registered. Maintain npm trusted publishing for `webview-native-ui/engine`, workflow `release.yml`, and provision the Maven secrets above in this repository. Credentials are not copied by moving source files.
 
@@ -50,3 +56,5 @@ The npm organization `webview-native-ui` and Maven Central namespace `io.github.
 No build or test command publishes a package. Existing npm/Maven versions are never overwritten.
 
 To rerun release verification for an existing tag, dispatch `release.yml` with that tag. It checks the original tagged commit and skips npm publication only when the existing package contents match. Keep the tag unchanged. Release tooling uses the Node.js 24 bundled npm, matching CI.
+
+[Documentation overview](README.md)

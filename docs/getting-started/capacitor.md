@@ -2,31 +2,24 @@
 
 Add Web projection and restoration to an existing Capacitor plugin without changing its public `registerPlugin()` export. The plugin keeps its native renderer and application API; the Engine coordinates its native view with a DOM fallback.
 
-This guide covers dependencies, registration, notifications and teardown. Use the [projection reference](projection.md) for exact contracts and platform limits.
+This guide covers dependencies, registration, notifications and teardown. Start with
+[native initialization](initialization.md) for the minimal call, required inputs
+and ownership; the plugin diffs below add event wiring and lifetime handling. Use the [projection reference](../reference/projection.md) for exact contracts and platform limits.
 
-## What this integration gives you
-
-A native control can remain interactive during normal use, then yield its visual
-presentation to a prepared image when a Web overlay or unsupported motion needs
-the DOM layer. Once native placement is ready again, the Engine restores the live
-view. This avoids rebuilding capture, image readiness and restoration coordination
-inside each plugin. See [concepts and limits](concepts.md) before choosing a fallback
-for content that cannot be captured.
-
-The steps below connect three things: your native view, an existing DOM container
-at the intended Web layer, and notifications describing successful appearance or
-presentation changes. The Engine needs those notifications because a native API
-call alone does not tell it when your control's visible state has changed.
+For a Capacitor tab-bar plugin, the application should keep calling the same
+show and selection methods. Add the registration in the native plugin, then
+forward its successful updates so a Web modal can cover the bar without requiring
+every application to implement image handoff.
 
 ## Requirements
 
-This package declares support for Capacitor 8 (`>=8.0.0 <9`). The Engine library requires iOS 15+ and Android API 23+; the consuming Capacitor version or SDK may require a higher minimum. Composited Android capture requires API 26+ and the WebView features described in the [projection reference](projection.md#dom-and-native-surface-requirements).
+This package declares support for Capacitor 8 (`>=8.0.0 <9`). The Engine library requires iOS 15+ and Android API 23+; the consuming Capacitor version or SDK may require a higher minimum. Composited Android capture requires API 26+ and the WebView features described in the [projection reference](../reference/projection.md#dom-and-native-surface-requirements).
 
 ## Choose the Web destination
 
 Provide one laid-out DOM container for each registration, in the layer where its Web projection belongs. It may be inserted after registration. The plugin still owns native view placement and sizing; the Engine does not create or size either view for you.
 
-Choose a [supported container](projection-containers.md) before wiring its selector. Read the [DOM and native surface requirements](projection.md#dom-and-native-surface-requirements) before integrating custom elements, SDK content or multiple surfaces. Scroll tracking and image handoff are internal to the registration. For Ionic applications, optionally enable [Ionic overlay support](ionic-overlays.md) once during application startup. Other frameworks emit the configured projection notifications from their own transition and overlay lifecycle.
+Choose a [supported container](../reference/containers.md) before wiring its selector. Read the [DOM and native surface requirements](../reference/projection.md#dom-and-native-surface-requirements) before integrating custom elements, SDK content or multiple surfaces. Scroll tracking and image handoff are internal to the registration. For Ionic applications, optionally enable [Ionic overlay support](../configuration/ionic-overlays.md) once during application startup. Other frameworks emit the configured projection notifications from their own transition and overlay lifecycle.
 
 ## Install inside a plugin
 
@@ -103,6 +96,9 @@ Run `npx cap sync ios` and rebuild. Keep the direct engine version aligned with 
 ## Register from the native plugin
 
 Keep the plugin's normal `registerPlugin()` export and public methods unchanged. Create and retain a registration after creating the native renderer. The engine ships its Web runtime with the Swift/Android library, starts it in the current document and future documents, finds the existing fallback DOM, and subscribes to the plugin's notifications. Applications do not call a separate JS initializer.
+
+The [notification contract](../configuration/events.md) defines which successful
+changes to report and how startup routing works.
 
 The integration has three responsibilities:
 
@@ -264,41 +260,6 @@ Both diffs add a private property, native registration, a notification override,
 
 Keep your plugin's existing `registerPlugin()` export. Use the same event names in the registration and `notifyListeners`; if the plugin already emits a suitable event (such as `tabSelected`), list that event instead of emitting it twice.
 
-### Notifications during startup
-
-The notification override above lets the Engine retain the latest matching projection destination before the Web runtime subscribes. No separate state variable or initial-state callback is needed. Forward every notification to `super` as usual: the Engine records state without replaying notifications, updates, or user actions. Without a destination notification, it infers the initial destination from native view visibility. Registration must exist before the notifications it should observe.
-
-If your plugin owns multiple registrations, pass the notification to each registration; `receiveListeners.match` selects the owning surface. Appearance updates do not change the destination. The renderer still owns native placement and visibility before connection.
-
-With the default Web fallback, scrolling without a prepared image or native scroll binding keeps the Web fallback visible until the renderer confirms current native placement with its native-destination notification. An appearance update alone is not that confirmation. Consumers choosing native failure recovery must keep their own native geometry current.
-
-### Which events to emit
-
-All incoming event declarations belong to `receiveListeners`. Its `update` list refreshes the image, its `projection` lists select the destination, and its optional `match` filters notifications for the owning surface.
-
-| Notification                            | Where to emit it in the existing plugin                                               |
-| --------------------------------------- | ------------------------------------------------------------------------------------- |
-| `appearanceChanged` (an `update` event) | After a successful native appearance update, such as `setColors`                      |
-| `transitionStarted` (`web`)             | Before the fallback DOM starts moving or a Web layer covers the native view           |
-| `shown` (`native`)                      | After the plugin's existing show operation, or when returning from the Web projection |
-| `hidden` (`none`)                       | After the plugin's existing hide operation                                            |
-
-The names in the examples are conventions you choose, not reserved Engine methods. An `update` event refreshes the prepared image without changing the requested destination. It does not call `setColors` again.
-
-Emit `transitionStarted` before the DOM starts moving, `shown` when native projection is requested again, and `hidden` after the plugin's own hide operation. Native capture, URL conversion, image preparation, draw acknowledgement, image retirement and listener cleanup stay inside the engine. The engine never invokes the plugin's `show`, `hide`, selection or ad-loading methods. End the registration with `projection.destroy()` on iOS or `projection.close()` on Android when the renderer is destroyed. Retain the registration for its full lifetime and call native APIs on the UI thread.
-
-## Animated native controls
-
-Native appearance updates prepare replacement images after a 50 ms debounce by default.
-If your control continues animating after its update notification, set `captureDelayMs`
-on the native registration (Swift: `captureDelayMs: 600`; Kotlin: `captureDelayMs = 600`).
-This changes background image preparation, not overlay presentation timing.
-See [capture timing](projection.md#capture-timing) for the cache behavior and measured guidance.
-
-## Integrating with DOM inspection
-
-The engine keeps a reusable image inside the fallback container, using its open ShadowRoot when available. No placement option is needed. If the renderer inspects child elements, exclude nodes marked `data-native-ui-projection-node`. See [DOM requirements](projection.md#dom-and-native-surface-requirements).
-
 ## Verify the integration
 
 Show the control, change its appearance, then open and dismiss a covering Web
@@ -309,5 +270,12 @@ content. Exercise a missing image to verify the chosen Web fallback.
 
 Use the actual control and backgrounds on supported devices; bridge success alone
 cannot verify visual continuity. For a renderer that already batches controls by
-page, continue with the [renderer guide](renderer-guide.md) rather than duplicating
+page, continue with the [renderer guide](../advanced/renderer.md) rather than duplicating
 registration machinery for each handoff.
+
+## Next: choose optional behavior
+
+Use the [configuration guide](../configuration/README.md) for notification routing,
+value reflection, capture timing and fallback policy. These shared settings are
+not additional platform setup. For a renderer that already batches controls, see
+[advanced APIs](../advanced/README.md).

@@ -5,9 +5,14 @@ above Engine-managed native content. Native registration handles capture and
 restoration, but it cannot infer Ionic's presentation lifecycle from a native
 view. This shared monitor supplies that coverage decision for all registrations.
 
-Integrate the plugin through the [Capacitor](capacitor-plugin.md) or
-[Cordova](cordova-plugin.md) guide first. Non-Ionic applications use their own
+Integrate the plugin through the [Capacitor](../getting-started/capacitor.md) or
+[Cordova](../getting-started/cordova.md) guide first. Non-Ionic applications use their own
 lifecycle notifications and do not install this adapter.
+
+For example, opening an Ionic settings modal should cover the background native
+tab bar while leaving the modal's own native close button usable. A blanket hide
+notification cannot express that relationship. The shared monitor evaluates each
+host against the overlay stack, so independent plugins use the same coverage rule.
 
 ## Enable once
 
@@ -36,7 +41,11 @@ explicit integration; it is not inferred from the popover's DOM alone.
 
 ## Customize unusual layouts
 
-Optional settings are document-wide:
+Optional settings are document-wide. Keep the defaults for ordinary Ionic overlays.
+Use `exclude` for an application overlay that should not cover native content, and
+`additional` when the same app also uses a custom dialog with its own lifecycle
+events. Use `covers` only when DOM containment and backdrop state do not describe
+which hosts that custom layout actually covers:
 
 ```ts
 enableSupportIonicOverlays({

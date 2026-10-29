@@ -123,6 +123,7 @@ test('native startup waits for a corresponding DOM and owns subscription teardow
   });
   await expect(page.locator('#slot')).not.toHaveAttribute('data-native-ui-snapshot');
   expect(await page.evaluate(() => (window as any).removed.sort())).toEqual(['hidden', 'moving', 'shown', 'updated']);
+  expect(await page.evaluate(() => (window as any).calls.some((call: any) => call.action === 'values'))).toBe(false);
 });
 
 test('event-driven return retains pixels until the engine receives native draw completion', async ({ page }) => {
@@ -1018,3 +1019,150 @@ for (const outcome of ['resolve', 'reject'] as const) {
     ).toBe(false);
   });
 }
+
+test('value reflection follows current DOM ownership and rejects stale replies', async ({ page }) => {
+  await page.setContent('<main></main>');
+  await page.addScriptTag({ content: bundle });
+  await page.evaluate(async () => {
+    const w = window as any;
+    w.pendingValues = [];
+    w.valueEvents = {};
+    w.session = await w.sessionEngine.startNativeSession(
+      {
+        id: 'values',
+        plugin: 'Example',
+        projectionSelector: '#value-slot',
+        values: {
+          selected: { property: 'value' },
+          checked: { property: 'checked' },
+        },
+        receiveListeners: { update: ['updated'] },
+      },
+      {
+        send: async (request: any) => (request.action === 'values' ? new Promise((resolve) => w.pendingValues.push(resolve)) : {}),
+        listen: async () => ({ remove() {} }),
+      },
+      {
+        addListener: async (name: string, callback: any) => {
+          w.valueEvents[name] = callback;
+          return { remove() {} };
+        },
+      },
+    );
+    w.notifications = [];
+    for (const name of ['input', 'change', 'ionChange']) document.addEventListener(name, (event) => w.notifications.push(event.type));
+    document.body.insertAdjacentHTML('beforeend', '<input id="value-slot" style="width:120px;height:40px">');
+  });
+  await expect.poll(() => page.evaluate(() => (window as any).pendingValues.length)).toBe(1);
+  await page.evaluate(() => (window as any).pendingValues.shift()({ values: { selected: 'initial', checked: true, count: 2 } }));
+  await expect(page.locator('#value-slot')).toHaveValue('initial');
+  await expect(page.locator('#value-slot')).toHaveAttribute('data-native-ui-value-count', '2');
+  expect(await page.evaluate(() => (window as any).notifications)).toEqual([]);
+  await page.evaluate(() => {
+    const w = window as any;
+    w.valueEvents.updated({});
+    w.valueEvents.updated({});
+  });
+  await expect.poll(() => page.evaluate(() => (window as any).pendingValues.length)).toBe(2);
+  await page.evaluate(() => {
+    const w = window as any;
+    w.pendingValues.pop()({ values: { selected: 'new', checked: false } });
+    w.pendingValues.shift()({ values: { selected: 'stale' } });
+  });
+  await expect(page.locator('#value-slot')).toHaveValue('new');
+  expect(await page.locator('#value-slot').evaluate((element) => (element as HTMLInputElement).checked)).toBe(false);
+  expect(await page.evaluate(() => (window as any).notifications)).toEqual([]);
+  await page.evaluate(() => {
+    const w = window as any;
+    w.valueEvents.updated({});
+    document.querySelector('#value-slot')!.outerHTML = '<input id="value-slot" style="width:120px;height:40px">';
+  });
+  await expect.poll(() => page.evaluate(() => (window as any).pendingValues.length)).toBe(2);
+  await page.evaluate(() => {
+    const w = window as any;
+    w.pendingValues.pop()({ values: { selected: 'replacement' } });
+    w.pendingValues.shift()({ values: { selected: 'departed' } });
+  });
+  await expect(page.locator('#value-slot')).toHaveValue('replacement');
+  expect(await page.evaluate(() => (window as any).notifications.length)).toBe(0);
+  await page.evaluate(() => (window as any).session.destroy());
+  await expect(page.locator('#value-slot')).toHaveValue('replacement');
+});
+
+test('late custom element definitions receive current values through setters without reviving replaced hosts', async ({ page }) => {
+  await page.setContent('<late-first id="slot"></late-first><late-attributes id="attributes"></late-attributes>');
+  await page.addScriptTag({ content: bundle });
+  await page.evaluate(async () => {
+    const w = window as any;
+    w.reads = [];
+    w.currentValue = 'initial';
+    w.assignments = [];
+    const register = (id: string, values: any) =>
+      w.sessionEngine.startNativeSession(
+        { id, plugin: 'Example', projectionSelector: '#' + id, values, receiveListeners: { update: ['updated'] } },
+        {
+          send: async (request: any) => {
+            if (request.action !== 'values') return {};
+            w.reads.push(id);
+            return { values: { selected: w.currentValue } };
+          },
+          listen: async () => ({ remove() {} }),
+        },
+        {
+          addListener: async (_name: string, callback: any) => {
+            if (id === 'slot') w.update = callback;
+            return { remove() {} };
+          },
+        },
+      );
+    w.sessions = [await register('slot', { selected: { property: 'value' } }), await register('attributes', {})];
+  });
+  await expect(page.locator('#attributes')).toHaveAttribute('data-native-ui-value-selected', 'initial');
+  await page.evaluate(() => {
+    const w = window as any;
+    w.currentValue = 'latest';
+    w.update({});
+    document.querySelector('#slot')!.outerHTML = '<late-current id="slot"></late-current>';
+    customElements.define(
+      'late-first',
+      class extends HTMLElement {
+        set value(value: string) {
+          w.assignments.push(['retired', value]);
+        }
+      },
+    );
+  });
+  await expect.poll(() => page.evaluate(() => document.querySelector('#slot')?.getAttribute('data-native-ui-destination'))).toBe('native');
+  await page.evaluate(() => {
+    const w = window as any;
+    customElements.define(
+      'late-current',
+      class extends HTMLElement {
+        set value(value: string) {
+          w.assignments.push(['current', value]);
+        }
+      },
+    );
+  });
+  await expect.poll(() => page.evaluate(() => (window as any).assignments)).toEqual([['current', 'latest']]);
+  expect(await page.evaluate(() => Object.hasOwn(document.querySelector('#slot'), 'value'))).toBe(false);
+  expect(await page.evaluate(() => (window as any).reads)).toEqual(['attributes', 'slot']);
+  await page.evaluate(() => {
+    document.querySelector('#slot')!.outerHTML = '<late-destroyed id="slot"></late-destroyed>';
+  });
+  await expect(page.locator('#slot')).toHaveAttribute('data-native-ui-destination', 'native');
+  await page.evaluate(async () => {
+    const w = window as any;
+    await Promise.all(w.sessions.map((session: any) => session.destroy()));
+    customElements.define(
+      'late-destroyed',
+      class extends HTMLElement {
+        set value(value: string) {
+          w.assignments.push(['destroyed', value]);
+        }
+      },
+    );
+  });
+  expect(await page.evaluate(() => (window as any).reads)).toEqual(['attributes', 'slot']);
+  expect(await page.evaluate(() => (window as any).assignments)).toEqual([['current', 'latest']]);
+});

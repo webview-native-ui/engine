@@ -1,3 +1,4 @@
+import { applyNativeValues, type NativeValueBinding } from './values.js';
 import { projectionPlacement } from '../projection/placement.js';
 import { getOverlayCoordinator } from '../dom/overlays.js';
 import { readScrollPlacement } from '../dom/scroll-placement.js';
@@ -14,6 +15,8 @@ export interface NativeSessionConfiguration {
   runtime?: 'capacitor' | 'cordova';
   projectionSelector: string;
   captureDelayMs?: number;
+  /** Value reflection is opt-in; native supplies the current values. */
+  values?: Record<string, NativeValueBinding>;
   /** Recovery while native is requested. Explicit web/none destinations take precedence. */
   failedFallback?: 'web' | 'native';
   captureMode?: 'composited' | 'view';
@@ -40,6 +43,7 @@ export interface NativeSessionBridge {
           gesture?: { viewport: Frame; offsetX: number; offsetY: number; rangeX: number; rangeY: number };
         }
       | { action: 'connect' }
+      | { action: 'values' }
       | { action: 'destination'; destination: ProjectionDestination },
   ): Promise<any>;
   listen(listener: (event: { active: boolean; precovered?: string }) => void): Promise<ListenerHandle>;
@@ -89,6 +93,44 @@ export const startNativeSession = async (
     }
   };
   let target: HTMLElement | undefined;
+  let valueRequest = 0;
+  let cancelValueWait: (() => void) | undefined;
+  const retireValueRead = () => {
+    valueRequest++;
+    cancelValueWait?.();
+    cancelValueWait = undefined;
+  };
+  const refreshValues = async () => {
+    if (!config.values || !target || stopped) return;
+    const element = target;
+    retireValueRead();
+    const request = valueRequest;
+    const current = () => !stopped && request === valueRequest && target === element && findTarget() === element && element.isConnected;
+    // Defining a custom element installs its setters. Earlier assignment would shadow them.
+    if (
+      element.localName.includes('-') &&
+      !element.matches(':defined') &&
+      Object.values(config.values).some((binding) => binding.property)
+    ) {
+      await Promise.race([
+        element.ownerDocument.defaultView!.customElements.whenDefined(element.localName),
+        new Promise<void>((resolve) => {
+          cancelValueWait = resolve;
+        }),
+      ]);
+      if (!current()) return;
+      cancelValueWait = undefined;
+    }
+    const result = await nativeBridge.send({ action: 'values' }).catch(() => undefined);
+    if (!current()) return;
+    if (result?.values && typeof result.values === 'object' && !Array.isArray(result.values)) {
+      try {
+        applyNativeValues(element, result.values, config.values);
+      } catch (error) {
+        console.warn('[Native UI Engine] Cannot reflect values', error);
+      }
+    }
+  };
   const placementOwner = {};
   let coveredToken: string | undefined;
   let placementEpoch = 0;
@@ -201,6 +243,8 @@ export const startNativeSession = async (
     return matches.length === 1 && matches[0] instanceof HTMLElement ? matches[0] : undefined;
   };
   const setVisibility = () => {
+    const intent = effectiveDestination();
+    if (target && target.getAttribute('data-native-ui-destination') !== intent) target.setAttribute('data-native-ui-destination', intent);
     if (!target) return;
     if (destination === 'web' || (destination === 'native' && placementPending)) target.removeAttribute(marker);
     else target.setAttribute(marker, destination);
@@ -278,6 +322,8 @@ export const startNativeSession = async (
       clearTimeout(scrollTimer);
       clearPlacement();
       target?.removeAttribute(marker);
+      target?.removeAttribute('data-native-ui-destination');
+      retireValueRead();
       // A page/DOM replacement retires its old surface even during a drag or draw ACK.
       // Hide before releasing its image so retirement cannot reveal the departed view.
       const previous = manager;
@@ -294,7 +340,10 @@ export const startNativeSession = async (
       if (stopped) return;
       target = findTarget();
       placementPending = false;
-      if (target) sizeObserver.observe(target);
+      if (target) {
+        sizeObserver.observe(target);
+        void refreshValues();
+      }
     }
     refreshScrollListeners();
     if (automaticMotion) return;
@@ -535,6 +584,7 @@ export const startNativeSession = async (
   const destroy = async () => {
     if (stopped) return;
     stopped = true;
+    retireValueRead();
     clearPlacement();
     generation++;
     stopOverlays();
@@ -549,6 +599,7 @@ export const startNativeSession = async (
     scrollAncestors.clear();
     clearTimeout(scrollTimer);
     target?.removeAttribute(marker);
+    target?.removeAttribute('data-native-ui-destination');
     style.remove();
     await Promise.allSettled([Promise.resolve(events?.remove()), manager?.destroy()]);
   };
@@ -574,6 +625,7 @@ export const startNativeSession = async (
           applyDestination(effectiveDestination(), true);
         }
         if (updated) {
+          void refreshValues();
           contentRevision++;
           manager?.changed();
           if (destination === 'native') schedule();

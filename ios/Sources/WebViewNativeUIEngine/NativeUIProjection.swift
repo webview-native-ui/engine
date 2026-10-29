@@ -7,6 +7,16 @@ public final class NativeUIProjection: NSObject, WKScriptMessageHandler {
     public enum Runtime: String { case capacitor, cordova }
     public enum FailedFallback: String { case web, native }
 
+    public struct ValueBinding {
+        public let property: String?
+        public init(property: String? = nil) { self.property = property }
+        fileprivate var configuration: [String: Any] {
+            var value: [String: Any] = [:]
+            if let property { value["property"] = property }
+            return value
+        }
+    }
+
     public struct ReceiveListeners {
         public struct Projection {
             public let native: [String]
@@ -46,6 +56,7 @@ public final class NativeUIProjection: NSObject, WKScriptMessageHandler {
     private let origins: Set<String>
     private let allowedOriginsJSON: String
     private let canCapture: () -> Bool
+    private let readValues: (() -> [String: Any])?
     private let runtime: Runtime
     private let receiveListeners: ReceiveListeners
     private let notificationLock = NSLock()
@@ -71,30 +82,34 @@ public final class NativeUIProjection: NSObject, WKScriptMessageHandler {
                 allowedOrigins: Set<String> = ["capacitor://localhost", "app://localhost", "https://localhost", "http://localhost"],
                 failedFallback: FailedFallback = .web, runtime: Runtime = .capacitor,
                 captureDelayMs: Double = 50,
+                values: [String: ValueBinding] = [:], readValues: (() -> [String: Any])? = nil,
                 canCapture: @escaping () -> Bool = { true }, view: @escaping () -> UIView?) throws {
         try self.init(webView: webView, plugin: plugin, projectionSelector: projectionSelector,
                       receiveListeners: receiveListeners, allowedOrigins: allowedOrigins, failedFallback: failedFallback, runtime: runtime,
-                      captureDelayMs: captureDelayMs, canCapture: canCapture, snapshots: NativeUICoveredSnapshots(), view: view)
+                      captureDelayMs: captureDelayMs, values: values, readValues: readValues, canCapture: canCapture, snapshots: NativeUICoveredSnapshots(), view: view)
     }
     init(webView: WKWebView?, plugin: String, projectionSelector: String,
          receiveListeners: ReceiveListeners = .init(),
          allowedOrigins: Set<String> = ["capacitor://localhost", "app://localhost", "https://localhost", "http://localhost"],
          failedFallback: FailedFallback = .web, runtime: Runtime = .capacitor,
          captureDelayMs: Double = 50,
+         values: [String: ValueBinding] = [:], readValues: (() -> [String: Any])? = nil,
          canCapture: @escaping () -> Bool = { true }, snapshots: NativeUICoveredSnapshots,
          view: @escaping () -> UIView?) throws {
         self.allowedOriginsJSON = String(data: try JSONSerialization.data(withJSONObject: Array(allowedOrigins)), encoding: .utf8)!
         self.runtime = runtime
         self.snapshots = snapshots
         self.receiveListeners = receiveListeners
+        self.readValues = readValues
         guard let webView else { throw ProjectionError.missingWebView }
         self.webView = webView; self.views = { view().map { ["view": $0] } ?? [:] }; self.origins = allowedOrigins; self.canCapture = canCapture
         super.init()
         precondition(Thread.isMainThread)
         guard captureDelayMs.isFinite, captureDelayMs >= 0, captureDelayMs <= 2147483647,
               !projectionSelector.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw ProjectionError.invalidConfiguration }
-        let config: [String: Any] = ["id": id, "plugin": plugin, "projectionSelector": projectionSelector,
+        var config: [String: Any] = ["id": id, "plugin": plugin, "projectionSelector": projectionSelector,
                                      "captureDelayMs": captureDelayMs, "receiveListeners": receiveListeners.configuration, "failedFallback": failedFallback.rawValue, "runtime": runtime.rawValue]
+        if readValues != nil { config["values"] = values.mapValues { $0.configuration } }
         let json = String(data: try JSONSerialization.data(withJSONObject: config), encoding: .utf8)!
         let allowed = allowedOriginsJSON
         let runtime = try Self.runtime()
@@ -163,6 +178,10 @@ public final class NativeUIProjection: NSObject, WKScriptMessageHandler {
         }
         let token = request["token"] as? String ?? ""
         switch request["action"] as? String {
+        case "values":
+            let values = readValues?() ?? [:]
+            guard JSONSerialization.isValidJSONObject(values) else { self.reply(key, [:], error: "Native values must be JSON values"); return }
+            complete(["values": values])
         case "connect":
             if !connected { destination = (views().values.contains(where: { !$0.isHidden }) ? "native" : "none"); connected = true }
             complete(["destination": recordedDestination ?? destination])
