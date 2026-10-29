@@ -192,3 +192,60 @@ test('disposal suppresses a late state-read failure', async ({ page }) => {
   await expect.poll(() => page.evaluate(() => (window as any).queue.running)).toBe(false);
   expect(await page.evaluate(() => (window as any).failures)).toBe(0);
 });
+
+for (const failedIndex of [0, 1]) {
+  test(`a failure in sequential send ${failedIndex + 1} cannot be masked by another successful send`, async ({ page }) => {
+    const result = await page.evaluate(async (failedIndex) => {
+      const frames: FrameRequestCallback[] = [];
+      const attempts: number[] = [];
+      let retries = 0;
+      let failures = 0;
+      const queue = (window as any).engine.createNativeUpdateQueue(
+        {
+          requestAnimationFrame(callback: FrameRequestCallback) {
+            frames.push(callback);
+            return frames.length;
+          },
+          cancelAnimationFrame() {},
+        },
+        {
+          reconnect: true,
+          async update(send: any) {
+            for (const index of [0, 1])
+              await send(async () => {
+                attempts.push(index);
+                if (index === failedIndex) throw new Error('offline');
+                return true;
+              });
+          },
+          retry() {
+            retries++;
+          },
+          failed() {
+            failures++;
+          },
+        },
+      );
+      const flush = async () => {
+        for (let i = 0; i < 10 && frames.length; i++) {
+          frames.shift()!(0);
+          while (queue.running) await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+      };
+      queue.request();
+      await flush();
+      const waiting = queue.waiting;
+      queue.reconnected();
+      await flush();
+      queue.destroy();
+      return { attempts, retries, failures, waiting, pending: frames.length };
+    }, failedIndex);
+    expect(result).toEqual({
+      attempts: failedIndex === 0 ? [0, 0, 0, 0] : [0, 1, 0, 1, 0, 1, 0, 1],
+      retries: 2,
+      failures: 1,
+      waiting: true,
+      pending: 0,
+    });
+  });
+}
