@@ -31,6 +31,8 @@ class NativeUIProjection(
     private val updatePlacement: ((JSONObject) -> Unit)? = null,
     private val runtime: Runtime = Runtime.CAPACITOR,
     captureDelayMs: Int = 50,
+    values: Map<String, ValueBinding> = emptyMap(),
+    private val readValues: (() -> JSONObject)? = null,
     view: () -> View?
 ) : AutoCloseable {
     enum class Runtime { CAPACITOR, CORDOVA }
@@ -45,6 +47,12 @@ class NativeUIProjection(
     /** VIEW is for opaque software-renderable views; SurfaceView/video requires COMPOSITED. */
     enum class CaptureMode { COMPOSITED, VIEW }
     enum class FailedFallback(val value: String) { WEB("web"), NATIVE("native") }
+
+    data class ValueBinding(val property: String? = null) {
+        internal fun configuration() = JSONObject().apply {
+            property?.let { put("property", it) }
+        }
+    }
 
     data class ReceiveListeners(
         val update: List<String> = emptyList(),
@@ -212,6 +220,7 @@ class NativeUIProjection(
         require(captureDelayMs >= 0) { "captureDelayMs must be nonnegative" }
         val config = JSONObject().put("runtime", if (runtime == Runtime.CORDOVA) "cordova" else "capacitor").put("id", id).put("plugin", plugin).put("projectionSelector", projectionSelector)
             .put("captureDelayMs", captureDelayMs).put("receiveListeners", receiveListeners.configuration()).put("failedFallback", failedFallback.value).put("captureMode", if (captureMode == CaptureMode.VIEW) "view" else "composited")
+        if (readValues != null) config.put("values", JSONObject(values.mapValues { it.value.configuration() }))
         if (updatePlacement != null) config.put("placementHandoff", true).put("nativeDragHandoff", true)
         val runtime = webView.context.assets.open("native-ui-engine.js").bufferedReader().use { it.readText() }
         val source = "if (!globalThis.WebViewNativeUIEngineRuntime) { $runtime } WebViewNativeUIEngineRuntime.start($config).catch(console.error);"
@@ -295,6 +304,10 @@ class NativeUIProjection(
             return snapshots.hidesNativeViews(token) && selected.isNotEmpty() && selected.all { (id, view) -> current[id] === view }
         }
         when (request.optString("action")) {
+            "values" -> {
+                try { complete(JSONObject().put("values", readValues?.invoke() ?: JSONObject())) }
+                catch (error: Exception) { reply(key, JSONObject(), error.message ?: "Cannot read native values") }
+            }
             "connect" -> {
                 if (!connected) { destination = (if (views().values.any { it.visibility == View.VISIBLE }) "native" else "none"); connected = true }
                 complete(JSONObject().put("destination", notificationDestination ?: destination))

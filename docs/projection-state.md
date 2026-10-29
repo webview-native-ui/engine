@@ -1,0 +1,32 @@
+# Observe projection state
+
+Projection state answers **where the component should be presented**. It is
+independent of its value, such as a toggle's checked state or a selected tab.
+See [value bindings](value-bindings.md) for that connection.
+
+A selector-based `NativeUIProjection` registration writes the read-only
+`data-native-ui-destination` attribute on its current DOM container:
+
+| Value    | Meaning                                                                                         |
+| -------- | ----------------------------------------------------------------------------------------------- |
+| `native` | Native presentation is requested.                                                               |
+| `web`    | Web presentation is requested, explicitly or because a registered overlay covers the container. |
+| `none`   | The plugin explicitly requested no presentation.                                                |
+
+The plugin's projection events select `native`, `web` or `none`. Overlay coverage
+changes an otherwise native request to Web; it does not override an explicit
+`none`. The Engine updates the attribute as it reconciles presentation and removes
+it when the container is replaced or the registration is destroyed. Reserve this
+attribute for the Engine rather than setting it from application code.
+
+This is presentation **intent**, not an acknowledgement that a native frame or
+image has finished drawing. Web presentation may use a cached native image or the
+existing interactive fallback according to availability and the integration's
+policy. Do not hide the fallback solely because this attribute says `native`:
+the Engine's handoff keeps the previous representation until the next one is ready.
+
+Use this attribute for diagnostics and application state that does not take over
+visibility. Continue using the documented projection events to request a change.
+See the [projection contract](projection.md#projection-contract) for ownership,
+fallback and interaction rules. Internal snapshot attributes are not additional
+public state APIs.

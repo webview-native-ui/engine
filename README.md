@@ -54,6 +54,8 @@ with composited snapshots available from API 26+.
 ## Reference and contributing
 
 - [Projection container support](docs/projection-containers.md) — supported HTML and Ionic destinations, sizing conditions and wrapper examples.
+- [Projection state](docs/projection-state.md) — observe presentation intent independently of component data.
+- [Value bindings](docs/value-bindings.md) — reflect native values into attributes or component properties.
 - [Projection reference](docs/projection.md) — lifecycle contracts, native transport, capture policies and platform limits.
 - [Development and releases](docs/maintenance.md) — repository structure, validation and publishing.
 

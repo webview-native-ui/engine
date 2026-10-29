@@ -227,3 +227,11 @@ See [capture timing](projection.md#capture-timing) for the cache behavior and me
 ## Integrating with DOM inspection
 
 The engine keeps a reusable image inside the fallback container, using its open ShadowRoot when available. No placement option is needed. If the renderer inspects child elements, exclude nodes marked `data-native-ui-projection-node`. See [DOM requirements](projection.md#dom-and-native-surface-requirements).
+
+## Component state and values
+
+See [projection state](projection-state.md) for the presentation intent exposed on
+the container. To keep a Web fallback or application adapter aligned with native
+selection and input, configure [value bindings](value-bindings.md) in the native
+registration. These are separate concerns; neither requires an application-side
+plugin wrapper.

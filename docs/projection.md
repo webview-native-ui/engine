@@ -16,6 +16,9 @@ your UI, then follow the [Capacitor](capacitor-plugin.md),
 | What differs on Android?                                | [Android library](#android-library)                                                        |
 | When is an image captured, and how accurate is it?      | [Capture timing](#capture-timing) and [iOS color precision](#image-color-precision-on-ios) |
 
+See also [projection state](projection-state.md) for presentation intent and
+[value bindings](value-bindings.md) for native-to-DOM component data.
+
 ## DOM and page lifetime
 
 Native registration is independent of the JavaScript framework. Its selector identifies
