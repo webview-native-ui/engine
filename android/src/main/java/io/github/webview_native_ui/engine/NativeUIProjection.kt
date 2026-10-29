@@ -516,8 +516,14 @@ class NativeUIProjection(
         evaluate("globalThis.WebViewNativeUIEngineRuntime?.stop('$id')")
         script.remove()
         registrations[webView]?.remove(id)
+        // A successful hide notification may precede its asynchronous Web acknowledgement.
+        val remainHidden = (notificationDestination ?: destination) == "none"
+        val visibility = if (remainHidden)
+            (views().values + hiddenByProjection + captured.values.flatMap { it.values }).associateWith { it.visibility }
+        else emptyMap()
         snapshots.close(); webReadyTokens.clear(); captured.clear(); anchors.clear()
-        if (destination != "none") hiddenByProjection.forEach { if (it.visibility == View.INVISIBLE) it.visibility = View.VISIBLE }
+        if (remainHidden) visibility.forEach { (view, previous) -> view.visibility = previous }
+        else hiddenByProjection.forEach { if (it.visibility == View.INVISIBLE) it.visibility = View.VISIBLE }
         hiddenByProjection.clear()
     }
 }

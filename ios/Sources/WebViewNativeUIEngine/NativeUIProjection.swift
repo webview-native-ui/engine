@@ -318,8 +318,14 @@ public final class NativeUIProjection: NSObject, WKScriptMessageHandler {
             controller.removeAllUserScripts()
             remaining.forEach { controller.addUserScript($0) }
         }
+        // A successful hide notification can precede its Web acknowledgement and teardown.
+        let keepHidden = (recordedDestination ?? destination) == "none"
+        let visibility = keepHidden
+            ? (Array(views().values) + hiddenByProjection + captured.values.flatMap { $0.values }).map { ($0, $0.isHidden) }
+            : []
         snapshots.reset(); resetScrolling(); captured.removeAll(); anchors.removeAll()
-        if destination != "none" { hiddenByProjection.forEach { $0.isHidden = false } }
+        if keepHidden { visibility.forEach { $0.0.isHidden = $0.1 } }
+        else { hiddenByProjection.forEach { $0.isHidden = false } }
         hiddenByProjection.removeAll()
     }
 }
