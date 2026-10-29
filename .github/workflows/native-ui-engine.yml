@@ -33,8 +33,6 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - name: Install SwiftLint
-        run: brew list swiftlint >/dev/null 2>&1 || brew install swiftlint
       - run: npm run lint:swift
       - name: Test on an available iPhone simulator
         run: |
