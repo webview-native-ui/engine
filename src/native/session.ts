@@ -134,6 +134,18 @@ export const startNativeSession = async (
   const placementOwner = {};
   let coveredToken: string | undefined;
   let placementEpoch = 0;
+  const releases = new Set<Promise<unknown>>();
+  let cancelReleaseWait = () => {};
+  let releaseCancellation = new Promise<void>((resolve) => {
+    cancelReleaseWait = resolve;
+  });
+  const cancelReleases = () => {
+    releases.clear();
+    cancelReleaseWait();
+    releaseCancellation = new Promise<void>((resolve) => {
+      cancelReleaseWait = resolve;
+    });
+  };
   const clearPlacement = () => {
     placementEpoch++;
     coveredToken = undefined;
@@ -155,6 +167,29 @@ export const startNativeSession = async (
       }),
     send: (request) => {
       if (!config.placementHandoff) return nativeBridge.send(request);
+      if (request.action === 'visibility' && !request.visible) cancelReleases();
+      if (request.action === 'visibility' && request.visible && releases.size) {
+        const version = generation;
+        const epoch = placementEpoch;
+        const host = target;
+        const cancellation = releaseCancellation;
+        // All reveal paths (including scroll fallback) wait for idle release's placement/draw ACK.
+        // Re-enter to include releases added while waiting. Hide/teardown cancels the wait.
+        return Promise.race([Promise.allSettled([...releases]), cancellation]).then(() => {
+          if (
+            stopped ||
+            cancellation !== releaseCancellation ||
+            version !== generation ||
+            epoch !== placementEpoch ||
+            host !== target ||
+            !host?.isConnected ||
+            findTarget() !== target ||
+            effectiveDestination() !== 'native'
+          )
+            return {};
+          return bridge.send(request);
+        });
+      }
       const binding = projectionPlacement(target);
       if (request.action === 'cover') {
         const alreadyCovered = coveredToken === request.token && binding?.owner === placementOwner && binding.projected;
@@ -196,7 +231,7 @@ export const startNativeSession = async (
           revealing && binding?.owner === placementOwner
             ? { ...request, token: ('token' in request ? request.token : coveredToken)!, placement: binding.measure() }
             : request;
-        return nativeBridge
+        const pending = nativeBridge
           .send(payload)
           .then(async (result) => {
             // A native drag can race retirement before its notification reaches JS.
@@ -220,6 +255,9 @@ export const startNativeSession = async (
             failed();
             throw error;
           });
+        if (request.action !== 'release' || !config.nativeDragHandoff) return pending;
+        releases.add(pending);
+        return pending.finally(() => releases.delete(pending));
       } catch (error) {
         failed();
         return Promise.reject(error);
@@ -388,7 +426,7 @@ export const startNativeSession = async (
     if (destination === 'native') {
       const version = generation;
       await bridge.send({ action: 'visibility', visible: true });
-      if (stopped || version !== generation || destination !== 'native') return;
+      if (stopped || version !== generation || destination !== 'native' || automaticMotion) return;
       setVisibility();
       scrollOwner = [...projectionAncestors(target!)].find((element) => {
         const style = getComputedStyle(element);
@@ -584,6 +622,7 @@ export const startNativeSession = async (
   const destroy = async () => {
     if (stopped) return;
     stopped = true;
+    cancelReleases();
     retireValueRead();
     clearPlacement();
     generation++;
@@ -648,6 +687,7 @@ export const startNativeSession = async (
       hide: () => {
         requestedDestination = destination = 'none';
         generation++;
+        cancelReleases();
         automaticMotion = false;
         nativeDragging = false;
         clearTimeout(scrollTimer);
