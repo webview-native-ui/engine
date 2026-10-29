@@ -274,7 +274,7 @@ With the default Web fallback, scrolling without a prepared image or native scro
 
 ### Which events to emit
 
-All incoming event declarations belong to `receiveListeners`. Its `update` list refreshes the image, its `projection` lists select the destination, and its optional `match` filters notifications for the owning surface.
+All incoming event declarations belong to `receiveListeners`. Its `update` list refreshes the image and any configured value bindings, its `projection` lists select the destination, and its optional `match` filters notifications for the owning surface.
 
 | Notification                            | Where to emit it in the existing plugin                                               |
 | --------------------------------------- | ------------------------------------------------------------------------------------- |
@@ -283,9 +283,17 @@ All incoming event declarations belong to `receiveListeners`. Its `update` list 
 | `shown` (`native`)                      | After the plugin's existing show operation, or when returning from the Web projection |
 | `hidden` (`none`)                       | After the plugin's existing hide operation                                            |
 
-The names in the examples are conventions you choose, not reserved Engine methods. An `update` event refreshes the prepared image without changing the requested destination. It does not call `setColors` again.
+The names in the examples are conventions you choose, not reserved Engine methods. An `update` event refreshes the prepared image and configured values without changing the requested destination. It does not call `setColors` again.
 
 Emit `transitionStarted` before the DOM starts moving, `shown` when native projection is requested again, and `hidden` after the plugin's own hide operation. Native capture, URL conversion, image preparation, draw acknowledgement, image retirement and listener cleanup stay inside the engine. The engine never invokes the plugin's `show`, `hide`, selection or ad-loading methods. End the registration with `projection.destroy()` on iOS or `projection.close()` on Android when the renderer is destroyed. Retain the registration for its full lifetime and call native APIs on the UI thread.
+
+## Component state and values
+
+See [projection state](projection-state.md) for the presentation intent exposed on
+the container. To keep a Web fallback or application adapter aligned with native
+selection and input, configure [value bindings](value-bindings.md) in the native
+registration. These are separate concerns; neither requires an application-side
+plugin wrapper.
 
 ## Animated native controls
 
@@ -311,11 +319,3 @@ Use the actual control and backgrounds on supported devices; bridge success alon
 cannot verify visual continuity. For a renderer that already batches controls by
 page, continue with the [renderer guide](renderer-guide.md) rather than duplicating
 registration machinery for each handoff.
-
-## Component state and values
-
-See [projection state](projection-state.md) for the presentation intent exposed on
-the container. To keep a Web fallback or application adapter aligned with native
-selection and input, configure [value bindings](value-bindings.md) in the native
-registration. These are separate concerns; neither requires an application-side
-plugin wrapper.

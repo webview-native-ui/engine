@@ -11,9 +11,11 @@ A selector-based `NativeUIProjection` registration writes the read-only
 | -------- | ----------------------------------------------------------------------------------------------- |
 | `native` | Native presentation is requested.                                                               |
 | `web`    | Web presentation is requested, explicitly or because a registered overlay covers the container. |
-| `none`   | The plugin explicitly requested no presentation.                                                |
+| `none`   | No presentation is requested.                                                                   |
 
-The plugin's projection events select `native`, `web` or `none`. Overlay coverage
+Without a prior destination notification, startup derives the initial intent from
+native view visibility; a hidden or absent view starts as `none`. The plugin's
+projection events then select `native`, `web` or `none`. Overlay coverage
 changes an otherwise native request to Web; it does not override an explicit
 `none`. The Engine updates the attribute as it reconciles presentation and removes
 it when the container is replaced or the registration is destroyed. Reserve this

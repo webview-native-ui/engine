@@ -72,6 +72,12 @@ use their own transition notifications; Ionic is optional.
 
 A DOM container does not necessarily contain an interactive Web replacement: a button plugin may provide an HTML button as its fallback, while an advertising plugin may leave the container empty when native content is unavailable. Image handoff is explicit and noninteractive. The engine never forwards clicks through an image or replaces SDK click/impression handling.
 
+Native registrations can also [reflect current component values](value-bindings.md)
+into their fallback host. This is independent of [presentation intent](projection-state.md):
+a selected tab is component data, while `native`, `web` and `none` describe where
+it belongs. Application events and framework form integration remain with the
+component adapter.
+
 ## Decide whether the limits fit your UI
 
 Images freeze both the control and any captured background. Content that must stay

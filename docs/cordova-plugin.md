@@ -199,6 +199,14 @@ The `PathHandler` delegates same-origin image requests to Engine. It serves only
 
 The defaults support Cordova's `https://localhost` and `http://localhost`. If the hostname changes, pass the same explicit origin set to `install` and each registration. Wildcard origins and `file://` app origins are not supported by this integration.
 
+## Component state and values
+
+See [projection state](projection-state.md) for the presentation intent exposed on
+the container. To keep a Web fallback or application adapter aligned with native
+selection and input, configure [value bindings](value-bindings.md) in the native
+registration. These are separate concerns; neither requires an application-side
+plugin wrapper.
+
 ## Lifetime and verification
 
 Keep the registration for the WebView lifetime. Engine reconnects after a document reload and clears the old document's image state. If the plugin destroys its native UI in `onReset`, update its view provider and emit the appropriate destination; do not leave a registration pointing at a destroyed view. Dispose registrations when the plugin/WebView is destroyed.
@@ -227,11 +235,3 @@ See [capture timing](projection.md#capture-timing) for the cache behavior and me
 ## Integrating with DOM inspection
 
 The engine keeps a reusable image inside the fallback container, using its open ShadowRoot when available. No placement option is needed. If the renderer inspects child elements, exclude nodes marked `data-native-ui-projection-node`. See [DOM requirements](projection.md#dom-and-native-surface-requirements).
-
-## Component state and values
-
-See [projection state](projection-state.md) for the presentation intent exposed on
-the container. To keep a Web fallback or application adapter aligned with native
-selection and input, configure [value bindings](value-bindings.md) in the native
-registration. These are separate concerns; neither requires an application-side
-plugin wrapper.

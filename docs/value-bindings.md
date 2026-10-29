@@ -8,7 +8,15 @@ request to move its rendering between native and Web.
 
 Configure this connection in the plugin's existing `NativeUIProjection`
 initialization. No application-side wrapper is required. These options work with
-both Capacitor and Cordova registrations.
+both Capacitor and Cordova registrations. Values are applied to the same element
+matched by `projectionSelector`, not a child control or a separate binding target.
+Choose a [supported projection container](projection-containers.md): for example,
+an `ion-toggle` or an application custom element exposing `checked` or `value`.
+HTML `input`, `select` and `textarea` are not direct projection containers. When
+using a wrapper around one, its own attribute observer or property setter must
+forward the value to the inner control. The Engine does not discover that control.
+These bindings belong to native registrations; the lower-level renderer APIs keep
+the renderer's existing value synchronization.
 
 ## Start with data attributes
 
@@ -42,7 +50,7 @@ state rather than performing blocking work.
 
 ## Choose a DOM property when the component needs one
 
-A Web component or form control may expose `value`, `checked` or another data
+A supported Web component host may expose `value`, `checked` or another data
 property instead of reading attributes. Override only those keys with `values`:
 
 ```swift
@@ -100,8 +108,8 @@ A custom element may react to a reflected attribute through its
 `attributeChangedCallback`, or accept a property through its setter. Use that
 hook to render the current value. Setters that emit application events retain
 their own behavior; the Engine neither suppresses those events nor invents a
-universal event shape. In particular, assigning a native input's `value` does
-not itself notify a framework form.
+universal event shape. Reflecting a property does not by itself connect a
+framework form.
 
 The Engine does not invoke native setters, observe DOM properties to send values
 back to native, or replay actions. Retain the component's existing Web-to-native

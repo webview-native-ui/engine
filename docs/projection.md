@@ -15,9 +15,8 @@ your UI, then follow the [Capacitor](capacitor-plugin.md),
 | What movement can remain native?                        | [Native scroll tracking](#native-scroll-tracking)                                          |
 | What differs on Android?                                | [Android library](#android-library)                                                        |
 | When is an image captured, and how accurate is it?      | [Capture timing](#capture-timing) and [iOS color precision](#image-color-precision-on-ios) |
-
-See also [projection state](projection-state.md) for presentation intent and
-[value bindings](value-bindings.md) for native-to-DOM component data.
+| How can a registration expose its presentation intent?  | [Projection state](projection-state.md)                                                    |
+| How can native values reach the Web fallback?           | [Value bindings](value-bindings.md)                                                        |
 
 ## DOM and page lifetime
 

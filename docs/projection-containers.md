@@ -184,7 +184,11 @@ Select `#seat-projection`, not the HTML `select`:
 </span>
 ```
 
-The control's DOM, value and event listeners survive handoff. The plugin still owns native behavior and value synchronization; the prepared image does not accept input.
+The control's DOM, value and event listeners survive handoff; the prepared image
+does not accept input. Native behavior and application events remain with the
+plugin. Optional [value bindings](value-bindings.md) reflect native values on the
+selected host. With the wrapper above, that host is the span, not the inner select;
+the wrapper's component adapter must forward reflected values to its control.
 
 ## Verification scope
 
