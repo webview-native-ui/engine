@@ -275,7 +275,7 @@ public final class NativeUIProjection: NSObject, WKScriptMessageHandler {
             restoreAccepted = true
             complete(["shown": valid && snapshots.cover(
                 token, in: webView,
-                views: Array(Dictionary(grouping: selected.values, by: { ObjectIdentifier($0) }).values.compactMap { $0.first }),
+                views: Array(selected.values),
                 transient: true, frames: frames
             )])
         case "restore":

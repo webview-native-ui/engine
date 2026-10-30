@@ -119,3 +119,33 @@ test('renderer teardown completes even if a pending creation fails', async ({ pa
     }),
   ).toEqual({ creation: 'failed', surfaces: 0 });
 });
+
+test('teardown waits for a deletion already in progress', async ({ page }) => {
+  expect(
+    await page.evaluate(async () => {
+      const registry = (window as any).surfaces.createWebProjectionSurfaces();
+      const owner = document.querySelector('main')!;
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let disposed = false;
+      await registry.ensure(owner, async () => ({
+        destroy: async () => {
+          await gate;
+          disposed = true;
+        },
+      }));
+      const removal = registry.delete(owner);
+      let finished = false;
+      const teardown = registry.destroy().then(() => {
+        finished = true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const finishedBeforeDisposal = finished;
+      release();
+      await Promise.all([removal, teardown]);
+      return { finishedBeforeDisposal, disposed };
+    }),
+  ).toEqual({ finishedBeforeDisposal: false, disposed: true });
+});

@@ -46,20 +46,17 @@ interface Prepared {
   layout: string;
 }
 
-const layout = (candidates: Candidate[], positionIndependent = false) =>
-  JSON.stringify(
-    candidates.map(({ control: c }) => [
-      c.id,
-      c.kind,
-      c.placement,
-      positionIndependent ? 0 : c.x,
-      positionIndependent ? 0 : c.y,
-      c.width,
-      c.height,
-      c.dark,
-      c.rtl,
-    ]),
-  );
+const layout = ({ control: c }: Candidate, positionIndependent = false) => [
+  c.id,
+  c.kind,
+  c.placement,
+  positionIndependent ? 0 : c.x,
+  positionIndependent ? 0 : c.y,
+  c.width,
+  c.height,
+  c.dark,
+  c.rtl,
+];
 
 /** Images are prepared after accepted native updates, never on the overlay's critical path. */
 const createProjectionEngine = async (scope: WebProjectionScope, transport: WebProjectionTransport, callbacks: WebProjectionOptions) => {
@@ -99,7 +96,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
         const relative = origin
           ? { ...candidate, control: { ...candidate.control, x: candidate.control.x - origin.x, y: candidate.control.y - origin.y } }
           : candidate;
-        return [scopeIDs.get(candidate.scope), layout([relative], !!callbacks.opaqueUnderlay)];
+        return [scopeIDs.get(candidate.scope), layout(relative, !!callbacks.opaqueUnderlay)];
       }),
     );
   const sheets = new Map<Document | ShadowRoot, HTMLStyleElement>();
@@ -292,10 +289,11 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
         )
       )
         return;
+      const partSources = result.parts.map((part) => selected.find((candidate) => part.ids.includes(candidate.control.id))!);
       await bounded(
         Promise.all(
-          result.parts.map(async (part) => {
-            const target = selected.find((candidate) => part.ids.includes(candidate.control.id))!.scope.element;
+          result.parts.map(async (part, index) => {
+            const target = partSources[index].scope.element;
             let pool = imagePool.get(target);
             if (!pool) {
               pool = [];
@@ -334,11 +332,9 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
         data: result as CoveredSnapshot,
         images,
         sources: Array.from(new Set(selected.flatMap((item) => [item.element, ...(item.sources ?? [])]))),
-        targets: result.parts.map((part) => selected.find((candidate) => part.ids.includes(candidate.control.id))!.element),
-        scopes: result.parts.map((part) => selected.find((candidate) => part.ids.includes(candidate.control.id))!.scope),
-        parents: result.parts.map(
-          (part) => selected.find((candidate) => part.ids.includes(candidate.control.id))!.scope.element.parentNode,
-        ),
+        targets: partSources.map((source) => source.element),
+        scopes: partSources.map((source) => source.scope),
+        parents: partSources.map((source) => source.scope.element.parentNode),
         frames: [],
         viewport: size,
         revision,
