@@ -128,3 +128,52 @@ test('custom routes are deduplicated and removed when configuration changes', as
   });
   expect(result).toEqual({ once: 1, covered: true, removed: true, removedNotifications: 0 });
 });
+
+test('non-modal and canceled dialogs do not cover native content', async ({ page }) => {
+  await page.setContent('<div id="slot"></div><dialog></dialog>');
+  await page.addScriptTag({ content: bundle('engine') });
+  const covered = () =>
+    page.evaluate(() => (window as any).engine.getOverlayCoordinator(document).isCovered(document.querySelector('#slot')));
+  await page.evaluate(() => {
+    (window as any).engine.getOverlayCoordinator(document);
+    document.querySelector('dialog')!.show();
+  });
+  expect(await covered()).toBe(false);
+  await page.evaluate(() => {
+    const dialog = document.querySelector('dialog')!;
+    dialog.close();
+    dialog.addEventListener('beforetoggle', (event) => event.preventDefault(), { once: true });
+    dialog.showModal();
+  });
+  expect(await covered()).toBe(false);
+});
+
+test('modal top-layer order overrides DOM and z-index order', async ({ page }) => {
+  await page.setContent(
+    '<dialog id="front" style="z-index:-1"><div id="inside"></div></dialog><dialog id="back" style="z-index:100"></dialog><ion-alert style="z-index:1000"></ion-alert>',
+  );
+  await page.addScriptTag({ content: bundle('engine') });
+  await page.evaluate(() => {
+    (window as any).state = (window as any).engine.enableSupportIonicOverlays();
+    document.querySelector('ion-alert')!.dispatchEvent(new Event('ionAlertWillPresent'));
+    document.querySelector<HTMLDialogElement>('#back')!.showModal();
+    document.querySelector<HTMLDialogElement>('#front')!.showModal();
+  });
+  const covered = () => page.evaluate(() => (window as any).state.isCovered(document.querySelector('#inside')));
+  expect(await covered()).toBe(false);
+  await page.evaluate(() => {
+    const back = document.querySelector<HTMLDialogElement>('#back')!;
+    back.close();
+    back.showModal();
+  });
+  await expect.poll(covered).toBe(true);
+});
+
+test('a dialog already open when registration starts is detected', async ({ page }) => {
+  await page.setContent('<div id="slot"></div><dialog></dialog>');
+  await page.evaluate(() => document.querySelector('dialog')!.showModal());
+  await page.addScriptTag({ content: bundle('engine') });
+  expect(await page.evaluate(() => (window as any).engine.getOverlayCoordinator(document).isCovered(document.querySelector('#slot')))).toBe(
+    true,
+  );
+});

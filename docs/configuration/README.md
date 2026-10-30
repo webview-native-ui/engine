@@ -22,7 +22,9 @@ same position: include that successful selection notification in `receiveListene
 | `captureMode` (Android) | `COMPOSITED`, including the visible background.                                                                                             | An opaque card scrolls past adjacent content: `VIEW` captures the card alone instead of surrounding window pixels. Do not use it for translucent content, video or SurfaceView. See [capture eligibility](../reference/platforms.md#android-capture-modes).                                                 |
 
 The Engine exposes [presentation intent](../reference/state.md) separately from
-component values. Neither requires an application-side Engine wrapper. Ionic
+component values. Neither requires an application-side Engine wrapper. Standard
+`dialog.showModal()` coverage is automatic on WebViews supporting `:modal`; `show()`
+is non-modal and does not cover native content. Ionic
 overlay detection is a separate, opt-in [shared initializer](ionic-overlays.md),
 not a registration argument; other frameworks report their lifecycle explicitly.
 

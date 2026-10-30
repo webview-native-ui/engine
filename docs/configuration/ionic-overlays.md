@@ -7,7 +7,9 @@ view. This shared monitor supplies that coverage decision for all registrations.
 
 Integrate the plugin through the [Capacitor](../getting-started/capacitor.md) or
 [Cordova](../getting-started/cordova.md) guide first. Non-Ionic applications use their own
-lifecycle notifications and do not install this adapter.
+lifecycle notifications and do not install this adapter. Standard HTML dialogs opened
+with `showModal()` are detected automatically on WebViews supporting `:modal`, without
+this initializer or custom events. Closing or removing the dialog restores coverage.
 
 For example, opening an Ionic settings modal should cover the background native
 tab bar while leaving the modal's own native close button usable. A blanket hide

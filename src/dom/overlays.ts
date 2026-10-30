@@ -36,6 +36,7 @@ export const usesOverlayBackdrop = (element: HTMLElement, breakpoint?: number): 
 
 const key = Symbol.for('@webview-native-ui/engine/overlays/v1');
 const createCoordinator = (doc: Document) => {
+  const modalSelector = doc.defaultView!.CSS.supports('selector(:modal)') ? 'dialog:modal' : undefined;
   const active = new Set<HTMLElement>();
   const native = new Set<HTMLElement>();
   const listeners = new Set<(change: OverlayChange) => void>();
@@ -70,20 +71,38 @@ const createCoordinator = (doc: Document) => {
     if (typeof breakpoint === 'number' && breakpoint > 0) breakpoints.set(element, breakpoint);
     notify({ element, phase, event });
   };
-  const refresh = (initial = false) => {
+  const refresh = (initial = false, mutations: MutationRecord[] = []) => {
     let changed = false;
+    if (modalSelector) {
+      for (const mutation of mutations) {
+        const element = mutation.target as HTMLElement;
+        if (mutation.type === 'attributes' && mutation.oldValue === null && element.matches(modalSelector)) {
+          active.delete(element);
+          active.add(element);
+          changed = true;
+        }
+      }
+    }
     for (const element of active)
-      if (!element.isConnected || element.ownerDocument !== doc || !definitions.some(({ selector }) => element.matches(selector))) {
+      if (
+        !element.isConnected ||
+        element.ownerDocument !== doc ||
+        !(element.matches('dialog')
+          ? modalSelector && element.matches(modalSelector)
+          : definitions.some(({ selector }) => element.matches(selector)))
+      ) {
         active.delete(element);
         native.delete(element);
         changed = true;
       }
-    for (const element of doc.querySelectorAll<OverlayElement>(definitions.map(({ selector }) => selector).join(','))) {
+    const selectors = [...definitions.map(({ selector }) => selector), ...(modalSelector ? [modalSelector] : [])];
+    for (const element of selectors.length ? doc.querySelectorAll<OverlayElement>(selectors.join(',')) : []) {
       if (
         !active.has(element) &&
-        !dismissed.has(element) &&
-        (initial || !element.matches('ion-popover')) &&
-        (element.presented || element.classList.contains('show-menu'))
+        (element.matches('dialog') ||
+          (!dismissed.has(element) &&
+            (initial || !element.matches('ion-popover')) &&
+            (element.presented || element.classList.contains('show-menu'))))
       ) {
         active.add(element);
         changed = true;
@@ -91,7 +110,7 @@ const createCoordinator = (doc: Document) => {
     }
     if (changed) notify({ phase: 'change' });
   };
-  return {
+  const coordinator = {
     get active(): ReadonlySet<HTMLElement> {
       return active;
     },
@@ -120,7 +139,11 @@ const createCoordinator = (doc: Document) => {
         const z = Number.parseFloat(doc.defaultView!.getComputedStyle(element).zIndex);
         return Number.isFinite(z) ? z : ((element as OverlayElement).overlayIndex ?? 0);
       };
-      stack.sort((a, b) => order(a) - order(b));
+      stack.sort((a, b) => {
+        const aModal = a.matches('dialog');
+        const bModal = b.matches('dialog');
+        return aModal || bModal ? Number(aModal) - Number(bModal) : order(a) - order(b);
+      });
       return stack;
     },
     isCovered(target: HTMLElement) {
@@ -153,6 +176,7 @@ const createCoordinator = (doc: Document) => {
           });
         }
       }
+      const initial = definitions.length === 0;
       options = nextOptions;
       definitions = nextDefinitions;
       routes = nextRoutes;
@@ -173,10 +197,15 @@ const createCoordinator = (doc: Document) => {
           remove();
           registrations.delete(name);
         }
-      const initial = !observer;
       if (!observer) {
-        observer = new MutationObserver(() => refresh());
-        observer.observe(doc.documentElement, { childList: true, subtree: true });
+        observer = new MutationObserver((mutations) => refresh(false, mutations));
+        observer.observe(doc.documentElement, {
+          childList: true,
+          subtree: true,
+          attributes: true,
+          attributeFilter: ['open'],
+          attributeOldValue: true,
+        });
         doc.addEventListener('nativeUIOverlayAdopted', (event) => {
           const element = (event as CustomEvent<HTMLElement>).detail;
           if (element?.ownerDocument === doc) accept(element, 'willPresent', event);
@@ -186,10 +215,12 @@ const createCoordinator = (doc: Document) => {
       if (initial || config) notify({ phase: 'change' });
     },
   };
+  coordinator.enable([]);
+  return coordinator;
 };
 export type OverlayCoordinator = ReturnType<typeof createCoordinator>;
 
-/** Access is inert: only the explicit framework initializer installs DOM listeners. */
+/** Standard modal dialogs are automatic; framework events require their explicit initializer. */
 export const getOverlayCoordinator = (doc: Document): OverlayCoordinator => {
   const shared = doc as unknown as Record<symbol, OverlayCoordinator>;
   return (shared[key] ??= createCoordinator(doc));

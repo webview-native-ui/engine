@@ -1252,3 +1252,17 @@ test('Web fallback cancels an idle reveal without waiting for the native hide ac
     w.pendingInitialRelease({});
   });
 });
+
+test('standard modal dialogs automatically project and restore a native session', async ({ page }) => {
+  await boot(page);
+  await expect(page.locator('#slot')).toHaveAttribute('data-native-ui-snapshot', /.+/);
+  await page.evaluate(() => {
+    const dialog = document.createElement('dialog');
+    document.body.append(dialog);
+    dialog.showModal();
+  });
+  await expect(page.locator('#slot')).toHaveAttribute('data-native-ui-snapshot-visible', '');
+  await page.evaluate(() => document.querySelector('dialog')!.close());
+  await expect(page.locator('#slot')).not.toHaveAttribute('data-native-ui-snapshot-visible');
+  await expect(page.locator('#slot')).toHaveAttribute('data-native-ui-session-surface', 'native');
+});
