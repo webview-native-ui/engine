@@ -17,7 +17,9 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /** Plugin-owned registration; uses the plugin's existing events without wrapping its methods. */
-class NativeUIProjection(
+class NativeUIProjection
+@JvmOverloads
+constructor(
     private val window: Window,
     private val webView: WebView,
     plugin: String,
