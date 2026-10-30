@@ -1307,3 +1307,15 @@ test('an expired native entry retires the delayed Web image', async ({ page }) =
   await expect(page.locator('#source')).not.toHaveAttribute('data-native-ui-snapshot-visible', '');
   await expect(page.locator('#source > button')).toBeVisible();
 });
+
+test('projection preserves host opacity and clipping', async ({ page }) => {
+  await prepare(page);
+  await page.locator('#source').evaluate((host) => {
+    host.style.opacity = '0.25';
+    host.style.overflow = 'hidden';
+  });
+  await page.evaluate(() => (window as any).manager.begin());
+  await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
+  await expect(page.locator('#source')).toHaveCSS('opacity', '0.25');
+  await expect(page.locator('#source')).toHaveCSS('overflow', 'hidden');
+});

@@ -9,7 +9,6 @@ ${hidden} *::before, ${hidden} *::after {
   visibility: hidden !important;
 }
 }
-[data-native-ui-snapshot-visible] { opacity:1!important;overflow:visible!important; }
 [data-native-ui-snapshot-visible][data-native-ui-snapshot-positioned] { position:relative!important; }
 `;
 
