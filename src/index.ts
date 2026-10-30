@@ -15,3 +15,5 @@ export { createWebProjectionSurfaces } from './projection/surfaces.js';
 export * from './projection/surface.js';
 
 export { createNativeUpdateQueue, type NativeUpdateSender } from './native/updates.js';
+
+export { setProjection } from './projection/mode.js';

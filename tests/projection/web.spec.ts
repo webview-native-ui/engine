@@ -122,8 +122,10 @@ const prepare = async (
         {
           captureDelayMs,
           transient,
-          wake() {},
-          blocked: () => false,
+          wake() {
+            w.onWake?.();
+          },
+          blocked: () => !!w.blocked,
           revision: () => w.revision,
           events: events
             ? {
@@ -1285,3 +1287,131 @@ test('renderer visibility ignores projection hiding across an open shadow bounda
   await page.evaluate(() => (document.querySelector<HTMLElement>('#scroll')!.style.visibility = 'hidden'));
   expect(await read()).toEqual({ host: 'hidden', child: 'hidden', projected: 'hidden', marker: true });
 });
+
+test('screen mode covers a standalone renderer and local end cannot release it', async ({ page }) => {
+  await prepare(page);
+  await page.evaluate(() => {
+    const w = window as any;
+    w.blocked = true;
+    w.engine.setProjection('web');
+  });
+  await expect.poll(() => page.evaluate(() => (window as any).manager.token)).toBe('image');
+  await page.evaluate(() => (window as any).manager.end());
+  expect(await page.evaluate(() => (window as any).manager.token)).toBe('image');
+  const state = () =>
+    page.evaluate(() => {
+      const manager = (window as any).manager;
+      return { token: manager.token, owners: manager.owners.length, visible: manager.visibleOwners.length, restoring: manager.restoring };
+    });
+  await page.evaluate(() => (window as any).engine.setProjection('native'));
+  await expect.poll(state).toEqual({ token: 'image', owners: 1, visible: 1, restoring: false });
+  await page.evaluate(() => {
+    const w = window as any;
+    w.blocked = false;
+    w.manager.end();
+  });
+  expect(await state()).toEqual({ token: undefined, owners: 0, visible: 1, restoring: true });
+  await page.evaluate(() => (window as any).manager.updated(undefined, ['counter'], 2));
+  expect(await page.evaluate(() => (window as any).manager.visibleOwners.length)).toBe(0);
+});
+
+test('screen mode preserves renderer intent and re-covers a native shown notification', async ({ page }) => {
+  await prepare(page, false, false, false, false, true);
+  await page.evaluate(() => {
+    const w = window as any;
+    w.manager.begin();
+    w.engine.setProjection('web');
+  });
+  await page.evaluate(() => (window as any).engine.setProjection('native'));
+  expect(await page.evaluate(() => (window as any).manager.token)).toBe('image');
+  await page.evaluate(() => {
+    const w = window as any;
+    w.engine.setProjection('web');
+    w.calls.length = 0;
+    w.eventListeners.shown({ id: 'counter' });
+  });
+  await expect.poll(() => page.evaluate(() => (window as any).calls.filter((call: any) => call.action === 'cover').length)).toBe(1);
+  await page.evaluate(() => {
+    const w = window as any;
+    w.eventListeners.hidden({ id: 'counter' });
+    w.engine.setProjection('native');
+    w.engine.setProjection('web');
+  });
+  expect(await page.evaluate(() => (window as any).manager.owners.length)).toBe(0);
+  expect(await page.evaluate(() => (window as any).manager.visibleOwners.length)).toBe(0);
+});
+
+test('a new batched renderer inherits Web mode when its first image is prepared', async ({ page }) => {
+  await boot(page);
+  await page.evaluate(async () => {
+    const w = window as any;
+    w.engine.setProjection('web');
+    const source = document.querySelector<HTMLElement>('#source')!;
+    const { x, y, width, height } = source.getBoundingClientRect();
+    w.calls = [];
+    w.surface = await w.engine.createWebProjectionSurface(
+      {
+        listen: async () => ({ remove() {} }),
+        send: async (request: any) => {
+          w.calls.push(request);
+          if (request.action === 'prepare')
+            return { token: 'late', parts: [{ ids: ['counter'], url: 'file:///image.png', x, y, width, height }] };
+          if (request.action === 'cover') return { shown: true };
+          return {};
+        },
+      },
+      { namespace: 'late', target: () => source, wake() {}, blocked: () => false },
+    );
+    w.surface.consider(1, [{ element: source, control: { id: 'counter', x, y, width, height } }]);
+  });
+  await expect.poll(() => page.evaluate(() => (window as any).surface.token)).toBe('late');
+  await page.evaluate(async () => {
+    const w = window as any;
+    await w.surface.destroy();
+    w.calls.length = 0;
+    w.engine.setProjection('native');
+    w.engine.setProjection('web');
+  });
+  expect(await page.evaluate(() => (window as any).calls)).toEqual([]);
+});
+
+test('reconciliation can repeat begin in screen Web mode without a cover loop', async ({ page }) => {
+  await prepare(page);
+  const count = await page.evaluate(async () => {
+    const w = window as any;
+    w.engine.setProjection('web');
+    w.manager.begin();
+    w.onWake = () => {
+      if (w.calls.filter((call: any) => call.action === 'cover').length < 10) w.manager.begin();
+    };
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    return w.calls.filter((call: any) => call.action === 'cover').length;
+  });
+  expect(count).toBe(1);
+});
+
+for (const localFirst of [true, false]) {
+  test(`local and screen requests both retire regardless of release order (local first: ${localFirst})`, async ({ page }) => {
+    await prepare(page, false, false, false, false, true);
+    await page.evaluate(() => {
+      const w = window as any;
+      w.eventListeners.transitionStarted({ id: 'counter' });
+      w.engine.setProjection('web');
+    });
+    await expect.poll(() => page.evaluate(() => (window as any).manager.visibleOwners.length)).toBe(1);
+    await page.evaluate((localFirst) => {
+      const w = window as any;
+      if (localFirst) w.manager.end();
+      else w.engine.setProjection('native');
+    }, localFirst);
+    expect(await page.evaluate(() => (window as any).manager.token)).toBe('image');
+    await page.evaluate((localFirst) => {
+      const w = window as any;
+      if (localFirst) w.engine.setProjection('native');
+      else w.manager.end();
+    }, localFirst);
+    expect(await page.evaluate(() => (window as any).manager.restoring)).toBe(true);
+    await page.evaluate(() => (window as any).manager.updated(undefined, ['counter'], 2));
+    expect(await page.evaluate(() => (window as any).manager.visibleOwners.length)).toBe(0);
+  });
+}
