@@ -1,3 +1,7 @@
+// @webview-native-ui/engine
+// Copyright (c) 2026 Masahiko Sakakibara (rdlabo)
+// SPDX-License-Identifier: MIT
+
 import UIKit
 /// Keeps native content at full size while clipping hit testing and visible pixels.
 public final class NativeUIClippedView: UIView {

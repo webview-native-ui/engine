@@ -1,3 +1,9 @@
+/*!
+ * @webview-native-ui/engine
+ * Copyright (c) 2026 Masahiko Sakakibara (rdlabo)
+ * SPDX-License-Identifier: MIT
+ */
+
 /** A fixed Web fallback element. A replacement element requires a new scope. */
 export const createWebProjectionScope = (element: HTMLElement, namespace: string) => {
   if (element.nodeType !== 1 || element.namespaceURI !== 'http://www.w3.org/1999/xhtml' || !element.ownerDocument || !('style' in element))

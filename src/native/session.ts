@@ -1,3 +1,9 @@
+/*!
+ * @webview-native-ui/engine
+ * Copyright (c) 2026 Masahiko Sakakibara (rdlabo)
+ * SPDX-License-Identifier: MIT
+ */
+
 import { applyNativeValues, type NativeValueBinding } from './values.js';
 import { projectionPlacement } from '../projection/placement.js';
 import { getOverlayCoordinator } from '../dom/overlays.js';

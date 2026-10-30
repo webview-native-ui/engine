@@ -1,3 +1,9 @@
+/*!
+ * @webview-native-ui/engine
+ * Copyright (c) 2026 Masahiko Sakakibara (rdlabo)
+ * SPDX-License-Identifier: MIT
+ */
+
 /** Use the host's existing file server; never initialize a framework bridge. */
 export const projectionURL = (url: string): string => {
   const host = globalThis as unknown as {

@@ -1,3 +1,7 @@
+// @webview-native-ui/engine
+// Copyright (c) 2026 Masahiko Sakakibara (rdlabo)
+// SPDX-License-Identifier: MIT
+
 // Test fixtures fail immediately when required setup values are missing.
 // swiftlint:disable force_unwrapping force_cast force_try
 import Cordova

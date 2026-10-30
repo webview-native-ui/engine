@@ -1,3 +1,9 @@
+/*!
+ * @webview-native-ui/engine
+ * Copyright (c) 2026 Masahiko Sakakibara (rdlabo)
+ * SPDX-License-Identifier: MIT
+ */
+
 import { startNativeSession, type NativeSessionConfiguration } from './session.js';
 import type { ListenerHandle } from '../types.js';
 

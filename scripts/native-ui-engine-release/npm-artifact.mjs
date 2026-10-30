@@ -1,3 +1,9 @@
+/*!
+ * @webview-native-ui/engine
+ * Copyright (c) 2026 Masahiko Sakakibara (rdlabo)
+ * SPDX-License-Identifier: MIT
+ */
+
 import { createHash } from 'node:crypto';
 import { gunzipSync } from 'node:zlib';
 

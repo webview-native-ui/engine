@@ -1,3 +1,9 @@
+/*!
+ * @webview-native-ui/engine
+ * Copyright (c) 2026 Masahiko Sakakibara (rdlabo)
+ * SPDX-License-Identifier: MIT
+ */
+
 /** Placement supplied synchronously before a native view returns from a Web image. */
 export interface ProjectionPlacementBinding {
   readonly projected: boolean;

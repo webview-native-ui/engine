@@ -1,3 +1,9 @@
+/*!
+ * @webview-native-ui/engine
+ * Copyright (c) 2026 Masahiko Sakakibara (rdlabo)
+ * SPDX-License-Identifier: MIT
+ */
+
 import { setTimeout as delay } from 'node:timers/promises';
 
 const api = 'https://central.sonatype.com/api/v1/publisher';

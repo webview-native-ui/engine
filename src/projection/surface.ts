@@ -1,3 +1,9 @@
+/*!
+ * @webview-native-ui/engine
+ * Copyright (c) 2026 Masahiko Sakakibara (rdlabo)
+ * SPDX-License-Identifier: MIT
+ */
+
 import { createWebProjectionBatch, type WebProjectionOptions } from './web.js';
 import { createWebProjectionScope, type WebProjectionScope } from './scope.js';
 import type { WebProjectionSource, WebProjectionTransport } from '../types.js';

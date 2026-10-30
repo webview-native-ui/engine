@@ -1,3 +1,9 @@
+/*
+ * @webview-native-ui/engine
+ * Copyright (c) 2026 Masahiko Sakakibara (rdlabo)
+ * SPDX-License-Identifier: MIT
+ */
+
 repositories {
     exclusiveContent {
         forRepository { maven { url = uri(System.getenv('NATIVE_UI_ENGINE_REPOSITORY')) } }

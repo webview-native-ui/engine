@@ -1,3 +1,9 @@
+/*!
+ * @webview-native-ui/engine
+ * Copyright (c) 2026 Masahiko Sakakibara (rdlabo)
+ * SPDX-License-Identifier: MIT
+ */
+
 import type { WebProjectionScope } from './projection/scope.js';
 
 /** All wire coordinates are CSS pixels, relative to the Web viewport. */

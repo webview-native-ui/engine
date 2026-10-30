@@ -1,3 +1,9 @@
+/*!
+ * @webview-native-ui/engine
+ * Copyright (c) 2026 Masahiko Sakakibara (rdlabo)
+ * SPDX-License-Identifier: MIT
+ */
+
 const call = (action, ...args) => new Promise((resolve, reject) => cordova.exec(resolve, reject, 'EngineFixture', action, args));
 const slot = document.querySelector('#slot');
 const wait = async (condition) => {

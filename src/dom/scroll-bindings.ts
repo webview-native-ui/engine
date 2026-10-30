@@ -1,3 +1,9 @@
+/*!
+ * @webview-native-ui/engine
+ * Copyright (c) 2026 Masahiko Sakakibara (rdlabo)
+ * SPDX-License-Identifier: MIT
+ */
+
 import type { WebProjectionSource } from '../types.js';
 
 /** Coordinate ownership, independent of any plugin's update transport or rendering. */

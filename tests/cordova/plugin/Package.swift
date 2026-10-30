@@ -1,4 +1,8 @@
 // swift-tools-version: 5.9
+// @webview-native-ui/engine
+// Copyright (c) 2026 Masahiko Sakakibara (rdlabo)
+// SPDX-License-Identifier: MIT
+
 import PackageDescription
 import Foundation
 let engine = ProcessInfo.processInfo.environment["NATIVE_UI_ENGINE_SOURCE"]!

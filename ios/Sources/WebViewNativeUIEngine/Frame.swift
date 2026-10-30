@@ -1,3 +1,7 @@
+// @webview-native-ui/engine
+// Copyright (c) 2026 Masahiko Sakakibara (rdlabo)
+// SPDX-License-Identifier: MIT
+
 import CoreGraphics
 public struct NativeUIFrame: Codable, Equatable {
     public let x: Double

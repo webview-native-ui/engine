@@ -1,3 +1,9 @@
+/*!
+ * @webview-native-ui/engine
+ * Copyright (c) 2026 Masahiko Sakakibara (rdlabo)
+ * SPDX-License-Identifier: MIT
+ */
+
 import { expect, test } from '@playwright/test';
 import { buildSync } from 'esbuild';
 const bundle = (name: string) =>

@@ -1,3 +1,9 @@
+/*!
+ * @webview-native-ui/engine
+ * Copyright (c) 2026 Masahiko Sakakibara (rdlabo)
+ * SPDX-License-Identifier: MIT
+ */
+
 import { getOverlayCoordinator, type OverlayDefinition, type OverlayOptions } from './dom/overlays.js';
 export type { OverlayOptions as IonicOverlayOptions } from './dom/overlays.js';
 const defaults: readonly OverlayDefinition[] = [

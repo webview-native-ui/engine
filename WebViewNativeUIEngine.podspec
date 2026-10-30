@@ -1,3 +1,7 @@
+# @webview-native-ui/engine
+# Copyright (c) 2026 Masahiko Sakakibara (rdlabo)
+# SPDX-License-Identifier: MIT
+
 require 'json'
 package = JSON.parse(File.read(File.join(__dir__, 'package.json')))
 Pod::Spec.new do |s|

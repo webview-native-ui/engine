@@ -1,3 +1,7 @@
+// @webview-native-ui/engine
+// Copyright (c) 2026 Masahiko Sakakibara (rdlabo)
+// SPDX-License-Identifier: MIT
+
 // Test fixtures fail immediately when required setup values are missing.
 // swiftlint:disable force_unwrapping force_cast
 import XCTest
@@ -393,5 +397,4 @@ private final class ProjectionFixture: NSObject, WKURLSchemeHandler {
     }
     func webView(_ webView: WKWebView, stop urlSchemeTask: WKURLSchemeTask) {}
 }
-
 // swiftlint:enable force_unwrapping force_cast

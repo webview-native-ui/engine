@@ -1,3 +1,9 @@
+/*!
+ * @webview-native-ui/engine
+ * Copyright (c) 2026 Masahiko Sakakibara (rdlabo)
+ * SPDX-License-Identifier: MIT
+ */
+
 /** Send only replaceable state from an update pass, never user actions. */
 export type NativeUpdateSender = <T>(request: () => Promise<T>, validate?: (result: T) => void) => Promise<T | undefined>;
 

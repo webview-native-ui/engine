@@ -1,3 +1,9 @@
+/*!
+ * @webview-native-ui/engine
+ * Copyright (c) 2026 Masahiko Sakakibara (rdlabo)
+ * SPDX-License-Identifier: MIT
+ */
+
 export * from './types.js';
 export * from './dom/geometry.js';
 export * from './dom/scroll-placement.js';

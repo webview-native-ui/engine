@@ -1,3 +1,9 @@
+/*!
+ * @webview-native-ui/engine
+ * Copyright (c) 2026 Masahiko Sakakibara (rdlabo)
+ * SPDX-License-Identifier: MIT
+ */
+
 import type { WebProjectionSurface } from './surface.js';
 
 /** Owns asynchronous projection creation and disposal for DOM-backed surfaces. */

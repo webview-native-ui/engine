@@ -1,3 +1,9 @@
+/*!
+ * @webview-native-ui/engine
+ * Copyright (c) 2026 Masahiko Sakakibara (rdlabo)
+ * SPDX-License-Identifier: MIT
+ */
+
 import type { ScrollPlacement as NativeUIScrollPlacement } from '../types.js';
 type Identify = (element: HTMLElement) => string;
 import { projectionAncestors } from './geometry.js';

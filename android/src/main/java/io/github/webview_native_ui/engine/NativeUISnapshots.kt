@@ -1,3 +1,9 @@
+/*
+ * @webview-native-ui/engine
+ * Copyright (c) 2026 Masahiko Sakakibara (rdlabo)
+ * SPDX-License-Identifier: MIT
+ */
+
 package io.github.webview_native_ui.engine
 
 import android.graphics.Bitmap

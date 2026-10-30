@@ -15,6 +15,13 @@ The public entry points are `src/index.ts` and `src/ionic.ts`, with shared contr
 
 `npm run build` bundles `src/native/bootstrap.ts` into `runtime/native-ui-engine.js`, the shared WebView runtime. Android packages this file directly as an asset. The build also copies it into `ios/Sources/WebViewNativeUIEngine/Resources` because SwiftPM requires resources inside the target directory. Both generated files are ignored during development and included in release tags so SwiftPM consumers do not need Node.js. Run `npm run build` before building a source checkout with Xcode. Edit the TypeScript source, not either generated file; CI checks regeneration and verifies the runtime included in npm and Maven archives.
 
+Include the package name `@webview-native-ui/engine`, a copyright notice for
+`Masahiko Sakakibara (rdlabo)`, and
+`SPDX-License-Identifier: MIT` at the top of authored source files, using the
+language's comment syntax. Keep shebangs and Swift tools-version directives first.
+Do not replace third-party notices or add per-symbol author tags. Distributed
+packages must retain the full MIT license in `LICENSE`.
+
 Browser tests mirror these groups under `tests/`. `tests/cordova/` contains the real native consumer fixture.
 
 Use Node.js 24, matching CI. From this repository:

@@ -1,3 +1,9 @@
+/*!
+ * @webview-native-ui/engine
+ * Copyright (c) 2026 Masahiko Sakakibara (rdlabo)
+ * SPDX-License-Identifier: MIT
+ */
+
 /** Shared by npm consumers and the runtime injected from the native library. */
 export type OverlayPhase = 'willPresent' | 'didPresent' | 'willDismiss' | 'didDismiss' | 'change';
 export interface OverlayChange {

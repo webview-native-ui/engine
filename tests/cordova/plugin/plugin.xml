@@ -1,4 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!--
+  @webview-native-ui/engine
+  Copyright (c) 2026 Masahiko Sakakibara (rdlabo)
+  SPDX-License-Identifier: MIT
+-->
+
 <plugin xmlns="http://apache.org/cordova/ns/plugins/1.0" id="native-ui-engine-cordova-fixture" version="0.0.0">
   <name>EngineFixture</name>
   <platform name="android">

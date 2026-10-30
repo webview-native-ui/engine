@@ -1,3 +1,7 @@
+# @webview-native-ui/engine
+# Copyright (c) 2026 Masahiko Sakakibara (rdlabo)
+# SPDX-License-Identifier: MIT
+
 """Exercise Central bundle signing locally; never contact a publishing service."""
 import hashlib
 from io import BytesIO

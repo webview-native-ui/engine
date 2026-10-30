@@ -1,3 +1,9 @@
+/*!
+ * @webview-native-ui/engine
+ * Copyright (c) 2026 Masahiko Sakakibara (rdlabo)
+ * SPDX-License-Identifier: MIT
+ */
+
 import { test, expect } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 const runtime = readFileSync('runtime/native-ui-engine.js', 'utf8');
