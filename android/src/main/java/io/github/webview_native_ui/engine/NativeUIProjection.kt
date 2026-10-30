@@ -23,7 +23,7 @@ class NativeUIProjection(
     plugin: String,
     projectionSelector: String,
     private val receiveListeners: ReceiveListeners = ReceiveListeners(),
-    allowedOrigins: Set<String> = setOf("https://localhost", "http://localhost"),
+    allowedOrigins: Set<String>? = null,
     failedFallback: FailedFallback = FailedFallback.WEB,
     private val captureMode: CaptureMode = CaptureMode.COMPOSITED,
     private val canCapture: () -> Boolean = { true },
@@ -99,13 +99,12 @@ class NativeUIProjection(
         /** Call during plugin load, before navigation. Later SDK views reuse this channel. */
         @JvmStatic
         @JvmOverloads
-        fun install(
-            webView: WebView,
-            allowedOrigins: Set<String> = setOf("https://localhost", "http://localhost"),
-        ) {
+        fun install(webView: WebView, allowedOrigins: Set<String>? = null) {
             check(android.os.Looper.myLooper() == android.os.Looper.getMainLooper())
+            val resolvedOrigins =
+                allowedOrigins ?: origins[webView] ?: ProjectionOrigins.configured(webView.context)
             if (registrations.containsKey(webView)) {
-                require(origins[webView] == allowedOrigins) {
+                require(origins[webView] == resolvedOrigins) {
                     "Native UI channel origins cannot change"
                 }
                 return
@@ -115,7 +114,7 @@ class NativeUIProjection(
             }
             val owners = mutableMapOf<String, java.lang.ref.WeakReference<NativeUIProjection>>()
             if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
-                WebViewCompat.addWebMessageListener(webView, "nativeUIEngine", allowedOrigins) {
+                WebViewCompat.addWebMessageListener(webView, "nativeUIEngine", resolvedOrigins) {
                     _,
                     message,
                     _,
@@ -133,7 +132,7 @@ class NativeUIProjection(
                 }
             } else throw UnsupportedOperationException("WebView message listeners are required")
             registrations[webView] = owners
-            origins[webView] = allowedOrigins.toSet()
+            origins[webView] = resolvedOrigins.toSet()
         }
     }
 
@@ -166,7 +165,12 @@ class NativeUIProjection(
         }
     }
 
-    private val allowedOriginsJSON = JSONArray(allowedOrigins).toString()
+    private val resolvedOrigins =
+        allowedOrigins
+            ?: origins[webView]
+            ?: if (runtime == Runtime.CAPACITOR) ProjectionOrigins.configured(webView.context)
+            else ProjectionOrigins.defaults
+    private val allowedOriginsJSON = JSONArray(resolvedOrigins).toString()
 
     // Check in the executing document: a native URL check can race navigation.
     private fun evaluate(source: String, complete: android.webkit.ValueCallback<String>? = null) {
@@ -366,12 +370,12 @@ class NativeUIProjection(
         val source =
             "if (!globalThis.WebViewNativeUIEngineRuntime) { $runtime } WebViewNativeUIEngineRuntime.start($config).catch(console.error);"
         if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
-            install(webView, allowedOrigins)
+            install(webView, resolvedOrigins)
             registrations.getValue(webView)[id] = java.lang.ref.WeakReference(this)
             var installedScript: ScriptHandler? = null
             try {
                 val created =
-                    WebViewCompat.addDocumentStartJavaScript(webView, source, allowedOrigins)
+                    WebViewCompat.addDocumentStartJavaScript(webView, source, resolvedOrigins)
                 installedScript = created
                 // Also support initialization after the current page has loaded.
                 evaluate(source)

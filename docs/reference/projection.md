@@ -125,7 +125,7 @@ Listeners follow host reparenting and slot reassignment and are removed on teard
 
 Scrolling is internal: iOS uses a uniquely matched native scroll binding when available; otherwise, including Android, scrolling temporarily uses the prepared image and restores native content after motion settles. Automatic scroll handling never overrides explicit `web` or `none`. Unsupported capture or geometry keeps the normal DOM fallback; it does not wait for a new capture on the transition path. The latest explicit destination survives WebView reload, and old-document replies cannot complete a new document's requests.
 
-By default, the internal channel is limited to the main frame on Capacitor's localhost origins. Pass the application's exact `allowedOrigins` for a different configured origin. Android requires WebView's `WEB_MESSAGE_LISTENER` and `DOCUMENT_START_SCRIPT` features; registration fails explicitly on unsupported WebView implementations. Do not use wildcard origins for remotely navigable WebViews.
+The internal channel is limited to the main frame. Capacitor origins come from the bundled `capacitor.config.json`: `server.url` takes precedence over the local hostname/scheme. To override them, pass exact `allowedOrigins` (on Android, to `install` before navigation; registrations inherit them). Neither `allowNavigation` nor the current WebView URL expands this set. Android requires WebView's `WEB_MESSAGE_LISTENER` and `DOCUMENT_START_SCRIPT` features; registration fails explicitly on unsupported WebView implementations. Do not use wildcard origins for remotely navigable WebViews.
 
 For capture modes, translucent surfaces, image color and private storage, see
 [capture and platform limits](platforms.md). Custom renderer bridge and scroll
