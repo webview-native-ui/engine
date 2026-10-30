@@ -6,6 +6,12 @@ export const createWebProjectionSurfaces = <Owner extends Node, Surface extends 
 ) => {
   type Entry = { surface?: Surface; ready: Promise<Surface | undefined> };
   const entries = new Map<Owner, Entry>();
+  const retiring = new Set<Promise<unknown>>();
+  const retire = (disposal: Promise<unknown>) => {
+    const pending = disposal.finally(() => retiring.delete(pending));
+    retiring.add(pending);
+    return pending;
+  };
   let stopped = false;
   const values = (): Surface[] => [...entries.values()].flatMap((entry) => (entry.surface ? [entry.surface] : []));
   let doc: Document | undefined;
@@ -57,9 +63,7 @@ export const createWebProjectionSurfaces = <Owner extends Node, Surface extends 
     const entry = entries.get(owner);
     if (!entry) return;
     entries.delete(owner);
-    if (entry.surface) await entry.surface.destroy();
-    // A failed creation has nothing to dispose; ensure() reports that error.
-    else await entry.ready.catch(() => {});
+    await retire(entry.surface ? entry.surface.destroy() : entry.ready.catch(() => {}));
   };
   return {
     get: (owner: Owner) => entries.get(owner)?.surface,
@@ -88,7 +92,7 @@ export const createWebProjectionSurfaces = <Owner extends Node, Surface extends 
           .then(async (surface) => {
             if (stopped || entries.get(owner) !== entry || !owner.isConnected) {
               if (entries.get(owner) === entry) entries.delete(owner);
-              await surface.destroy();
+              await retire(surface.destroy());
               return undefined;
             }
             entry.surface = surface;
@@ -107,7 +111,7 @@ export const createWebProjectionSurfaces = <Owner extends Node, Surface extends 
       stopped = true;
       listeners?.abort();
       if (motionFrame) doc?.defaultView?.cancelAnimationFrame(motionFrame);
-      await Promise.all([...entries.keys()].map(remove));
+      await Promise.all([...retiring, ...[...entries.keys()].map(remove)]);
     },
   };
 };

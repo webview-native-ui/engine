@@ -17,7 +17,6 @@ Scrolling and overlays are examples of a broader goal: letting Web UI and Native
 
 _Conceptual view of overlay presentation. The Engine projects native appearance into the Web layer; it does not reorder the actual native view within the DOM._
 
-
 https://github.com/user-attachments/assets/2768f014-7325-49c7-b848-25052756c36d
 
 native controls beneath a Web alert, followed by a native ad scrolling with Web content. Recorded on iOS Simulator.

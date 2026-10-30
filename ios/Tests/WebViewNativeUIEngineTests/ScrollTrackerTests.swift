@@ -6,9 +6,7 @@ import WebKit
 
 final class NativeUIScrollTrackerTests: XCTestCase {
     private func node(_ id: String = "counter", y: Double = 400, reuse: Bool = false) throws -> NativeUIScrollNode {
-        let value: [String: Any] = ["id": id, "kind": "extension", "x": 10, "y": y + 80, "width": 240, "height": 60,
-                                    "items": [], "dark": false, "rtl": false,
-                                    "extension": ["name": "counter", "props": "{}", "actions": ["increment": "button"]],
+        let value: [String: Any] = ["id": id,
                                     "scroll": ["id": "scroll", "reuse": reuse, "offsetX": 0, "offsetY": 0,
                                                "viewport": ["x": 0, "y": 80, "width": 320, "height": 500],
                                                "clip": ["x": 0, "y": 100, "width": 320, "height": 480],

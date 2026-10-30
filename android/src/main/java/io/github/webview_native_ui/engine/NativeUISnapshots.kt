@@ -769,10 +769,7 @@ class NativeUISnapshots(private val directory: File) : AutoCloseable {
     override fun close() {
         onMain()
         closed = true
-        val previous = viewCache
-        viewCache = null
         reset()
-        previous?.parts?.forEach(::releasePixelsIfUnused)
         encoder.shutdown()
     }
 }

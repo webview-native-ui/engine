@@ -25,7 +25,7 @@ test('injected runtime retains the existing Capacitor object and disposes a pend
       },
     };
     w.Capacitor = w.originalCapacitor;
-    w.channel = {
+    w.nativeUIEngine = {
       postMessage: (raw: string) => {
         w.messages.push(JSON.parse(raw));
       },
@@ -59,7 +59,7 @@ test('Cordova notifications use the existing session without Capacitor subscript
   await page.evaluate(() => {
     const w = window as any;
     w.messages = [];
-    w.channel = {
+    w.nativeUIEngine = {
       postMessage: (raw: string) => {
         const message = JSON.parse(raw);
         w.messages.push(message.request);
@@ -121,7 +121,7 @@ test('a delayed old stop cannot remove a restarted session interaction listener'
         };
       },
     };
-    w.channel = {
+    w.nativeUIEngine = {
       postMessage: (raw: string) => {
         const message = JSON.parse(raw);
         w.messages.push(message.request);

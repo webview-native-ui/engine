@@ -408,28 +408,6 @@ class NativeUIProjection(
         )
     }
 
-    private fun clips(selected: Map<String, View>): Map<String, RectF>? {
-        if (captureMode != CaptureMode.VIEW) return null
-        return selected.mapValues { (_, view) ->
-            val clip = frame(view)
-            var parent = view.parent
-            while (parent is android.view.ViewGroup) {
-                if (parent.clipChildren) {
-                    val bounds = frame(parent)
-                    if (parent.clipToPadding) {
-                        bounds.left += parent.paddingLeft
-                        bounds.top += parent.paddingTop
-                        bounds.right -= parent.paddingRight
-                        bounds.bottom -= parent.paddingBottom
-                    }
-                    if (!clip.intersect(bounds)) clip.setEmpty()
-                }
-                parent = parent.parent
-            }
-            clip
-        }
-    }
-
     private fun receive(message: JSONObject) {
         if (closed) return
         val key = message.optString("key")
@@ -639,8 +617,7 @@ class NativeUIProjection(
                                         webView,
                                         selected.values.distinct(),
                                         true,
-                                        clips(selected),
-                                        frames,
+                                        frames = frames,
                                     ),
                             )
                     )
@@ -694,13 +671,7 @@ class NativeUIProjection(
                 }
                 restoreAccepted =
                     captureMode == CaptureMode.VIEW ||
-                        snapshots.restore(
-                            token,
-                            window,
-                            webView,
-                            frames,
-                            clips = clips(current.filterKeys { it in frames }),
-                        )
+                        snapshots.restore(token, window, webView, frames)
                 complete(JSONObject().put("shown", restoreAccepted))
             }
             "resume" -> {
