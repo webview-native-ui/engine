@@ -49,7 +49,20 @@ projection = NativeUIProjection(
 )
 ```
 
-Both snippets belong inside the integration guide's error boundary; retain the
+Java can use the same defaults without supplying every optional argument:
+
+```java
+NativeUIProjection.install(getBridge().getWebView());
+projection = new NativeUIProjection(
+    getActivity().getWindow(),
+    getBridge().getWebView(),
+    getPluginHandle().getId(),
+    "#native-ui-fallback",
+    () -> nativeView
+);
+```
+
+These snippets belong inside the integration guide's error boundary; retain the
 existing Web fallback if initialization fails. `projection` and `nativeView` are
 properties of your plugin. Dispose the registration with `destroy()` on iOS or
 `close()` on Android when that renderer is retired. All native lifecycle calls
