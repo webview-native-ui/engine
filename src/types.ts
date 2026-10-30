@@ -45,7 +45,9 @@ export type WebProjectionResult<Request extends WebProjectionRequest> = Request 
   ? PreparedWebProjection | { token?: never; parts?: never }
   : Request extends { action: 'cover' | 'restore' }
     ? { shown: boolean }
-    : void;
+    : Request extends { action: 'painted' }
+      ? { shown: boolean } | void
+      : void;
 export interface ListenerHandle {
   remove(): Promise<void> | void;
 }

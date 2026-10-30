@@ -1285,3 +1285,65 @@ test('renderer visibility ignores projection hiding across an open shadow bounda
   await page.evaluate(() => (document.querySelector<HTMLElement>('#scroll')!.style.visibility = 'hidden'));
   expect(await read()).toEqual({ host: 'hidden', child: 'hidden', projected: 'hidden', marker: true });
 });
+
+test('projection preserves host opacity and clipping', async ({ page }) => {
+  await prepare(page);
+  await page.locator('#source').evaluate((host) => {
+    host.style.opacity = '0.25';
+    host.style.overflow = 'hidden';
+  });
+  await page.evaluate(() => (window as any).manager.begin());
+  await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
+  await expect(page.locator('#source')).toHaveCSS('opacity', '0.25');
+  await expect(page.locator('#source')).toHaveCSS('overflow', 'hidden');
+});
+
+test('an expired native entry retires the delayed Web image', async ({ page }) => {
+  await prepare(page);
+  await page.evaluate(async () => {
+    const w = window as any;
+    await w.manager.destroy();
+    w.manager = await w.createProjection(document.querySelector('#source'), 'expired', async (request: any) => {
+      if (request.action === 'prepare')
+        return { token: 'expired', parts: [{ ids: ['counter'], url: 'file:///image.png', ...w.source.control }] };
+      if (request.action === 'cover') return { shown: true };
+      if (request.action === 'painted') return new Promise((resolve) => (w.painted = resolve));
+      return {};
+    });
+    w.manager.consider(1, [w.source]);
+  });
+  await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot', /.+/);
+  await page.evaluate(() => (window as any).manager.begin());
+  await expect.poll(() => page.evaluate(() => !!(window as any).painted)).toBe(true);
+  await page.evaluate(() => (window as any).painted({ shown: false }));
+  await expect(page.locator('#source')).not.toHaveAttribute('data-native-ui-snapshot-visible', '');
+  await expect(page.locator('#source > button')).toBeVisible();
+});
+
+test('returning images follow host motion until native acknowledges restoration', async ({ page }) => {
+  await prepare(page);
+  await page.clock.install();
+  await page.evaluate(async () => {
+    const w = window as any;
+    w.registry = w.engine.createWebProjectionSurfaces();
+    await w.registry.ensure(document.querySelector('main'), async () => w.manager);
+    w.manager.begin();
+  });
+  await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
+  await page.evaluate(() => {
+    const w = window as any,
+      host = document.querySelector('#source') as HTMLElement;
+    host.style.boxSizing = 'border-box';
+    w.manager.end();
+    w.registry.changed();
+    host.style.borderLeft = '20px solid blue';
+    w.registry.followMotion(new Map([[host, true]]));
+  });
+  await page.clock.runFor(32);
+  expect(
+    await page.evaluate(() => {
+      const host = document.querySelector('#source')!;
+      return host.querySelector('img')!.getBoundingClientRect().x - host.getBoundingClientRect().x;
+    }),
+  ).toBe(0);
+});
