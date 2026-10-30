@@ -60,7 +60,7 @@ public final class NativeUICoveredSnapshots {
             complete(["shown": restore(in: webView, token: token, frames: destination)])
         case "painted", "restored":
             retireCopy(token, entry: request["action"] as? String == "painted")
-            complete([:])
+            complete(request["action"] as? String == "painted" ? ["shown": captures[token] != nil] : [:])
         case "release": release(token); complete([:])
         case "reset": reset(); complete([:])
         default: complete([:])
@@ -257,7 +257,7 @@ public final class NativeUICoveredSnapshots {
         // A lost cleanup message must never leave an obsolete cover on live UI.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             guard self?.restoration?.views.first === views.first else { return }
-            self?.clearRestoration()
+            if entry { self?.release(token) } else { self?.clearRestoration() }
         }
         return true
     }

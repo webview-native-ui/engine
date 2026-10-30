@@ -320,7 +320,7 @@ public final class NativeUIProjection: NSObject, WKScriptMessageHandler {
                 }
             }
             complete([:])
-        case "painted": snapshots.retireCopy(token); complete([:])
+        case "painted": snapshots.retireCopy(token); complete(["shown": !snapshots.identifiers(for: token).isEmpty])
         case "restored": snapshots.retireCopy(token, entry: false); complete([:])
         case "release": snapshots.release(token); captured.removeValue(forKey: token); anchors.removeValue(forKey: token); complete([:])
         case "reset": snapshots.reset(); captured.removeAll(); anchors.removeAll(); complete([:])

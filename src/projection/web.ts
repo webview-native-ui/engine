@@ -721,9 +721,13 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
         paintFrame = win.requestAnimationFrame(() => {
           paintFrame = 0;
           if (!isCurrent()) return;
-          void call({ action: 'painted', token: image.data.token }).catch(() => {
-            if (isCurrent()) abandon(image, false);
-          });
+          void call({ action: 'painted', token: image.data.token })
+            .then((result) => {
+              if (isCurrent() && result?.shown === false) abandon(image, false);
+            })
+            .catch(() => {
+              if (isCurrent()) abandon(image, false);
+            });
         });
         callbacks.wake();
       })
