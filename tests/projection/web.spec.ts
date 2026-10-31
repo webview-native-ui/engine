@@ -1285,3 +1285,25 @@ test('renderer visibility ignores projection hiding across an open shadow bounda
   await page.evaluate(() => (document.querySelector<HTMLElement>('#scroll')!.style.visibility = 'hidden'));
   expect(await read()).toEqual({ host: 'hidden', child: 'hidden', projected: 'hidden', marker: true });
 });
+
+test('an expired native entry retires the delayed Web image', async ({ page }) => {
+  await prepare(page);
+  await page.evaluate(async () => {
+    const w = window as any;
+    await w.manager.destroy();
+    w.manager = await w.createProjection(document.querySelector('#source'), 'expired', async (request: any) => {
+      if (request.action === 'prepare')
+        return { token: 'expired', parts: [{ ids: ['counter'], url: 'file:///image.png', ...w.source.control }] };
+      if (request.action === 'cover') return { shown: true };
+      if (request.action === 'painted') return new Promise((resolve) => (w.painted = resolve));
+      return {};
+    });
+    w.manager.consider(1, [w.source]);
+  });
+  await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot', /.+/);
+  await page.evaluate(() => (window as any).manager.begin());
+  await expect.poll(() => page.evaluate(() => !!(window as any).painted)).toBe(true);
+  await page.evaluate(() => (window as any).painted({ shown: false }));
+  await expect(page.locator('#source')).not.toHaveAttribute('data-native-ui-snapshot-visible', '');
+  await expect(page.locator('#source > button')).toBeVisible();
+});

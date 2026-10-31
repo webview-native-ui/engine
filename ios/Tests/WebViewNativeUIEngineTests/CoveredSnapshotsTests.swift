@@ -54,6 +54,41 @@ final class NativeUICoveredSnapshotsTests: XCTestCase {
         XCTAssertFalse(control.isHidden)
     }
 
+    @MainActor func testExpiredEntryRestoresOnlyOwnedViewsAndRejectsLatePaint() async throws {
+        let window = SnapshotTestWindow(frame: UIScreen.main.bounds)
+        window.rootViewController = UIViewController()
+        window.makeKeyAndVisible()
+        let web = window.rootViewController!.view!
+        web.frame = window.bounds
+        window.layoutIfNeeded()
+        let visible = UIView(), hidden = UIView()
+        hidden.isHidden = true
+        let snapshots = NativeUICoveredSnapshots()
+        defer { snapshots.reset(); window.isHidden = true }
+        func send(_ request: [String: Any]) async -> [String: Any] {
+            await withCheckedContinuation { continuation in
+                snapshots.handle(request, in: web,
+                                 frames: { _, _ in ["button": CGRect(x: 20, y: 80, width: 60, height: 44)] },
+                                 views: { _ in [visible, hidden] }, complete: { continuation.resume(returning: $0) })
+            }
+        }
+        let capture = await send(["action": "prepare", "ids": ["button"], "revision": 1, "viewportWidth": Double(web.bounds.width)])
+        let token = try XCTUnwrap(capture["token"] as? String)
+        let covered = await send(["action": "cover", "token": token])
+        XCTAssertEqual(covered["shown"] as? Bool, true)
+        XCTAssertTrue(visible.isHidden)
+        try await Task.sleep(nanoseconds: 700_000_000)
+        XCTAssertFalse(visible.isHidden)
+        XCTAssertTrue(hidden.isHidden)
+        XCTAssertFalse(snapshots.hidesNativeControls)
+        XCTAssertNil(snapshots.coveringToken)
+        XCTAssertTrue(window.subviews.compactMap { $0 as? UIImageView }.isEmpty)
+        let late = await send(["action": "painted", "token": token])
+        XCTAssertEqual(late["shown"] as? Bool, false)
+        let retry = await send(["action": "cover", "token": token])
+        XCTAssertEqual(retry["shown"] as? Bool, false)
+    }
+
     @MainActor func testPreparedImageContainsVisibleWindowPixels() async throws {
         let owner = UIViewController()
         let window = SnapshotTestWindow(frame: UIScreen.main.bounds)
