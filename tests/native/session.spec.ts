@@ -1252,3 +1252,28 @@ test('Web fallback cancels an idle reveal without waiting for the native hide ac
     w.pendingInitialRelease({});
   });
 });
+
+test('pause re-covers native show without releasing placement ownership', async ({ page }) => {
+  await bindPlacement(page);
+  const application = buildSync({
+    entryPoints: ['src/index.ts'],
+    bundle: true,
+    format: 'iife',
+    globalName: 'appEngine',
+    write: false,
+  }).outputFiles[0].text;
+  await page.addScriptTag({ content: application });
+  await page.evaluate(() => (window as any).appEngine.pause());
+  await expect.poll(() => page.evaluate(() => (window as any).binding.projected)).toBe(true);
+  await page.evaluate(() => {
+    const w = window as any;
+    w.calls.length = 0;
+    w.events.shown({ slot: 1 });
+  });
+  await expect.poll(() => page.evaluate(() => (window as any).calls.filter((c: any) => c.action === 'cover').length)).toBe(1);
+  await expect.poll(() => page.evaluate(() => (window as any).binding.projected)).toBe(true);
+  expect(await page.evaluate(() => (window as any).calls.some((c: any) => c.action === 'visibility'))).toBe(false);
+  await page.evaluate(() => (window as any).appEngine.resume());
+  await expect(page.locator('#slot')).toHaveAttribute('data-native-ui-session-surface', 'native');
+  await expect.poll(() => page.evaluate(() => (window as any).binding.projected)).toBe(false);
+});
