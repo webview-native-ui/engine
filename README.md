@@ -50,6 +50,18 @@ The Engine supports **iOS and Android**. Ionic and Angular are optional. Start w
 
 Use matching Engine versions across npm and native dependencies, and retain dependency lockfiles for reproducible builds. Android placement requires API 23+, with composited snapshots available from API 26+.
 
+## Optional Ionic integration
+
+For Ionic applications using an Engine-enabled plugin, the `@webview-native-ui/engine/ionic` entry point connects Ionic overlay lifecycle events to native projection:
+
+```ts
+import { enableSupportIonicOverlays } from '@webview-native-ui/engine/ionic';
+
+enableSupportIonicOverlays();
+```
+
+Call it once during application startup unless your plugin already enables it. Applications importing it directly need `@webview-native-ui/engine` as a direct dependency. This shared framework integration coordinates coverage across plugins; each plugin retains control of its own presentation API. See [Ionic overlay support](docs/configuration/ionic-overlays.md) for setup, supported overlays and renderer helpers.
+
 ## Contributing
 
 For repository development, verification and publishing, see [development and releases](docs/maintenance.md).
