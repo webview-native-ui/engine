@@ -1,6 +1,6 @@
 import { applyNativeValues, type NativeValueBinding } from './values.js';
 import { projectionPlacement } from '../projection/placement.js';
-import { getOverlayCoordinator } from '../dom/overlays.js';
+import { getProjectionPause } from '../projection/pause.js';
 import { readScrollPlacement } from '../dom/scroll-placement.js';
 import { projectionAncestors } from '../dom/geometry.js';
 import { createWebProjection, type WebProjection } from '../projection/web.js';
@@ -72,9 +72,9 @@ export const startNativeSession = async (
   let ready = false;
   let requestedDestination: ProjectionDestination = 'native';
   let destination: ProjectionDestination = 'native';
-  const overlays = getOverlayCoordinator(document);
+  const projectionRequest = getProjectionPause(document);
   const effectiveDestination = (): ProjectionDestination =>
-    requestedDestination === 'native' && target && overlays.isCovered(target) ? 'web' : requestedDestination;
+    requestedDestination === 'native' && projectionRequest.isPaused(target) ? 'web' : requestedDestination;
   let automaticMotion = false;
   let nativeDragging = false;
   let placementPending = false;
@@ -585,7 +585,7 @@ export const startNativeSession = async (
     else if (target && records.some((record) => record.type === 'childList')) applyDestination(effectiveDestination());
   });
   observer.observe(document.documentElement, { childList: true, attributes: true, subtree: true });
-  const applyDestination = (next: ProjectionDestination, force = false) => {
+  const applyDestination = (next: ProjectionDestination, force?: ProjectionDestination) => {
     if (stopped || (!force && next === destination)) return;
     automaticMotion = false;
     nativeDragging = false;
@@ -608,6 +608,8 @@ export const startNativeSession = async (
           setVisibility();
         });
     } else if (destination === 'web') {
+      // A native show starts a new local request; the screen-wide Web request prevents restoration.
+      if (force === 'native' && projectionRequest.isPaused()) manager?.end();
       beginProjection();
       if (!manager?.token) void bridge.send({ action: 'visibility', visible: false }).catch(() => {});
       setVisibility();
@@ -617,7 +619,11 @@ export const startNativeSession = async (
     }
   };
   // Let a renderer claim a native child window during the same Ionic event dispatch.
-  const stopOverlays = overlays.subscribe(() => queueMicrotask(() => applyDestination(effectiveDestination())));
+  const stopPause = projectionRequest.subscribe(() =>
+    queueMicrotask(() => {
+      if (ready) applyDestination(effectiveDestination());
+    }),
+  );
   let events: ListenerHandle | undefined;
   const destroy = async () => {
     if (stopped) return;
@@ -626,7 +632,7 @@ export const startNativeSession = async (
     retireValueRead();
     clearPlacement();
     generation++;
-    stopOverlays();
+    stopPause();
     observer.disconnect();
     sizeObserver.disconnect();
     window.removeEventListener('resize', resized);
@@ -661,7 +667,7 @@ export const startNativeSession = async (
           if (next === 'native') placementPending = false;
           requestedDestination = next;
           void bridge.send({ action: 'destination', destination: next }).catch(() => {});
-          applyDestination(effectiveDestination(), true);
+          applyDestination(effectiveDestination(), next);
         }
         if (updated) {
           void refreshValues();
@@ -682,7 +688,7 @@ export const startNativeSession = async (
       show: () => {
         placementPending = false;
         requestedDestination = 'native';
-        applyDestination(effectiveDestination(), true);
+        applyDestination(effectiveDestination(), 'native');
       },
       hide: () => {
         requestedDestination = destination = 'none';

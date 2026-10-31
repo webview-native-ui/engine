@@ -24,6 +24,8 @@ same position: include that successful selection notification in `receiveListene
 The Engine exposes [presentation intent](../reference/state.md) separately from
 component values. Neither requires an application-side Engine wrapper. Ionic
 overlay detection is a separate, opt-in [shared initializer](ionic-overlays.md),
-not a registration argument; other frameworks report their lifecycle explicitly.
+not a registration argument. For application-owned overlays, plugins can
+[re-export pause/resume](pause-resume.md) so applications explicitly bracket their
+overlays.
 
 [Documentation overview](../README.md)
