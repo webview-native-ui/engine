@@ -146,6 +146,34 @@ const prepare = async (
     await expect(page.locator(shared ? '#projection-host' : proxy ? '#proxy' : '#source')).toHaveAttribute('data-native-ui-snapshot', /.+/);
 };
 
+test('returning images follow host motion until native acknowledges restoration', async ({ page }) => {
+  await prepare(page);
+  await page.clock.install();
+  await page.evaluate(async () => {
+    const w = window as any;
+    w.registry = w.engine.createWebProjectionSurfaces();
+    await w.registry.ensure(document.querySelector('main'), async () => w.manager);
+    w.manager.begin();
+  });
+  await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
+  await page.evaluate(() => {
+    const w = window as any,
+      host = document.querySelector('#source') as HTMLElement;
+    host.style.boxSizing = 'border-box';
+    w.manager.end();
+    w.registry.changed();
+    host.style.borderLeft = '20px solid blue';
+    w.registry.followMotion(new Map([[host, true]]));
+  });
+  await page.clock.runFor(32);
+  expect(
+    await page.evaluate(() => {
+      const host = document.querySelector('#source')!;
+      return host.querySelector('img')!.getBoundingClientRect().x - host.getBoundingClientRect().x;
+    }),
+  ).toBe(0);
+});
+
 test('prepared pixels appear without a new capture; only matching restore ACK retires them', async ({ page }) => {
   await prepare(page);
   await page.evaluate(() => (window as any).manager.begin());

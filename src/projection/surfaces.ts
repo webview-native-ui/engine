@@ -50,7 +50,9 @@ export const createWebProjectionSurfaces = <Owner extends Node, Surface extends 
     if (motionFrame || stopped || !moving.size || !doc?.defaultView) return;
     // Ancestor transforms already carry the image. Only the host's own motion needs rebasing.
     const surfaces = values().filter(
-      (surface) => (surface.token || surface.restoring) && surface.owners.some((owner) => moving.has(target(owner))),
+      (surface) =>
+        (surface.token || surface.restoring) &&
+        (surface.restoring ? surface.visibleOwners : surface.owners).some((owner) => moving.has(target(owner))),
     );
     if (!surfaces.length) return;
     motionFrame = doc.defaultView.requestAnimationFrame(() => {
