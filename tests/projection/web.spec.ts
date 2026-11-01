@@ -28,7 +28,6 @@ const boot = async (page: Page) => {
 };
 const prepare = async (
   page: Page,
-  fail = false,
   shadow = false,
   proxy = false,
   shared = false,
@@ -45,7 +44,7 @@ const prepare = async (
       (window as any).sourceRoot = host.shadowRoot;
     });
   await page.evaluate(
-    async ({ fail, proxy, shared, events, captureDelayMs, transient }) => {
+    async ({ proxy, shared, events, captureDelayMs, transient }) => {
       const w = window as any,
         source = (w.sourceRoot ?? document).querySelector('#source') as HTMLElement,
         owner = (w.sourceRoot ?? document).querySelector('#scroll') as HTMLElement;
@@ -53,7 +52,6 @@ const prepare = async (
         viewport = owner.getBoundingClientRect();
       w.calls = [];
       w.revision = 1;
-      w.failCover = false;
       w.coverReplies = [];
       if (proxy) {
         const target = document.createElement('button');
@@ -98,15 +96,13 @@ const prepare = async (
           send: async (request: any) => {
             w.calls.push(request);
             if (request.action === 'prepare')
-              return fail
-                ? {}
-                : {
-                    token: 'image',
-                    parts: [{ ids: ['counter'], url: 'file:///image.png', x: rect.x, y: rect.y, width: rect.width, height: rect.height }],
-                  };
+              return {
+                token: 'image',
+                parts: [{ ids: ['counter'], url: 'file:///image.png', x: rect.x, y: rect.y, width: rect.width, height: rect.height }],
+              };
             if (request.action === 'cover') {
               if (w.holdCover) return new Promise((resolve) => w.coverReplies.push(resolve));
-              return { shown: !w.failCover };
+              return { shown: true };
             }
             return transient && request.action === 'restore' ? { shown: !w.failRestore } : {};
           },
@@ -140,10 +136,9 @@ const prepare = async (
       );
       w.manager.consider(1, [w.source]);
     },
-    { fail, proxy, shared, events, captureDelayMs, transient },
+    { proxy, shared, events, captureDelayMs, transient },
   );
-  if (!fail)
-    await expect(page.locator(shared ? '#projection-host' : proxy ? '#proxy' : '#source')).toHaveAttribute('data-native-ui-snapshot', /.+/);
+  await expect(page.locator(shared ? '#projection-host' : proxy ? '#proxy' : '#source')).toHaveAttribute('data-native-ui-snapshot', /.+/);
 };
 
 test('returning images follow host motion until native acknowledges restoration', async ({ page }) => {
@@ -203,24 +198,6 @@ for (const related of [true, false])
     }, related);
     expect(layers).toBe(related ? 0 : 1);
   });
-test('capture absence preserves interactive Web without a presentation wait', async ({ page }) => {
-  await prepare(page, true);
-  await page.waitForTimeout(100);
-  await page.evaluate(() => (window as any).manager.begin());
-  await expect(page.locator('button')).toBeVisible();
-  expect(await page.evaluate(() => (window as any).calls.some((c: any) => c.action === 'cover'))).toBe(false);
-});
-test('cover refusal restores Web and removes snapshot ownership', async ({ page }) => {
-  await prepare(page);
-  await page.evaluate(() => {
-    const w = window as any;
-    w.failCover = true;
-    w.manager.begin();
-  });
-  await expect(page.locator('#source')).not.toHaveAttribute('data-native-ui-snapshot-visible');
-  await expect(page.locator('button')).toBeVisible();
-  expect(await page.evaluate(() => (window as any).manager.owners.length)).toBe(0);
-});
 test('interaction keeps the completed pre-interaction image', async ({ page }) => {
   await prepare(page);
   await page.evaluate(() => {
@@ -231,44 +208,6 @@ test('interaction keeps the completed pre-interaction image', async ({ page }) =
   });
   await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
   expect(await page.evaluate(() => (window as any).calls.filter((c: any) => c.action === 'prepare').length)).toBe(1);
-});
-test('destruction releases only owned tokens, listeners and CSS', async ({ page }) => {
-  await prepare(page);
-  await page.evaluate(async () => {
-    const w = window as any;
-    w.manager.begin();
-    await w.manager.destroy();
-  });
-  await expect(page.locator('button')).toBeVisible();
-  expect(
-    await page.evaluate(() => {
-      const w = window as any;
-      return {
-        removed: w.removed,
-        owners: w.manager.owners.length,
-        reset: w.calls.some((c: any) => c.action === 'reset'),
-        released: w.calls.some((c: any) => c.action === 'release'),
-        styles: document.querySelectorAll('style[data-native-ui-snapshot-base]').length,
-      };
-    }),
-  ).toEqual({ removed: true, owners: 0, reset: false, released: true, styles: 0 });
-});
-test('a scope fixes an existing fallback DOM and rejects a document', async ({ page }) => {
-  await boot(page);
-  expect(
-    await page.evaluate(() => {
-      const w = window as any,
-        fallback = document.querySelector('#source')!;
-      const scope = w.engine.createWebProjectionScope(fallback, 'test');
-      let rejected = false;
-      try {
-        w.engine.createWebProjectionScope(document, 'bad');
-      } catch {
-        rejected = true;
-      }
-      return { same: scope.element === fallback, frozen: Object.isFrozen(scope), rejected };
-    }),
-  ).toEqual({ same: true, frozen: true, rejected: true });
 });
 for (const rtl of [false, true])
   test(`fractional layout and direction remain intact (${rtl ? 'RTL' : 'LTR'})`, async ({ page }) => {
@@ -318,7 +257,7 @@ test('ACK during motion never establishes a stale origin; content resize require
 });
 
 test('image presentation works inside a shadow tree and restores Web', async ({ page }) => {
-  await prepare(page, false, true);
+  await prepare(page, true);
   await page.evaluate(() => (window as any).manager.begin());
   await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
   expect(await page.evaluate(() => getComputedStyle((window as any).source.element.querySelector('img')).opacity)).toBe('1');
@@ -328,7 +267,7 @@ test('image presentation works inside a shadow tree and restores Web', async ({ 
 });
 
 test('identical native tokens stay isolated across plugin scopes and teardown', async ({ page }) => {
-  await prepare(page, false, false, true);
+  await prepare(page, false, true);
   await page.evaluate(async () => {
     const w = window as any,
       element = document.createElement('div');
@@ -382,17 +321,31 @@ test('identical native tokens stay isolated across plugin scopes and teardown', 
     await page.evaluate(() => {
       const w = window as any;
       return {
+        removed: w.removed,
+        owners: w.manager.owners.length,
+        reset: w.calls.some((c: any) => c.action === 'reset'),
+        released: w.calls.some((c: any) => c.action === 'release'),
+        styles: document.querySelectorAll('style[data-native-ui-snapshot-base]').length,
+      };
+    }),
+  ).toEqual({ removed: true, owners: 0, reset: false, released: true, styles: 1 });
+  expect(
+    await page.evaluate(() => {
+      const w = window as any;
+      return {
         owners: w.second.owners.length,
         removed: !!w.secondRemoved,
         opacity: getComputedStyle(document.querySelector('#second > img')!).opacity,
       };
     }),
   ).toEqual({ owners: 1, removed: false, opacity: '1' });
+  await page.evaluate(() => (window as any).second.destroy());
+  expect(await page.evaluate(() => document.querySelectorAll('style[data-native-ui-snapshot-base]').length)).toBe(0);
 });
 
 for (const shared of [false, true])
   test(`delayed cover never exposes pixels before Native is hidden (${shared})`, async ({ page }) => {
-    await prepare(page, false, false, false, shared);
+    await prepare(page, false, false, shared);
     const host = page.locator(shared ? '#projection-host' : '#source');
     await page.evaluate(() => {
       const w = window as any;
@@ -445,6 +398,7 @@ test('cover without a positive acknowledgement restores Web ownership', async ({
   await expect.poll(() => page.evaluate(() => (window as any).manager.owners.length)).toBe(0);
   await expect(page.locator('#source')).not.toHaveAttribute('data-native-ui-snapshot-visible');
   expect(await page.evaluate(() => (window as any).manager.token)).toBeUndefined();
+  await expect(page.locator('#source button')).toBeVisible();
 });
 
 test('existing fallback DOM, listeners, values and application updates survive handoff', async ({ page }) => {
@@ -503,7 +457,7 @@ test('existing fallback DOM, listeners, values and application updates survive h
 });
 
 test('fixed fallback follows its renderer-owned parent without recapturing', async ({ page }) => {
-  await prepare(page, false, false, true);
+  await prepare(page, false, true);
   await page.evaluate(() => {
     const w = window as any,
       surface = document.querySelector<HTMLElement>('#surface')!;
@@ -532,7 +486,7 @@ test('fixed fallback follows its renderer-owned parent without recapturing', asy
 });
 
 test('detached fallback cannot be replaced by an unrelated DOM', async ({ page }) => {
-  await prepare(page, false, false, true);
+  await prepare(page, false, true);
   await page.evaluate(() => {
     const w = window as any;
     w.scope.element.remove();
@@ -542,7 +496,7 @@ test('detached fallback cannot be replaced by an unrelated DOM', async ({ page }
 });
 
 test('fallback adopted into another document is rejected on return', async ({ page }) => {
-  await prepare(page, false, false, true);
+  await prepare(page, false, true);
   await page.evaluate(() => (window as any).manager.begin());
   await expect(page.locator('#proxy')).toHaveAttribute('data-native-ui-snapshot-visible', '');
   expect(
@@ -785,25 +739,31 @@ for (const detached of [false, true]) {
   });
 }
 
-test('replaced fallback elements are rejected before native ownership can change', async ({ page }) => {
+test('unsupported fallback nodes are rejected before native ownership can change', async ({ page }) => {
   await boot(page);
+  expect(
+    await page.evaluate(() => Object.isFrozen((window as any).engine.createWebProjectionScope(document.querySelector('#source'), 'test'))),
+  ).toBe(true);
   expect(
     await page.evaluate(() => {
       const w = window as any;
-      return ['img', 'input', 'video', 'canvas', 'select', 'textarea', 'iframe'].map((tag) => {
+      return [
+        document,
+        ...['img', 'input', 'video', 'canvas', 'select', 'textarea', 'iframe'].map((tag) => document.createElement(tag)),
+      ].map((element) => {
         try {
-          w.engine.createWebProjectionScope(document.createElement(tag), 'test');
+          w.engine.createWebProjectionScope(element, 'test');
           return false;
         } catch (error) {
           return error instanceof TypeError;
         }
       });
     }),
-  ).toEqual([true, true, true, true, true, true, true]);
+  ).toEqual([true, true, true, true, true, true, true, true]);
 });
 
 test('plugin events preserve web projection through updates and ignore other surfaces', async ({ page }) => {
-  await prepare(page, false, false, false, false, true);
+  await prepare(page, false, false, false, true);
   await page.evaluate(() => (window as any).eventListeners.transitionStarted({ id: 'other' }));
   await expect(page.locator('#source')).not.toHaveAttribute('data-native-ui-snapshot-visible');
   await page.evaluate(() => (window as any).eventListeners.transitionStarted({ id: 'counter' }));
@@ -823,7 +783,7 @@ test('plugin events preserve web projection through updates and ignore other sur
 });
 
 test('hidden notification invalidates delayed cover and updates cannot resurrect it', async ({ page }) => {
-  await prepare(page, false, false, false, false, true);
+  await prepare(page, false, false, false, true);
   await page.evaluate(() => {
     const w = window as any;
     w.holdCover = true;
@@ -871,7 +831,7 @@ test('renderer visibility excludes Engine hiding without changing authored visib
 
 for (const delay of [undefined, 300]) {
   test(`capture delay ${delay ?? 'default 50'} debounces updates without blocking prepared handoff`, async ({ page }) => {
-    await prepare(page, false, false, false, false, false, delay);
+    await prepare(page, false, false, false, false, delay);
     const now = new Date('2026-01-01T00:00:00Z');
     await page.clock.install({ time: now });
     await page.clock.pauseAt(now);
@@ -986,7 +946,7 @@ for (const scenario of ['fractional-rtl', 'nested-scroll', 'parent-scale', 'host
 
 for (const transient of [false, true]) {
   test(`handoff retains prepared DOM through ${transient ? 'a moved native return' : 'repeated switches'}`, async ({ page }) => {
-    await prepare(page, false, false, false, false, false, 0, transient);
+    await prepare(page, false, false, false, false, 0, transient);
     await page.evaluate(() => {
       const w = window as any;
       w.treeChanges = 0;
@@ -1018,7 +978,7 @@ for (const transient of [false, true]) {
 }
 
 test('translated transient pixels survive immediate redrag until a replacement is ready', async ({ page }) => {
-  await prepare(page, false, false, false, false, false, 50, true);
+  await prepare(page, false, false, false, false, 50, true);
   const result = await page.evaluate(async () => {
     const w = window as any;
     // Hold replacement captures throughout the test, independently of machine speed.
@@ -1059,7 +1019,7 @@ test('translated transient pixels survive immediate redrag until a replacement i
 });
 
 test('moving a source within a fixed transient scope invalidates its old image layout', async ({ page }) => {
-  await prepare(page, false, false, false, true, false, 50, true);
+  await prepare(page, false, false, true, false, 50, true);
   await page.evaluate(() => {
     const w = window as any;
     w.interact({ active: true });

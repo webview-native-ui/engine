@@ -423,6 +423,7 @@ for (const fallback of ['web', 'native'] as const) {
     await expect
       .poll(() => page.evaluate(() => (window as any).calls.filter((r: any) => r.action === 'visibility').at(-1)?.visible))
       .toBe(fallback === 'native');
+    expect(await page.evaluate(() => (window as any).calls.some((call: any) => call.action === 'cover'))).toBe(false);
     if (fallback === 'native') await expect(page.locator('#slot button')).toBeHidden();
     else await expect(page.locator('#slot button')).toBeVisible();
     await page.evaluate(() => (window as any).events.hidden({ slot: 1 }));
@@ -575,20 +576,13 @@ test('native-confirmed hide removes Web pixels synchronously without another bri
   expect(hidden).toEqual({ image: false, destination: 'none' });
 });
 
-test('opaque view mode prepaints its image beneath native before scrolling', async ({ page }) => {
-  await boot(page, true, '#slot', 'native', false, 'view');
-  await expect(page.locator('#slot')).toHaveAttribute('data-native-ui-snapshot-visible', '');
-  expect(await page.evaluate(() => (window as any).calls.some((call: any) => call.action === 'cover'))).toBe(false);
-  await page.evaluate(() => (window as any).session.hide());
-  await expect(page.locator('#slot')).not.toHaveAttribute('data-native-ui-snapshot-visible');
-});
-
 test('opaque movement retains decoded pixels and local coordinates until content changes', async ({ page }) => {
   await boot(page, true, '#slot', 'native', false, 'view');
   await page.evaluate(() => {
     document.body.style.height = '3000px';
   });
   await expect(page.locator('#slot')).toHaveAttribute('data-native-ui-snapshot-visible', '');
+  expect(await page.evaluate(() => (window as any).calls.some((call: any) => call.action === 'cover'))).toBe(false);
   await page.waitForTimeout(200);
   const preparations = await page.evaluate(() => (window as any).calls.filter((c: any) => c.action === 'prepare').length);
   for (let i = 1; i <= 3; i++) {
@@ -608,6 +602,9 @@ test('opaque movement retains decoded pixels and local coordinates until content
   await expect
     .poll(() => page.evaluate(() => (window as any).calls.filter((c: any) => c.action === 'prepare').length))
     .toBeGreaterThan(preparations);
+  await expect(page.locator('#slot')).toHaveAttribute('data-native-ui-snapshot-visible', '');
+  await page.evaluate(() => (window as any).session.hide());
+  await expect(page.locator('#slot')).not.toHaveAttribute('data-native-ui-snapshot-visible');
 });
 
 test('full-view pixels remain host-local when native position lags DOM during first preparation', async ({ page }) => {
