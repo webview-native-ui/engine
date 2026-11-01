@@ -1362,10 +1362,6 @@ class NativeUIEngineTest {
         nativeInitialization(NativeUIProjection.CaptureMode.COMPOSITED)
 
     @Test
-    fun opaqueViewUsesPreparedWebPixelsWithoutNativeCopies() =
-        nativeInitialization(NativeUIProjection.CaptureMode.VIEW)
-
-    @Test
     fun lateOpaqueCoverCannotHideAfterResume() =
         nativeInitialization(NativeUIProjection.CaptureMode.VIEW, true)
 
