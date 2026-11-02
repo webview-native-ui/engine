@@ -17,3 +17,4 @@ android/**/build/
 android/**/.kotlin/
 
 ios/Tests/*.xcodeproj/
+ios/Tests/TestHost/Info.plist
