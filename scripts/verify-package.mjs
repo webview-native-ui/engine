@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 const directory = mkdtempSync(join(tmpdir(), 'engine-package-'));
 try {
   const [packed] = JSON.parse(
@@ -23,6 +24,8 @@ try {
     'LICENSE',
     'README.md',
     'WebViewNativeUIEngine.podspec',
+    'WebViewNativeUIControls.podspec',
+    'ios/Sources/WebViewNativeUIControls/NativeUIController.swift',
     'ios/Sources/WebViewNativeUIEngine/Resources/native-ui-engine.js',
   ])
     assert(files.has(file), file);
@@ -30,6 +33,12 @@ try {
     for (const path of Object.values(entry)) assert(files.has(path.replace(/^\.\//, '')), path);
   assert(!files.has('Package.swift'), 'SwiftPM resolves from Git');
   assert(![...files].some((file) => /^(tests|android|node_modules)\//.test(file)));
+  execFileSync('tar', ['-xzf', archive, '-C', directory]);
+  // Import the extracted archive without installing Capacitor, Ionic, or other dependencies.
+  const controls = await import(pathToFileURL(join(directory, 'package/dist/controls/index.js')));
+  const integration = await import(pathToFileURL(join(directory, 'package/dist/integration/index.js')));
+  assert.equal(typeof controls.createNativeUI, 'function');
+  assert.equal(typeof integration.suspendNativeUI, 'function');
   console.log('npm archive: exports, native resources and license verified');
 } finally {
   rmSync(directory, { recursive: true, force: true });

@@ -25,7 +25,7 @@ with tempfile.TemporaryDirectory(prefix='engine-central-test-') as home:
     try:
         subprocess.run(gradle + ['-PsignRelease', 'centralBundle'], cwd=root, env=env, check=True)
         base = f'io/github/webview-native-ui/engine/{version}/engine-{version}'
-        required = [base + suffix for suffix in
+        required = [f'io/github/webview-native-ui/{artifact}/{version}/{artifact}-{version}' + suffix for artifact in ['engine', 'controls'] for suffix in
                     ['.aar', '.pom', '.module', '-sources.jar', '-javadoc.jar']]
         with zipfile.ZipFile(archive) as bundle:
             names = bundle.namelist()
@@ -41,15 +41,19 @@ with tempfile.TemporaryDirectory(prefix='engine-central-test-') as home:
                 signature.write_bytes(bundle.read(name + '.asc'))
                 subprocess.run(['gpg', '--homedir', home, '--verify', str(signature), str(artifact)],
                                check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            for suffix in ['-sources.jar', '-javadoc.jar', '.aar']:
-                with zipfile.ZipFile(BytesIO(bundle.read(base + suffix))) as artifact:
-                    if suffix == '.aar':
-                        assert artifact.read('assets/native-ui-engine.js') == (root / 'runtime/native-ui-engine.js').read_bytes()
-                        artifact = zipfile.ZipFile(BytesIO(artifact.read('classes.jar')))
-                    for notice in ['LICENSE']:
-                        assert artifact.read('META-INF/webview-native-ui-engine/' + notice) == (release.parent / notice).read_bytes()
-            assert b'<name>MIT</name>' in bundle.read(base + '.pom')
-        print('Verified all five artifact signatures/checksums and MIT license.')
+            for coordinate in ['engine', 'controls']:
+                coordinate_base = f'io/github/webview-native-ui/{coordinate}/{version}/{coordinate}-{version}'
+                for suffix in ['-sources.jar', '-javadoc.jar', '.aar']:
+                    with zipfile.ZipFile(BytesIO(bundle.read(coordinate_base + suffix))) as artifact:
+                        if suffix == '.aar':
+                            if coordinate == 'engine':
+                                assert artifact.read('assets/native-ui-engine.js') == (root / 'runtime/native-ui-engine.js').read_bytes()
+                            artifact = zipfile.ZipFile(BytesIO(artifact.read('classes.jar')))
+                        assert artifact.read(f'META-INF/webview-native-ui-{coordinate}/LICENSE') == (root / 'LICENSE').read_bytes()
+                assert b'<name>MIT</name>' in bundle.read(coordinate_base + '.pom')
+            controls_pom = bundle.read(f'io/github/webview-native-ui/controls/{version}/controls-{version}.pom')
+            assert b'<artifactId>engine</artifactId>' in controls_pom
+        print('Verified signatures/checksums for both Maven artifacts and their MIT licenses.')
     finally:
         # The test-key bundle must never be mistaken for a real release candidate.
         archive.unlink(missing_ok=True)

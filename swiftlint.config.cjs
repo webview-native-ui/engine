@@ -8,6 +8,8 @@ module.exports = {
   disabled_rules: [
     // Review state-machine structure rather than forcing splits at arbitrary counts.
     'function_body_length',
+    'file_length',
+    'function_parameter_count',
     'type_body_length',
     'cyclomatic_complexity',
     // Keep existing public argument order, nested API types and geometry tuples.
@@ -17,5 +19,6 @@ module.exports = {
     // Completion handlers remain trailing closures, matching UIKit call sites.
     'multiple_closures_with_trailing_closure',
   ],
-  identifier_name: { excluded: ['id', 'x', 'y', 'w', 'h', 'to'] },
+  line_length: { ...capacitor.line_length, warning: 200, error: 240 },
+  identifier_name: { excluded: ['id', 'x', 'y', 'w', 'h', 'to', 'cg', 'vc', 'a', 'b'] },
 };

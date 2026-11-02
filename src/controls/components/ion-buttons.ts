@@ -1,0 +1,37 @@
+import { horizontalToolbarGroup, inVerticalToolbarLayout } from '../shared/toolbar-options.js';
+import type { VerticalControlAreaOptions } from '../definitions.js';
+import { createCandidate, appendItem } from '../shared/candidate.js';
+import type { Candidate, Identify } from '../shared/candidate.js';
+import { childElements, verticalBarsToolbarActions, inFixedToolbar, isVerticalBarsToolbarGroup } from '../shared/dom.js';
+import * as menuButton from './ion-menu-button.js';
+
+export const tag = 'ion-buttons';
+export const tracksMotion = true;
+
+export const read = (element: HTMLElement, id: Identify, options: VerticalControlAreaOptions = {}): Candidate | undefined => {
+  if (!inFixedToolbar(element)) return;
+  let children = childElements(element);
+  const verticalBars = inVerticalToolbarLayout(element);
+  if (verticalBars ? !isVerticalBarsToolbarGroup(element) : !horizontalToolbarGroup(element, options)) return;
+  if (children.length === 1 && (!verticalBars || children[0].matches(menuButton.tag))) return menuButton.read(element, id, options);
+  if (verticalBars) children = verticalBarsToolbarActions(element);
+  if (
+    !children.length ||
+    children.some(
+      (child) =>
+        !child.matches(`${menuButton.tag}${verticalBars ? '' : '.ios'}`) &&
+        (!child.matches(`ion-button${verticalBars ? '' : '.ios.button-clear'}`) ||
+          (!verticalBars && ((child as HTMLIonButtonElement).fill ?? 'clear') !== 'clear')),
+    )
+  )
+    return;
+  const candidate = createCandidate(element, tag, id, options);
+  if (verticalBars && children.length !== childElements(element).length) candidate.sources = children;
+  for (const child of children) {
+    const supported = child.matches(menuButton.tag)
+      ? menuButton.append(candidate, child as HTMLIonMenuButtonElement, id)
+      : appendItem(candidate, child, id);
+    if (!supported) return;
+  }
+  return candidate;
+};

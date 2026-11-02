@@ -2,8 +2,11 @@
 import PackageDescription
 let package = Package(
  name: "WebViewNativeUIEngine", platforms: [.iOS(.v15)],
- products: [.library(name: "WebViewNativeUIEngine", targets: ["WebViewNativeUIEngine"])],
+ products: [.library(name: "WebViewNativeUIEngine", targets: ["WebViewNativeUIEngine"]),
+ .library(name: "WebViewNativeUIControls", targets: ["WebViewNativeUIControls"])],
  targets: [
+  .testTarget(name: "WebViewNativeUIControlsTests", dependencies: ["WebViewNativeUIControls"], path: "ios/Tests/WebViewNativeUIControlsTests"),
+  .target(name: "WebViewNativeUIControls", dependencies: ["WebViewNativeUIEngine"], path: "ios/Sources/WebViewNativeUIControls"),
   .target(name: "WebViewNativeUIEngine", path: "ios/Sources/WebViewNativeUIEngine", resources: [.process("Resources")]),
   .testTarget(name: "WebViewNativeUIEngineTests", dependencies: ["WebViewNativeUIEngine"], path: "ios/Tests/WebViewNativeUIEngineTests")
  ])

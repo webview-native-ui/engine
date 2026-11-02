@@ -1,0 +1,44 @@
+name: NativeUIControlsHostedTests
+options:
+  deploymentTarget:
+    iOS: '17.0'
+packages:
+  NativeUI:
+    path: ../..
+targets:
+  TestHost:
+    type: application
+    platform: iOS
+    sources: [TestHost/AppDelegate.swift]
+    info:
+      path: TestHost/Info.plist
+      properties:
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+          UISceneConfigurations: {}
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.ionic.nativeui.testhost
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_VERSION: '5.0'
+  WebViewNativeUIControlsTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [WebViewNativeUIControlsTests]
+    dependencies:
+      - target: TestHost
+      - package: NativeUI
+        product: WebViewNativeUIControls
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.ionic.nativeui.hostedtests
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_VERSION: '5.0'
+schemes:
+  NativeUIControlsHostedTests:
+    build:
+      targets:
+        TestHost: all
+        WebViewNativeUIControlsTests: [test]
+    test:
+      targets: [WebViewNativeUIControlsTests]

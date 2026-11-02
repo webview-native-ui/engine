@@ -1,0 +1,427 @@
+import { controlDefault } from './shared/control-options.js';
+import { toolbarOptions } from './shared/toolbar-options.js';
+import { createDiagnostics } from './shared/diagnostics.js';
+import { createHTMLWebProjection } from './html.js';
+import { validateExtensions, type NativeUIExtension } from './extensions.js';
+import type { NativeUITransport } from './transport.js';
+import { nativeWebViewMetrics } from '../integration/index.js';
+import type { NativeUIRuntimeHandle, NativeUIRuntimeOptions, NativeUIPlugin, VerticalBarEdge, WebViewMetrics } from './definitions.js';
+import { createRuntime } from './runtime.js';
+import { bounded, boundedListener } from './shared/bridge.js';
+import { createNativeConnection, type NativeUIConnection } from './shared/connection.js';
+export interface OverlayController {
+  suspend(): Promise<() => void>;
+  destroy(): Promise<void>;
+}
+type OverlayFactory = (
+  doc: Document,
+  plugin: NativeUIPlugin,
+  options: NativeUIRuntimeOptions,
+  retain: (deferActivation?: (id: string) => boolean) => () => void,
+  nativeRail: () => boolean,
+  connection?: NativeUIConnection,
+) => Promise<OverlayController>;
+import { createVerticalBarsWebProjection } from './vertical-bars-web.js';
+import { prehideVerticalBarsToolbarSources } from './prehide.js';
+import { observeVerticalBarsModals, topModal, modalPreparing, modalPresentation } from './shared/modal.js';
+export { defineNativeUI } from './extensions.js';
+export type { NativeUIExtension, NativeUIValue } from './extensions.js';
+export type {
+  NativeUIComponent,
+  NativeUIControls,
+  NativeUIRuntimeHandle,
+  NativeUIRuntimeOptions,
+  NativeUIStatus,
+  NativeUISuspension,
+  VerticalBarEdge,
+  WebViewMetrics,
+} from './definitions.js';
+
+export const createNativeUIActivation = (transport: NativeUITransport) => {
+  const plugin = transport.plugin;
+  let active: Promise<NativeUIRuntimeHandle> | undefined;
+  let activeFailed = false;
+  let activeRoot: HTMLElement | undefined;
+  let activeRailHost: HTMLElement | undefined;
+  let activeConfiguration: string | undefined;
+  let activeExtensions: readonly NativeUIExtension[] = [];
+  let stopping: Promise<void> | undefined;
+
+  // Every stop entry point releases the activation immediately but reserves the
+  // shared native/DOM resources until its teardown has settled.
+  const stopActivation = (owner: Promise<NativeUIRuntimeHandle>, destruction: Promise<void>) => {
+    if (active !== owner) return;
+    active = undefined;
+    activeFailed = false;
+    activeConfiguration = undefined;
+    activeRoot = undefined;
+    activeRailHost = undefined;
+    activeExtensions = [];
+    stopping = destruction;
+    const release = () => {
+      if (stopping === destruction) stopping = undefined;
+    };
+    void destruction.then(release, release);
+  };
+  const web = (reason: string): NativeUIRuntimeHandle => ({
+    markForCheck: () => {},
+    getStatus: () => ({ state: 'web', projected: 0, updates: 0, reason }),
+    suspend: async () => ({ resume: async () => {} }),
+    destroy: async () => {},
+  });
+
+  const combine = (native: NativeUIRuntimeHandle, fallback: NativeUIRuntimeHandle): NativeUIRuntimeHandle => ({
+    markForCheck() {
+      native.markForCheck();
+      fallback.markForCheck();
+    },
+    getStatus() {
+      const nativeStatus = native.getStatus();
+      const fallbackStatus = fallback.getStatus();
+      return {
+        ...nativeStatus,
+        state:
+          nativeStatus.state === 'stopped' && fallbackStatus.state === 'stopped'
+            ? 'stopped'
+            : nativeStatus.projected > 0
+              ? 'native'
+              : 'web',
+        projected: nativeStatus.projected + fallbackStatus.projected,
+        updates: nativeStatus.updates + fallbackStatus.updates,
+      };
+    },
+    async suspend(options) {
+      const [nativeLease, fallbackLease] = await Promise.all([native.suspend(options), fallback.suspend(options)]);
+      return { resume: async () => void (await Promise.all([nativeLease.resume(), fallbackLease.resume()])) };
+    },
+    async destroy() {
+      await Promise.all([native.destroy(), fallback.destroy()]);
+    },
+  });
+
+  /** Wraps a runtime handle with the shared enable-lifecycle: reason, suspend hooks and idempotent destroy. */
+  const manage = (
+    handle: NativeUIRuntimeHandle,
+    lifecycle: {
+      reason?: string;
+      suspend?: () => (() => void) | undefined | Promise<(() => void) | undefined>;
+      /** Registers teardown before it starts so direct destroy and disable share the same queue. */
+      stopping?: (destruction: Promise<void>) => void;
+      destroy?: () => void | Promise<void>;
+    } = {},
+  ): NativeUIRuntimeHandle => {
+    let destruction: Promise<void> | undefined;
+    return {
+      markForCheck: () => {
+        if (!destruction) handle.markForCheck();
+      },
+      getStatus: () => (lifecycle.reason ? { ...handle.getStatus(), reason: lifecycle.reason } : handle.getStatus()),
+      async suspend(options) {
+        const lease = await handle.suspend(options);
+        const resume = await lifecycle.suspend?.();
+        return {
+          async resume() {
+            await lease.resume();
+            resume?.();
+          },
+        };
+      },
+      destroy() {
+        if (!destruction) {
+          destruction = Promise.resolve().then(async () => {
+            try {
+              await handle.destroy();
+            } finally {
+              await lifecycle.destroy?.();
+            }
+          });
+          lifecycle.stopping?.(destruction);
+        }
+        return destruction;
+      },
+    };
+  };
+
+  /** Reads the current native WebView geometry and applies it to page transitions. */
+  const configureNativeTransition = async (): Promise<WebViewMetrics> => {
+    const metrics =
+      typeof document !== 'undefined' && transport.getPlatform() === 'ios' && transport.isAvailable()
+        ? await bounded(plugin.getWebViewMetrics())
+        : { radius: 0 };
+    nativeWebViewMetrics.radius = metrics.radius;
+    return metrics;
+  };
+
+  /** Resolves a logical vertical-bar edge to the physical side for the given direction. */
+  const physicalVerticalBarEdge = (edge: Exclude<VerticalBarEdge, null>, rtl: boolean): 'left' | 'right' =>
+    (edge === 'leading') !== rtl ? 'left' : 'right';
+
+  const elementRtl = (element: Element): boolean => element.closest('[dir]')?.getAttribute('dir') === 'rtl';
+
+  const webProjection = (doc: Document, options: NativeUIRuntimeOptions, enabled: () => boolean = () => true) => {
+    const ionic = () => createVerticalBarsWebProjection(doc, options, () => options.verticalBars?.enabled !== false && enabled());
+    if (options.source === 'html') return createHTMLWebProjection(doc, options);
+    if (options.source === 'auto') return combine(ionic(), createHTMLWebProjection(doc, options));
+    return ionic();
+  };
+
+  /** Call once at application startup. Ionic markup remains the source of truth. */
+  const enableNativeUI = (options: NativeUIRuntimeOptions = {}, overlayFactory?: OverlayFactory): Promise<NativeUIRuntimeHandle> => {
+    if (typeof document === 'undefined') return Promise.resolve(web('Requires a document'));
+    const extensions = [...(options.extensions ?? [])];
+    const nativeState: NonNullable<NativeUIRuntimeOptions['nativeState']> = (options.nativeState = {});
+    try {
+      validateExtensions(extensions, document);
+    } catch (error) {
+      return Promise.reject(error);
+    }
+    const configuration = JSON.stringify([
+      options.source ?? 'ionic',
+      options.debug === true,
+      options.ionic?.auto !== false,
+      options.verticalBars?.enabled !== false,
+      options.verticalBars?.placement?.edge,
+      options.rail?.edge,
+      toolbarOptions(options, false),
+      toolbarOptions(options, true),
+      options.ionic?.verticalBars?.buttonProjection ?? 'system',
+      // Local source overrides can use this even when the startup projection is system.
+      options.ionic?.verticalBars?.buttonDefaultFill ?? 'glass',
+      ...(['tabs', 'segment', 'fab'] as const).flatMap((kind) => [
+        controlDefault(options, kind, false),
+        controlDefault(options, kind, true),
+      ]),
+      options.ionic?.verticalBars?.popover === true,
+    ]);
+    if (active && activeFailed) {
+      const previous = active;
+      stopActivation(
+        previous,
+        previous.then((handle) => handle.destroy()),
+      );
+    }
+    if (
+      active &&
+      (activeConfiguration !== configuration ||
+        activeRoot !== options.root ||
+        activeRailHost !== options.rail?.host ||
+        extensions.length !== activeExtensions.length ||
+        extensions.some((extension, index) => extension !== activeExtensions[index]))
+    )
+      return Promise.reject(
+        new Error('Native UI is already running with different controls or extensions; destroy it before changing configuration.'),
+      );
+    if (active) return active;
+    activeConfiguration = configuration;
+    activeRoot = options.root;
+    activeRailHost = options.rail?.host;
+    activeExtensions = extensions;
+    const previousStop = stopping;
+    let start: Promise<NativeUIRuntimeHandle>;
+    const stop = (destruction: Promise<void>) => stopActivation(start, destruction);
+    let releaseNative = async () => {};
+    let retired = false;
+    const pagehide = () => runtimeStopped('pagehide');
+    const runtimeStopped = (cause: 'failure' | 'pagehide') => {
+      if (cause === 'failure') {
+        // Keep the Web rail usable, but replace this degraded activation on the next enable.
+        if (active === start) activeFailed = true;
+        void start
+          .then(async () => {
+            if (!retired) document.defaultView?.addEventListener('pagehide', pagehide, { once: true });
+            await releaseNative();
+          })
+          .catch(() => {});
+        return;
+      }
+      const destruction = start.then((handle) => handle.destroy());
+      stop(destruction);
+      void destruction.catch(() => {});
+    };
+    return (start = active =
+      (async () => {
+        // Native controls and DOM ownership are shared. A replacement activation
+        // must wait until the old handle has finished clearing both surfaces.
+        if (previousStop) await previousStop.catch(() => {});
+        const platform = transport.getPlatform();
+        const diagnose = createDiagnostics(options.debug);
+        let nativeModalAnimations = () => false;
+        const stopModals = options.source === 'html' ? () => {} : observeVerticalBarsModals(document, () => nativeModalAnimations());
+        const prehide =
+          platform !== 'android' && options.source !== 'html' && options.ionic?.auto !== false
+            ? prehideVerticalBarsToolbarSources(document, () => options.verticalBars?.enabled !== false, options.root, options)
+            : undefined;
+        const fallback = (reason: string) => {
+          diagnose(`web-fallback: ${reason}`);
+          return manage(webProjection(document, options), {
+            reason,
+            suspend: () => prehide?.suspend(),
+            destroy: () => {
+              retired = true;
+              document.defaultView?.removeEventListener('pagehide', pagehide);
+              prehide?.stop();
+              stopModals();
+            },
+            stopping: stop,
+          });
+        };
+        if (platform !== 'ios' && platform !== 'android') return fallback('Requires an iOS or Android native host');
+        if (!transport.isAvailable()) return fallback('Native UI plugin is not registered');
+        let runtime: NativeUIRuntimeHandle | undefined;
+        let overlays: OverlayController | undefined;
+        let connection: NativeUIConnection | undefined;
+        let metricsListener: Awaited<ReturnType<typeof plugin.addListener>> | undefined;
+        let nativeRelease: Promise<void> | undefined;
+        releaseNative = () =>
+          (nativeRelease ??= (async () => {
+            try {
+              connection?.stop();
+              await overlays?.destroy();
+            } finally {
+              if (metricsListener) await bounded(metricsListener.remove()).catch(() => {});
+            }
+          })());
+        const cleanup = async () => {
+          retired = true;
+          try {
+            await releaseNative();
+          } finally {
+            document.defaultView?.removeEventListener('pagehide', pagehide);
+            prehide?.stop();
+            stopModals();
+          }
+        };
+        try {
+          const ordinaryControls = (['button', 'backButton', 'tabs', 'segment', 'fab'] as const).some((kind) =>
+            controlDefault(options, kind, false),
+          );
+          const capabilities = await bounded(plugin.configure({ suppressScrollEdgeEffect: ordinaryControls }));
+          if (!capabilities.supported) return fallback('Native UI is unavailable on this device');
+          if (capabilities.connectionState) connection = createNativeConnection(document, plugin);
+          const listen = connection?.listen ?? plugin.addListener.bind(plugin);
+          const unavailableExtensions = new Map<string, string>();
+          for (const extension of extensions) {
+            if (platform === 'android' && extension.placement === 'tab-accessory')
+              unavailableExtensions.set(extension.name, 'unsupported-placement: tab-accessory requires a supported iOS tab host.');
+            else if (!capabilities.extensions?.includes(extension.name))
+              unavailableExtensions.set(
+                extension.name,
+                'unregistered-extension: register this name in the native app before enabling the shell, then rebuild.',
+              );
+          }
+          if (platform === 'android') {
+            runtime = await createRuntime(
+              document,
+              plugin,
+              {
+                ...options,
+                source: 'extensions',
+                coveredSnapshots: capabilities.coveredSnapshots === true,
+                extensions,
+                unavailableExtensions,
+              },
+              () => false,
+              runtimeStopped,
+              connection,
+            );
+            runtime = combine(runtime, webProjection(document, options));
+            metricsListener = await boundedListener(
+              listen('webViewMetricsChange', () => {
+                document.defaultView?.dispatchEvent(new Event('nativeUIRefresh'));
+              }),
+            );
+            connection?.start();
+            return manage(runtime, {
+              stopping: stop,
+              destroy: cleanup,
+            });
+          }
+          let deviceEdge: VerticalBarEdge = null;
+          const ionicRoot = () => {
+            if (options.source === 'html') return null;
+            const root = options.root ?? document.body;
+            return root.closest<HTMLElement>('ion-app') ?? root.querySelector<HTMLElement>('ion-app');
+          };
+          const updateNativeEdge = () => {
+            const requested = options.verticalBars?.placement?.edge;
+            const root = ionicRoot() ?? options.root ?? document.body;
+            nativeState.edge =
+              deviceEdge && (!requested || requested === deviceEdge) ? physicalVerticalBarEdge(deviceEdge, elementRtl(root)) : undefined;
+          };
+          // Ionic layout is read-only input; device metrics determine native availability.
+          const nativeVerticalBars = () => {
+            updateNativeEdge();
+            if (options.verticalBars?.enabled === false) return false;
+            const app = ionicRoot();
+            if (!app?.classList.contains('ios-theme-vertical-bars')) return !!nativeState.edge;
+            const physicalEdge = app.classList.contains('ios-theme-vertical-bars-left') ? 'left' : 'right';
+            return physicalEdge === nativeState.edge;
+          };
+          nativeModalAnimations = () => capabilities.modalAnimation === true && nativeVerticalBars();
+          const applyMetrics = (metrics: WebViewMetrics) => {
+            if (ordinaryControls) nativeWebViewMetrics.radius = metrics.radius;
+            deviceEdge = metrics.verticalBarEdge ?? null;
+            updateNativeEdge();
+            document.defaultView?.dispatchEvent(new Event('nativeUIRefresh'));
+          };
+          metricsListener = await boundedListener(listen('webViewMetricsChange', applyMetrics));
+          await bounded(Promise.resolve().then(() => plugin.getWebViewMetrics()))
+            .then(applyMetrics)
+            .catch(() => undefined);
+          connection?.observe(async (_, restored) => {
+            if (restored)
+              await bounded(plugin.getWebViewMetrics())
+                .then(applyMetrics)
+                .catch(() => undefined);
+          });
+          const native = await createRuntime(
+            document,
+            plugin,
+            {
+              ...options,
+              extensions,
+              unavailableExtensions,
+              coveredSnapshots: capabilities.coveredSnapshots === true,
+              nativeScroll: capabilities.nativeScroll === true,
+            },
+            nativeVerticalBars,
+            runtimeStopped,
+            connection,
+          );
+          runtime = combine(
+            native,
+            webProjection(document, options, () => {
+              const modal = topModal(document);
+              return (
+                !(modal && (modalPreparing(modal) || modalPresentation(modal))) &&
+                (!nativeVerticalBars() || native.getStatus().projected === 0)
+              );
+            }),
+          );
+          if (options.ionic?.verticalBars?.popover === true && overlayFactory)
+            overlays = await overlayFactory(document, plugin, options, native.retain, nativeVerticalBars, connection);
+          connection?.start();
+          return manage(runtime, {
+            suspend: async () => {
+              const restorePrehide = prehide?.suspend();
+              const resumeOverlays = await overlays?.suspend();
+              return () => {
+                restorePrehide?.();
+                resumeOverlays?.();
+              };
+            },
+            stopping: stop,
+            destroy: cleanup,
+          });
+        } catch (error) {
+          connection?.stop();
+          await overlays?.destroy().catch(() => {});
+          await runtime?.destroy().catch(() => {});
+          if (metricsListener) await bounded(metricsListener.remove()).catch(() => {});
+          return fallback(error instanceof Error ? error.message : String(error));
+        }
+      })());
+  };
+
+  return { enableNativeUI, configureNativeTransition };
+};
