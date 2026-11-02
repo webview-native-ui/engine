@@ -49,7 +49,7 @@ with tempfile.TemporaryDirectory(prefix='engine-central-test-') as home:
                             if coordinate == 'engine':
                                 assert artifact.read('assets/native-ui-engine.js') == (root / 'runtime/native-ui-engine.js').read_bytes()
                             artifact = zipfile.ZipFile(BytesIO(artifact.read('classes.jar')))
-                        assert artifact.read('META-INF/webview-native-ui-engine/LICENSE') == (root / 'LICENSE').read_bytes()
+                        assert artifact.read(f'META-INF/webview-native-ui-{coordinate}/LICENSE') == (root / 'LICENSE').read_bytes()
                 assert b'<name>MIT</name>' in bundle.read(coordinate_base + '.pom')
             controls_pom = bundle.read(f'io/github/webview-native-ui/controls/{version}/controls-{version}.pom')
             assert b'<artifactId>engine</artifactId>' in controls_pom
