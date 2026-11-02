@@ -31,12 +31,13 @@ jobs:
       - run: npm run build
       - name: Verify release runtime matches source
         run: git diff --exit-code -- runtime/native-ui-engine.js ios/Sources/WebViewNativeUIEngine/Resources/native-ui-engine.js
+      - run: npm run test:controls
       - run: npm run test:release
       - run: npm run test:package
       - run: npx playwright install --with-deps chromium
       - run: npm test
   swift:
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -51,7 +52,15 @@ jobs:
           echo "CORDOVA_SIMULATOR=$DEVICE" >> "$GITHUB_ENV"
           xcrun simctl boot "$DEVICE" || true
           xcrun simctl bootstatus "$DEVICE" -b
-          xcodebuild -scheme WebViewNativeUIEngine -destination "platform=iOS Simulator,id=$DEVICE" CODE_SIGNING_ALLOWED=NO test
+          POPOVER_CLOSE=WebViewNativeUIControlsTests/NativeUISnapshotTests/testNativePopoverClosureNotifiesWebBeforeReopening
+          POPOVER_REPLACE=WebViewNativeUIControlsTests/NativeUISnapshotTests/testPopoverReopensAfterPresentationIdentityKeepsReplacedSource
+          xcodebuild -scheme WebViewNativeUIEngine-Package -skip-testing:"$POPOVER_CLOSE" -skip-testing:"$POPOVER_REPLACE" -destination "platform=iOS Simulator,id=$DEVICE" CODE_SIGNING_ALLOWED=NO test
+      - name: Verify hosted control presentations
+        run: |
+          brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
+          cd ios/Tests
+          xcodegen generate
+          xcodebuild -project NativeUIControlsHostedTests.xcodeproj -scheme NativeUIControlsHostedTests -destination "platform=iOS Simulator,id=$CORDOVA_SIMULATOR" CODE_SIGNING_ALLOWED=NO -only-testing:WebViewNativeUIControlsTests/NativeUISnapshotTests/testNativePopoverClosureNotifiesWebBeforeReopening -only-testing:WebViewNativeUIControlsTests/NativeUISnapshotTests/testPopoverReopensAfterPresentationIdentityKeepsReplacedSource test
       - name: Verify npm-distributed CocoaPod
         run: |
           set -euo pipefail
@@ -66,10 +75,11 @@ jobs:
           use_frameworks!
           target 'App' do
             pod 'WebViewNativeUIEngine', :path => '../engine'
+            pod 'WebViewNativeUIControls', :path => '../engine'
           end
           RUBY
           pod install --project-directory="$ENGINE_PODS_TEMP/app"
-          xcodebuild -project "$ENGINE_PODS_TEMP/app/Pods/Pods.xcodeproj" -scheme WebViewNativeUIEngine -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
+          xcodebuild -project "$ENGINE_PODS_TEMP/app/Pods/Pods.xcodeproj" -scheme WebViewNativeUIControls -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
       - run: npm run test:cordova -- ios "$CORDOVA_SIMULATOR"
   android:
     runs-on: ubuntu-latest
@@ -87,6 +97,7 @@ jobs:
       - run: npm run build
       - run: python3 scripts/native-ui-engine-release/verify.py
       - run: npm run lint:android
+      - run: android/gradlew -p android :controls:testReleaseUnitTest :controls:lintRelease
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules

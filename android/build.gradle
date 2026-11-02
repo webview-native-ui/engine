@@ -1,6 +1,7 @@
 plugins {
     id 'com.android.library' version '8.13.0'
     id 'org.jetbrains.kotlin.android' version '2.2.20'
+    id 'org.jetbrains.kotlin.plugin.compose' version '2.2.20' apply false
     id 'maven-publish'
 }
 
@@ -59,9 +60,9 @@ if (providers.gradleProperty('signRelease').isPresent()) {
 }
 
 tasks.register('centralBundle', Zip) {
-    dependsOn 'publishReleasePublicationToVerificationRepository'
+    dependsOn 'publishReleasePublicationToVerificationRepository', ':controls:publishReleasePublicationToVerificationRepository'
     from(layout.buildDirectory.dir('maven')) {
-        include "io/github/webview-native-ui/engine/${project.version}/**"
+        include "io/github/webview-native-ui/engine/${project.version}/**", "io/github/webview-native-ui/controls/${project.version}/**"
         exclude '**/maven-metadata*'
     }
     archiveFileName = "engine-${project.version}-central.zip"
@@ -98,6 +99,7 @@ dependencies { ktfmt 'com.facebook:ktfmt:0.61' }
         args '--kotlinlang-style'
         if (taskName == 'ktfmtCheck') args '--dry-run', '--set-exit-if-changed'
         args fileTree('src') { include '**/*.kt' }.files.sort()
+        args fileTree('controls/src') { include '**/*.kt' }.files.sort()
         args fileTree('../tests/cordova/plugin/src/android') { include '*.kt' }.files.sort()
     }
 }

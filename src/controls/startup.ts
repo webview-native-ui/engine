@@ -1,0 +1,74 @@
+import { createNativeUIActivation } from './activation.js';
+import type { NativeUITransport } from './transport.js';
+import type { NativeUIRuntimeOptions, NativeUIHandle, NativeUIOptions, NativeUIRuntimeHandle } from './definitions.js';
+
+export const createNativeUI = (transport: NativeUITransport) => {
+  const { enableNativeUI: activate, configureNativeTransition } = createNativeUIActivation(transport);
+  type OverlayFactory = Parameters<typeof activate>[1];
+  const handles = new WeakMap<NativeUIRuntimeHandle, NativeUIHandle>();
+
+  /** Start one shell. Partial options override defaults; markup owns individual placement. */
+  const startNativeUI = async (input: NativeUIOptions = {}, overlayFactory?: OverlayFactory): Promise<NativeUIHandle> => {
+    const root = input.root ?? (typeof document === 'undefined' ? undefined : document.body);
+    const bars = { enabled: true, ...input.verticalBars };
+    const host = bars.placement?.webHost;
+    if (root && (!root.isConnected || root.ownerDocument !== document))
+      throw new Error('Native UI requires a connected root in the current document');
+    if (host && (!host.isConnected || host.ownerDocument !== document || root?.contains(host) || host.contains(root!)))
+      throw new Error('The Web rail host must be connected in the current document and outside the source root');
+    const options: NativeUIRuntimeOptions = {
+      ...input,
+      root,
+      source: 'auto',
+      verticalBars: bars,
+      rail: host ? { host, edge: bars.placement?.edge === 'leading' ? 'left' : 'right' } : undefined,
+    };
+    const runtime = await activate(options, overlayFactory);
+    const existing = handles.get(runtime);
+    if (existing) return existing;
+    let stopped = false;
+    let queue = Promise.resolve();
+    const change = (enabled: boolean) => {
+      const operation = queue.then(async () => {
+        if (stopped) throw new Error('Native UI has been destroyed');
+        if (bars.enabled === enabled) return;
+        // Retire both surfaces before changing ownership. Resume also waits for native reconciliation.
+        const lease = await runtime.suspend();
+        try {
+          if (stopped) throw new Error('Native UI has been destroyed');
+          bars.enabled = enabled;
+          root?.ownerDocument.defaultView?.dispatchEvent(new Event('nativeUIRefresh'));
+        } finally {
+          await lease.resume();
+        }
+      });
+      queue = operation.catch(() => {});
+      return operation;
+    };
+    let destruction: Promise<void> | undefined;
+    const destroy = runtime.destroy.bind(runtime);
+    const handle: NativeUIHandle = {
+      markForCheck: runtime.markForCheck.bind(runtime),
+      getStatus: runtime.getStatus.bind(runtime),
+      suspend: runtime.suspend.bind(runtime),
+      enableVerticalControlArea: () => change(true),
+      disableVerticalControlArea: () => change(false),
+      destroy() {
+        if (!destruction) {
+          stopped = true;
+          // Reserve native teardown immediately, preserving the shared startup queue.
+          destruction = destroy();
+        }
+        return destruction;
+      },
+    };
+    const managed = Object.assign(runtime, handle);
+    handles.set(runtime, managed);
+    return managed;
+  };
+
+  /** Enable the shared standard shell without loading the optional Ionic overlay adapter. */
+  const enableNativeUI = (options: NativeUIOptions = {}): Promise<NativeUIHandle> => startNativeUI(options);
+
+  return { startNativeUI, enableNativeUI, configureNativeTransition };
+};

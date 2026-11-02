@@ -1,6 +1,6 @@
 {
   "name": "@webview-native-ui/engine",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "Native UI placement, scroll tracking, and Web projection for Capacitor and Cordova plugin maintainers.",
   "type": "module",
   "license": "MIT",
@@ -16,6 +16,18 @@
     "./ionic": {
       "types": "./dist/ionic.d.ts",
       "import": "./dist/ionic.js"
+    },
+    "./controls": {
+      "types": "./dist/controls/index.d.ts",
+      "import": "./dist/controls/index.js"
+    },
+    "./controls/ionic": {
+      "types": "./dist/controls/ionic.d.ts",
+      "import": "./dist/controls/ionic.js"
+    },
+    "./integration": {
+      "types": "./dist/integration/index.d.ts",
+      "import": "./dist/integration/index.js"
     }
   },
   "files": [
@@ -24,7 +36,9 @@
     "WebViewNativeUIEngine.podspec",
     "README.md",
     "LICENSE",
-    "docs"
+    "docs",
+    "src",
+    "WebViewNativeUIControls.podspec"
   ],
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.json && node scripts/build-runtime.mjs",
@@ -41,7 +55,8 @@
     "lint:swift": "swiftlint version && node-swiftlint lint --strict --no-cache",
     "format:swift": "swiftlint version && node-swiftlint --fix --format --no-cache",
     "lint:android": "android/gradlew -p android ktfmtCheck lintRelease",
-    "format:kotlin": "android/gradlew -p android ktfmtFormat"
+    "format:kotlin": "android/gradlew -p android ktfmtFormat",
+    "test:controls": "vitest run"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -53,18 +68,28 @@
     "prettier": "^3.6.2",
     "swiftlint": "^2.0.0",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.72.1"
+    "typescript-eslint": "^8.72.1",
+    "@ionic/core": "^8.8.1",
+    "vitest": "^4.0.0",
+    "jsdom": "^26.0.0"
   },
   "publishConfig": {
     "access": "public"
   },
   "peerDependencies": {
-    "@capacitor/core": ">=8.0.0 <9"
+    "@capacitor/core": ">=8.0.0 <9",
+    "@ionic/core": ">=8.8.1 <10"
   },
   "types": "./dist/index.d.ts",
   "peerDependenciesMeta": {
     "@capacitor/core": {
       "optional": true
+    },
+    "@ionic/core": {
+      "optional": true
     }
+  },
+  "dependencies": {
+    "@rdlabo/ionic-theme-utils": "0.1.5"
   }
 }

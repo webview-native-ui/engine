@@ -49,8 +49,10 @@ jobs:
         env:
           RELEASE_VERSION: ${{ inputs.version }}
         run: |
-          code=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' "https://repo.maven.apache.org/maven2/io/github/webview-native-ui/engine/$RELEASE_VERSION/engine-$RELEASE_VERSION.pom")
-          test "$code" = 404 || { echo "Central returned HTTP $code; refusing publication"; exit 1; }
+          for artifact in engine controls; do
+            code=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' "https://repo.maven.apache.org/maven2/io/github/webview-native-ui/$artifact/$RELEASE_VERSION/$artifact-$RELEASE_VERSION.pom")
+            test "$code" = 404 || { echo "Central returned HTTP $code for $artifact; refusing publication"; exit 1; }
+          done
       - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
         with:
           distribution: temurin

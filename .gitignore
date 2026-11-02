@@ -12,3 +12,8 @@ android/local.properties
 android/.kotlin/
 runtime/native-ui-engine.js
 ios/Sources/WebViewNativeUIEngine/Resources/native-ui-engine.js
+
+android/**/build/
+android/**/.kotlin/
+
+ios/Tests/*.xcodeproj/

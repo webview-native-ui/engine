@@ -69,3 +69,5 @@ For repository development, verification and publishing, see [development and re
 ## License
 
 [MIT](LICENSE). Commercial use, modification and redistribution are permitted with the license's notice and attribution requirements. The Engine's license does not change the licenses of applications or plugins that depend on it.
+
+For the optional shared control runtime and adapter boundaries, see [shared controls](docs/controls.md).

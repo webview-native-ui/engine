@@ -9,7 +9,7 @@ export default [
       'dist/**',
       '.build/**',
       '.swiftpm/**',
-      'android/build/**',
+      'android/**/build/**',
       'android/.gradle/**',
       'android/.kotlin/**',
       'test-results/**',

@@ -1,0 +1,310 @@
+import { getUnprojectedVisibility } from '../../index.js';
+
+import { fadeMarker } from './crossfade.js';
+import { modalUsesVerticalBars } from './modal.js';
+
+import type { Frame } from '../definitions.js';
+
+export const marker = 'data-native-ui-projected';
+// Scoped runtimes (Stencil slot emulation) patch child accessors on upgraded
+// elements and may report none before hydration; the prototype getter still
+// reports the real light DOM.
+const childNodesGet = typeof Node === 'undefined' ? undefined : Object.getOwnPropertyDescriptor(Node.prototype, 'childNodes')?.get;
+export const childNodesOf = (element: Element): Node[] =>
+  childNodesGet ? Array.from(childNodesGet.call(element)) : Array.from(element.childNodes);
+export const childElements = (element: Element): HTMLElement[] =>
+  childNodesOf(element).filter(
+    (node) => node.nodeType === 1 && !(node as Element).hasAttribute('data-native-ui-projection-node'),
+  ) as HTMLElement[];
+export const prehiddenClass = 'native-ui-prehidden';
+export const prehideRootClass = 'native-ui-prehide';
+export const rejectedClass = 'native-ui-rejected';
+export const verticalBarsBackWebClass = 'ios-theme-vertical-bars-back-web-owned';
+const prehideClasses = new Set([prehiddenClass, prehideRootClass]);
+export const prehideOnlyMutation = (record: MutationRecord): boolean => {
+  if (record.attributeName !== 'class' || record.oldValue === null) return false;
+  const withoutPrehide = (value: string) =>
+    value
+      .split(/\s+/)
+      .filter((name) => name && !prehideClasses.has(name))
+      .join(' ');
+  return withoutPrehide(record.oldValue) === withoutPrehide((record.target as Element).getAttribute('class') ?? '');
+};
+
+export const withoutPrehide = <T>(element: HTMLElement, read: () => T): T => {
+  const changed: HTMLElement[] = [];
+  for (let current: HTMLElement | null = element; current; current = current.parentElement) {
+    if (current.classList.contains(prehiddenClass)) {
+      current.classList.remove(prehiddenClass);
+      changed.push(current);
+    }
+  }
+  const root = element.ownerDocument.documentElement;
+  if (element.matches('ion-back-button') && root.classList.contains(prehideRootClass)) {
+    root.classList.remove(prehideRootClass);
+    changed.push(root);
+  }
+  try {
+    return read();
+  } finally {
+    changed.forEach((current) => current.classList.add(current === root ? prehideRootClass : prehiddenClass));
+  }
+};
+export const isDark = (style: CSSStyleDeclaration): boolean => {
+  const themeScheme = style.getPropertyValue('--ios27-color-scheme').trim();
+  if (themeScheme) return themeScheme === 'dark';
+  const background = style.getPropertyValue('--ion-background-color-rgb').match(/\d+/g)?.slice(0, 3).map(Number);
+  if (background?.length === 3) return background[0] * 0.2126 + background[1] * 0.7152 + background[2] * 0.0722 < 128;
+  const schemes = (style.colorScheme ?? '').split(/\s+/);
+  if (schemes.includes('dark') && !schemes.includes('light')) return true;
+  if (schemes.includes('light') && !schemes.includes('dark')) return false;
+  return typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-color-scheme: dark)').matches;
+};
+const permanentlyExcluded = '.ios-theme-disabled, .ios26-disabled, .ion-cloned-element, [hidden], [inert]';
+export const excluded = `${permanentlyExcluded}, .ion-page-hidden, .ion-page-invisible`;
+const enteringPages = new WeakSet<HTMLElement>();
+export const setVerticalBarsEnteringPage = (page: HTMLElement, entering: boolean): void => {
+  if (entering) enteringPages.add(page);
+  else enteringPages.delete(page);
+};
+export const verticalBarsEnteringPage = (element: HTMLElement): HTMLElement | undefined => {
+  const page = element.closest<HTMLElement>('.ion-page-invisible');
+  return page && enteringPages.has(page) && page.closest('ion-app.ios-theme-vertical-bars') ? page : undefined;
+};
+export const createVerticalBarsPageState = () => {
+  const departed = new WeakSet<HTMLElement>();
+  return {
+    isDeparted(element: HTMLElement, includeHorizontal = false): boolean {
+      const page = element.closest<HTMLElement>('.ion-page');
+      return !!page && departed.has(page) && (includeHorizontal || !!element.closest('ion-app.ios-theme-vertical-bars'));
+    },
+    lifecycle(event: Event): void {
+      // Avoid instanceof so stale listeners stay safe after global teardown.
+      const page = event.target && (event.target as Node).nodeType === 1 ? (event.target as HTMLElement) : undefined;
+      if (!page?.matches('.ion-page')) return;
+      const entering = event.type === 'ionViewWillEnter';
+      if (entering || event.type === 'ionViewDidEnter') departed.delete(page);
+      else if (event.type === 'ionViewWillLeave' || event.type === 'ionViewDidLeave') departed.add(page);
+      setVerticalBarsEnteringPage(page, entering);
+    },
+    cancel(entering?: HTMLElement, leaving?: HTMLElement): void {
+      if (entering) {
+        departed.add(entering);
+        setVerticalBarsEnteringPage(entering, false);
+      }
+      if (leaving) departed.delete(leaving);
+    },
+  };
+};
+const disabledButtonGroup = 'ion-buttons:is(.ios-theme-disabled, .ios26-disabled)';
+const nativeUIDisabledSelector = '.native-ui-disabled, [data-native-ui="disabled"]';
+
+export const isDisabledButtonGroupChild = (element: HTMLElement): boolean =>
+  element.matches('ion-button') && element.parentElement?.matches(disabledButtonGroup) === true;
+
+const verticalBarsTags = new Set(['ion-button', 'ion-back-button', 'ion-buttons', 'ion-menu-button', 'ion-tab-bar']);
+
+export const isVerticalBarsSource = (element: HTMLElement): boolean =>
+  !element.closest('[data-native-ui-placement="element"]') &&
+  (element.matches(
+    '[data-native-ui-placement="rail"][data-native-ui="button"], [data-native-ui-placement="rail"][data-native-ui="back-button"]',
+  ) ||
+    (verticalBarsTags.has(element.localName) &&
+      (element.matches('ion-tab-bar') || verticalBarsOwned(element)) &&
+      !element.closest('ion-menu, ion-popover') &&
+      modalUsesVerticalBars(element) &&
+      !!element.closest('ion-app.ios-theme-vertical-bars')));
+
+// Condense headers are the scrolling duplicate of a page's fixed header.
+// Keep this exclusion aligned with the entering-back prehide rule in vertical-bars.scss.
+const nonFixedToolbarSurface =
+  'ion-header[collapse="condense"], ion-header.header-collapse-condense, ion-content ion-header, ion-content ion-footer';
+
+export const isVerticalBarsBackPosition = (element: HTMLElement): boolean => {
+  if (element.closest(nonFixedToolbarSurface)) return false;
+  const page = element.closest('.ion-page');
+  if (!page) return true;
+  const candidates = Array.from(page.querySelectorAll<HTMLElement>('ion-back-button')).filter(
+    (back) =>
+      back.closest('.ion-page') === page &&
+      !back.matches('.ion-cloned-element') &&
+      !back.closest(`${nonFixedToolbarSurface}, ion-menu, ion-popover`) &&
+      modalUsesVerticalBars(back),
+  );
+  const rank = (back: HTMLElement) =>
+    inFixedToolbar(back) ? 0 : back.closest('ion-header ion-toolbar, ion-footer ion-toolbar') ? 1 : back.closest('ion-toolbar') ? 3 : 2;
+  const best = candidates.reduce<HTMLElement | undefined>(
+    (winner, back) => (!winner || rank(back) < rank(winner) ? back : winner),
+    undefined,
+  );
+  return best === element;
+};
+
+export const preferredVerticalBarsBack = <T extends HTMLElement>(elements: T[], doc: Document): T | undefined => {
+  const pages = Array.from(doc.querySelectorAll('.ion-page'));
+  const pageOrder = (element: Element) => pages.indexOf(element.closest('.ion-page')!);
+  return elements.sort((a, b) => pageOrder(b) - pageOrder(a) || Number(!!b.closest('ion-header')) - Number(!!a.closest('ion-header')))[0];
+};
+
+const excludedBy = (element: HTMLElement, selector: string): boolean => {
+  const owner = element.closest<HTMLElement>(selector);
+  return !!owner && !(element.parentElement === owner && isDisabledButtonGroupChild(element));
+};
+
+export const isPermanentlyExcluded = (element: HTMLElement): boolean => excludedBy(element, permanentlyExcluded);
+export const isExcluded = (element: HTMLElement, enteringPage?: HTMLElement): boolean =>
+  excludedBy(element, `${permanentlyExcluded}, .ion-page-hidden`) || (!!element.closest('.ion-page-invisible') && !enteringPage);
+
+// A shared native surface must not cover an opted-out descendant either.
+export const isNativeUIDisabled = (element: Element): boolean =>
+  !!element.closest(nativeUIDisabledSelector) || !!element.querySelector(nativeUIDisabledSelector);
+
+export const isVerticalBarsToolbarActionShape = (element: HTMLElement): boolean =>
+  element.matches('ion-menu-button') ||
+  (element.matches('ion-button') && !!element.querySelector('ion-icon[slot="icon-only"], svg[slot="icon-only"]'));
+
+// Placement belongs to the DOM identity for one routed-page epoch. Changes to
+// content/disabled state affect rendering, never its chosen surface.
+const verticalBarsPlacement = new WeakMap<HTMLElement, boolean>();
+export const setVerticalBarsPlacement = (element: HTMLElement, rail: boolean): void => {
+  verticalBarsPlacement.set(element, rail);
+};
+export const clearVerticalBarsPlacement = (element: HTMLElement): void => {
+  verticalBarsPlacement.delete(element);
+};
+// Explicit Web placement remains authoritative even when added after initial capture.
+export const verticalBarsOwned = (element: HTMLElement): boolean =>
+  verticalBarsPlacement.get(element) === true &&
+  !element.closest('ion-buttons.ios-theme-horizontal-only, ion-button.ios-theme-horizontal-only');
+
+export const isVerticalBarsToolbarAction = (element: HTMLElement): boolean =>
+  verticalBarsOwned(element) && !isExcluded(element, verticalBarsEnteringPage(element)) && !isNativeUIDisabled(element);
+
+const overlays = 'ion-menu, ion-popover';
+
+/** Shared eligibility for a toolbar action candidate, before placement is decided (prehide) or consumed (projection). */
+export const verticalBarsActionCandidate = (element: HTMLElement): boolean =>
+  !element.matches('[data-native-ui="button"], [data-native-ui="back-button"]') &&
+  !element.querySelector('[data-native-ui="button"], [data-native-ui="back-button"]') &&
+  inFixedToolbar(element) &&
+  !element.closest('ion-buttons.ios-theme-horizontal-only, ion-button.ios-theme-horizontal-only') &&
+  !isPermanentlyExcluded(element) &&
+  !isNativeUIDisabled(element) &&
+  !element.closest(overlays) &&
+  modalUsesVerticalBars(element);
+
+/** Shared eligibility for a back-button candidate; the back button may sit outside a fixed toolbar. */
+export const verticalBarsBackCandidate = (element: HTMLElement): boolean =>
+  !element.hasAttribute('data-native-ui') &&
+  isVerticalBarsBackPosition(element) &&
+  !element.closest('ion-buttons.ios-theme-horizontal-only') &&
+  !isPermanentlyExcluded(element) &&
+  !isNativeUIDisabled(element) &&
+  !element.closest(overlays) &&
+  modalUsesVerticalBars(element);
+
+export const verticalBarsToolbarActions = (element: HTMLElement): HTMLElement[] =>
+  // Back buttons use the dedicated rail slot; they are never toolbar actions.
+  childElements(element).filter((child) => !child.matches('ion-back-button') && isVerticalBarsToolbarAction(child));
+
+export const isVerticalBarsToolbarGroup = (element: HTMLElement): boolean => {
+  return (
+    element.matches('ion-buttons') &&
+    verticalBarsOwned(element) &&
+    !element.matches('.ios-theme-disabled, .ios26-disabled') &&
+    !isNativeUIDisabled(element)
+  );
+};
+
+export const toolbarTextMarker = 'data-native-ui-toolbar-text';
+
+export const syncToolbarText = (doc: Document): void => {
+  for (const toolbar of Array.from(
+    doc.querySelectorAll<HTMLElement>(`ion-app.ios-theme-vertical-bars ion-toolbar, ion-toolbar[${toolbarTextMarker}]`),
+  )) {
+    toolbar.toggleAttribute(
+      toolbarTextMarker,
+      !!toolbar.closest('ion-app.ios-theme-vertical-bars') &&
+        childNodesOf(toolbar).some((node) => node.nodeType === Node.TEXT_NODE && !!node.textContent?.trim()),
+    );
+  }
+};
+
+export const activateProjectedElement = (element: HTMLElement): void => {
+  const target = element.matches('ion-button, ion-back-button, ion-menu-button')
+    ? element.shadowRoot?.querySelector<HTMLElement>('[part~="native"]')
+    : undefined;
+  (target ?? element).click();
+};
+
+export const unprojected = <T>(elements: Iterable<HTMLElement>, read: () => T): T => {
+  const list = Array.from(elements);
+  const hidden = list.filter((element) => element.hasAttribute(marker));
+  const snapshotHidden = list.filter((element) => element.hasAttribute('data-native-ui-snapshot-source'));
+  const webHidden = list.filter((element) => element.hasAttribute('data-native-ui-web-source'));
+  hidden.forEach((element) => element.removeAttribute(marker));
+  snapshotHidden.forEach((element) => element.removeAttribute('data-native-ui-snapshot-source'));
+  webHidden.forEach((element) => element.removeAttribute('data-native-ui-web-source'));
+  try {
+    return read();
+  } finally {
+    hidden.forEach((element) => element.setAttribute(marker, ''));
+    snapshotHidden.forEach((element) => element.setAttribute('data-native-ui-snapshot-source', ''));
+    webHidden.forEach((element) => element.setAttribute('data-native-ui-web-source', ''));
+  }
+};
+
+const readVisible = (element: HTMLElement, allowOutsideViewport: boolean): boolean => {
+  const enteringPage = isVerticalBarsSource(element) ? verticalBarsEnteringPage(element) : undefined;
+  if (!element.isConnected || isExcluded(element, enteringPage) || isNativeUIDisabled(element)) return false;
+  for (let current: HTMLElement | null = element; current; current = current.parentElement) {
+    const style = getComputedStyle(current);
+    if (
+      style.display === 'none' ||
+      (style.visibility !== 'visible' && getUnprojectedVisibility(current) !== 'visible') ||
+      (Number(style.opacity) === 0 && !current.hasAttribute(fadeMarker) && current !== enteringPage)
+    )
+      return false;
+    // Ordinary controls on moving/collapsing/custom transformed surfaces stay in Web coordinates.
+    // VerticalBars rail controls are placed independently of their Web coordinates and must remain
+    // owned while Ionic transforms the content behind an open menu.
+    if (
+      !allowOutsideViewport &&
+      style.transform !== 'none' &&
+      !new DOMMatrixReadOnly(style.transform).isIdentity &&
+      current !== element &&
+      !current.matches('ion-tab-bar')
+    )
+      return false;
+  }
+  const rect = element.getBoundingClientRect();
+  return (
+    rect.width > 0 &&
+    rect.height > 0 &&
+    (allowOutsideViewport || (rect.left >= -1 && rect.top >= -1 && rect.right <= innerWidth + 1 && rect.bottom <= innerHeight + 1))
+  );
+};
+
+export const visible = (element: HTMLElement, allowOutsideViewport = false): boolean =>
+  withoutPrehide(element, () => readVisible(element, allowOutsideViewport));
+
+export const frame = (rect: DOMRect, origin?: DOMRect): Frame => ({
+  x: rect.x - (origin?.x ?? 0),
+  y: rect.y - (origin?.y ?? 0),
+  width: rect.width,
+  height: rect.height,
+});
+
+export const text = (element: Element): string => {
+  if (element.matches('ion-icon, svg, ion-badge, .ios27-segment-lens, .ion-cloned-element')) return '';
+  return childNodesOf(element)
+    .map((node) => (node.nodeType === 3 ? node.textContent : node.nodeType === 1 ? text(node as Element) : ''))
+    .join('')
+    .replace(/\s+/g, ' ')
+    .trim();
+};
+
+export const inFixedToolbar = (element: Element): boolean => {
+  const edge = element.closest('ion-toolbar')?.parentElement;
+  return !!edge?.matches('ion-header, ion-footer') && !element.closest('ion-content') && !element.closest(nonFixedToolbarSurface);
+};

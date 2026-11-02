@@ -1,0 +1,64 @@
+plugins {
+    id 'com.android.library'
+    id 'org.jetbrains.kotlin.android'
+    id 'org.jetbrains.kotlin.plugin.compose'
+    id 'maven-publish'
+}
+group = rootProject.group
+version = rootProject.version
+android {
+    namespace 'io.github.webview_native_ui.controls'
+    compileSdk 36
+    defaultConfig { minSdk 24 }
+    buildFeatures { compose true }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+    kotlinOptions { jvmTarget = '17' }
+    publishing { singleVariant('release') { withSourcesJar(); withJavadocJar() } }
+}
+dependencies {
+    api project(':')
+    api platform('androidx.compose:compose-bom:2025.10.00')
+    api 'androidx.compose.ui:ui'
+    api 'androidx.compose.foundation:foundation'
+    api 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2'
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.json:json:20250517'
+}
+afterEvaluate {
+    publishing {
+        publications {
+            release(MavenPublication) {
+                from components.release
+                artifactId = 'controls'
+                pom {
+                    name = 'WebView Native UI Controls'
+                    description = 'Shared native control rendering for WebView hosts.'
+                    url = 'https://github.com/webview-native-ui/engine'
+                    licenses { license { name = 'MIT'; url = 'https://opensource.org/license/mit' } }
+                    developers { developer { id = 'rdlabo'; name = 'rdlabo'; url = 'https://github.com/rdlabo' } }
+                    scm { url = 'https://github.com/webview-native-ui/engine'; connection = 'scm:git:https://github.com/webview-native-ui/engine.git'; developerConnection = 'scm:git:ssh://git@github.com/webview-native-ui/engine.git' }
+                }
+            }
+        }
+        repositories { maven { name = 'verification'; url = rootProject.layout.buildDirectory.dir('maven') } }
+    }
+}
+
+if (providers.gradleProperty('signRelease').isPresent()) {
+    apply plugin: 'signing'
+    signing {
+        useInMemoryPgpKeys(providers.environmentVariable('MAVEN_SIGNING_KEY').get(), providers.environmentVariable('MAVEN_SIGNING_PASSWORD').getOrElse(''))
+    }
+    afterEvaluate { signing.sign(publishing.publications.release) }
+}
+def licenseResources = tasks.register('prepareLicenseResources', Sync) {
+    from('../..') { include 'LICENSE' }
+    into(layout.buildDirectory.dir('generated/license-resources/META-INF/webview-native-ui-engine'))
+}
+android.sourceSets.main.resources.srcDir(layout.buildDirectory.dir('generated/license-resources'))
+tasks.matching { it.name.startsWith('process') && it.name.endsWith('JavaRes') }.configureEach { dependsOn licenseResources }
+tasks.withType(Jar).configureEach {
+    if (name in ['sourceReleaseJar', 'javaDocReleaseJar']) {
+        from('../..') { include 'LICENSE'; into 'META-INF/webview-native-ui-engine' }
+    }
+}
