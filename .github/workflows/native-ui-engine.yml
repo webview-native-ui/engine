@@ -108,11 +108,11 @@ jobs:
           api-level: 35
           arch: x86_64
           script: |
-            android/gradlew -p android connectedDebugAndroidTest
+            android/gradlew -p android :connectedDebugAndroidTest
             npm run test:cordova -- android emulator-5554
       - name: Verify unsupported capture fallback on minimum Android
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 23
           arch: x86
-          script: android/gradlew -p android connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=io.github.webview_native_ui.engine.NativeUIEngineTest#unsupportedCaptureKeepsNativeViewOnApi23
+          script: android/gradlew -p android :connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=io.github.webview_native_ui.engine.NativeUIEngineTest#unsupportedCaptureKeepsNativeViewOnApi23
