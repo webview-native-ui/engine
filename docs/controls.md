@@ -26,6 +26,34 @@ re-exports that module. Resolve a single Engine version in the application; do n
 copy of integration into the theme or adapter. The `/controls` entry does not load Ionic runtime code;
 load `/controls/ionic` only when opting into Ionic overlays.
 
+## External reserved regions
+
+Applications supply viewport geometry; Engine does not import or call capacitor-foldable.
+Pass its `getReservedRegions().regions` through `verticalBars.reservedRegions` at startup,
+or call `handle.setReservedRegions(regions)` after posture, bar placement or viewport changes.
+The public handle updates the running shell without restarting native controls.
+
+```ts
+// The embedding adapter or application supplies geometry; Engine reads no device API.
+const ui = await enableNativeUI({ verticalBars: { reservedRegions: regions } });
+ui.setReservedRegions(updatedRegions);
+ui.setReservedRegions(); // clear the supplied geometry
+```
+
+`reservedVerticalBarBoundary(regions, physicalEdge, width, height)` is a pure helper
+exported from `/integration`. It resolves the active top reservation on the physical
+rail edge using explicit viewport dimensions. Missing or unusable regions return
+`undefined`; the applying adapter or theme owns defaults. No DOM or provider is read.
+
+Region frames use Web viewport CSS pixels and already include OS interaction margins;
+Engine does not add `margins` again. Only active top-edge occlusions on the current rail
+contribute to the resolved top origin. Missing, empty or unusable regions leave the
+origin undefined so the applying layout can retain its defaults. Calling
+`setReservedRegions()` clears the supplied geometry; calls after `destroy()` have no effect.
+
+These APIs provide layout data only. Modal ownership timing and image capture are
+unchanged in this change.
+
 ## Verification and release order
 
 Run `npm run test:controls` for the migrated control tests and `npm test` for generic projection.

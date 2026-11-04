@@ -1,3 +1,5 @@
+import type { NativeUIReservedRegion } from '../integration/reserved-regions.js';
+export type { NativeUIReservedRegion } from '../integration/reserved-regions.js';
 import type { WebProjectionTransport } from '../index.js';
 import type { NativeUIExtension } from './extensions.js';
 import type { NativeUIListenerHandle as PluginListenerHandle } from './transport.js';
@@ -72,6 +74,8 @@ export interface NativeUIRuntimeOptions extends NativeUIOptions {
 
 /** A running shell. Placement changes preserve all other startup settings. */
 export interface NativeUIHandle extends NativeUIRuntimeHandle {
+  /** Replace externally supplied viewport regions. Omit to clear the supplied geometry. No-op after destroy. */
+  setReservedRegions(regions?: readonly NativeUIReservedRegion[]): void;
   /** Enable rail projection when available, preserving other settings. Rejects after destroy. */
   enableVerticalControlArea(): Promise<void>;
   /** Restore rail sources to the Web without stopping ordinary native controls. Rejects after destroy. */
@@ -79,6 +83,9 @@ export interface NativeUIHandle extends NativeUIRuntimeHandle {
 }
 
 export interface NativeUIVerticalBarsOptions {
+  /** Initial OS-reserved regions. Update through handle.setReservedRegions after posture/size changes.
+   */
+  reservedRegions?: readonly NativeUIReservedRegion[];
   /** Defaults to true. Availability is always determined separately. */
   enabled?: boolean;
   /** Placement preference, not a declaration of device capability. */
