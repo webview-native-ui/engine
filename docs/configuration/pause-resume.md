@@ -32,10 +32,16 @@ call `resume()` on dismissal, cancellation or failure. Use one pair per overlay,
 even with multiple plugins; nested overlays each need their own pair.
 
 A pause replaces visible native surfaces with prepared Web images or their normal
-Web fallback. Hidden surfaces stay hidden. The final matching `resume()` releases
+Web fallback. Hidden surfaces stay hidden. The final `resume()` releases
 the request, preserving each plugin's presentation intent and remaining Ionic
-overlay coverage. An extra `resume()` at zero has no effect.
+overlay coverage.
+
+The counter does not track callers or pair individual calls. An extra `resume()`
+while paused can release another overlay's request; only a `resume()` at zero has
+no effect. Each owner must release exactly once for each pause it requested.
 
 Both functions return immediately, without waiting for native acknowledgments or
-painting. Calling `pause()` just before a blocking `window.alert()` therefore does
+painting. Returning from `pause()` does not mean native UI has already moved
+behind the Web overlay; it may remain in front until the handoff completes.
+Calling `pause()` just before a blocking `window.alert()` therefore does
 not guarantee a completed handoff. They do not detect custom overlays automatically.

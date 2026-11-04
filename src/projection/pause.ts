@@ -35,5 +35,5 @@ export const getProjectionPause = (doc: Document) => {
 /** Request temporary Web projection across this document. Pair each call with resume(). */
 export const pause = (): void => getProjectionPause(document).pause();
 
-/** Release one pause; normal per-surface presentation resumes after the last release. */
+/** Release one shared pause, regardless of caller; resume exactly once per pause(). */
 export const resume = (): void => getProjectionPause(document).resume();
