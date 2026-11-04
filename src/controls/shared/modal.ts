@@ -14,6 +14,8 @@ interface ModalState {
   top?: HTMLIonModalElement;
   moving?: HTMLIonModalElement;
   projecting?: HTMLIonModalElement;
+  /** The toolbar sits below the system boundary: its controls render on the Web, not in the fixed rail. */
+  below?: HTMLIonModalElement;
   boundary?: number;
   stack: HTMLIonModalElement[];
 }
@@ -21,6 +23,7 @@ const states = new WeakMap<Document, ModalState>();
 export const modalStack = (doc: Document): readonly HTMLIonModalElement[] => states.get(doc)?.stack ?? [];
 export const movingModal = (doc: Document) => states.get(doc)?.moving;
 export const projectingModal = (doc: Document) => states.get(doc)?.projecting;
+export const belowBoundaryModal = (doc: Document) => states.get(doc)?.below;
 export const modalRailBoundary = (doc: Document) => states.get(doc)?.boundary;
 export const modalMotionEvent = 'nativeUIModalMotion';
 
@@ -106,15 +109,19 @@ export const observeVerticalBarsModals = (
     saved.probe.remove();
     railLayouts.delete(modal);
   };
+  // CSS resolves app spacing and clamp, so custom calc()/env() lengths need no
+  // duplicated arithmetic. An unmeasurable toolbar reports no position at all.
+  const modalToolbarTop = (modal: HTMLIonModalElement): number | undefined => {
+    const probe = railLayouts.get(modal)?.probe;
+    const content = modal.shadowRoot?.querySelector('[part~="content"]');
+    if (!probe || !content || !win.getComputedStyle(modal).getPropertyValue('--ios-theme-vertical-bars-modal-toolbar-top').trim()) return;
+    const top = parseFloat(win.getComputedStyle(probe).top);
+    return Number.isFinite(top) ? content.getBoundingClientRect().top + top : undefined;
+  };
   const railFollowsModal = (modal: HTMLIonModalElement, boundary: number | undefined) => {
     if (boundary === undefined || !Number.isFinite(boundary) || boundary < 0) return true;
-    const probe = railLayouts.get(modal)?.probe;
-    if (!probe || !win.getComputedStyle(modal).getPropertyValue('--ios-theme-vertical-bars-modal-toolbar-top').trim()) return true;
-    // The caller supplies the boundary or its fallback. CSS resolves app spacing
-    // and clamp, so custom calc()/env() lengths need no duplicated arithmetic.
-    const top = parseFloat(win.getComputedStyle(probe).top);
-    const content = modal.shadowRoot?.querySelector('[part~="content"]');
-    return !content || !Number.isFinite(top) || content.getBoundingClientRect().top + top > boundary + 1 / (win.devicePixelRatio || 1);
+    const top = modalToolbarTop(modal);
+    return top === undefined || top > boundary + 1 / (win.devicePixelRatio || 1);
   };
 
   const refresh = () => {
@@ -203,6 +210,20 @@ export const observeVerticalBarsModals = (
     for (const modal of railLayouts.keys()) if (!active.includes(modal)) restoreRailLayout(modal);
     if (state.moving !== moving) {
       state.moving = moving;
+      changed = true;
+    }
+    // With a measured position below the boundary the controls are plain Web
+    // content inside the sheet; an unmeasurable toolbar keeps the image handoff.
+    const below =
+      top &&
+      boundary !== undefined &&
+      !modalPreparing(top) &&
+      modalUsesVerticalBars(top) &&
+      (modalToolbarTop(top) ?? -Infinity) > boundary + 1 / (win.devicePixelRatio || 1)
+        ? top
+        : undefined;
+    if (state.below !== below) {
+      state.below = below;
       changed = true;
     }
     const projecting = moving && railFollowsModal(moving, boundary) ? moving : undefined;

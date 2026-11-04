@@ -6,7 +6,7 @@ import {
   type OverlayChange,
 } from '../index.js';
 import { enableSupportIonicOverlays, coveredIonicSurface } from '../ionic.js';
-import { movingModal, projectingModal, modalRailBoundary, modalMotionEvent } from './shared/modal.js';
+import { movingModal, projectingModal, belowBoundaryModal, modalRailBoundary, modalMotionEvent } from './shared/modal.js';
 import { coverOverlayBackground, usesCoveredBackground } from './overlays/covered-overlay.js';
 import { getProjectionState } from './shared/covered-source.js';
 import { createCoveredSnapshots, type CoveredSnapshots } from './shared/covered-snapshot.js';
@@ -321,7 +321,9 @@ export const createRuntime = async (
     } else candidate = readCandidate(element, id, options);
     if (candidate && isVerticalBarsCandidate(element) && !element.closest('[data-native-ui-placement="element"]')) {
       if (!nativeVerticalBars()) return undefined;
-      candidate.control.placement = 'vertical-bars';
+      // Below the OS reservation the rail cannot host them; project at the
+      // modal's own position so a capture takes the sheet's moving background.
+      if (element.closest('ion-modal') !== belowBoundaryModal(doc)) candidate.control.placement = 'vertical-bars';
       if (['button', 'button-group', 'menu-button'].includes(candidate.control.kind)) {
         const slot = (element.matches('ion-buttons') ? element : (element.closest('ion-buttons') ?? element)).getAttribute('slot');
         if (slot === 'start' || slot === 'end') candidate.control.toolbarSlot = slot;
@@ -773,7 +775,12 @@ export const createRuntime = async (
             : undefined;
       const modal = topModal(doc);
       const verticalBarFrame =
-        modal && !(imagesFor() && projectingModal(doc)) && !modalPreparing(modal) && !modalDismissing(modal) && modalUsesVerticalBars(modal)
+        modal &&
+        !(imagesFor() && projectingModal(doc)) &&
+        belowBoundaryModal(doc) !== modal &&
+        !modalPreparing(modal) &&
+        !modalDismissing(modal) &&
+        modalUsesVerticalBars(modal)
           ? modalVerticalBarFrame(modal)
           : undefined;
       const transition = navigation.current;

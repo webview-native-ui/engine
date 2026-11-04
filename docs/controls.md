@@ -52,9 +52,13 @@ origin undefined so the applying layout can retain its defaults. Calling
 `setReservedRegions()` clears the supplied geometry; calls after `destroy()` have no effect.
 
 For Ionic modal motion, native controls remain fixed above the supplied boundary.
-Images take over only once the toolbar follows below it, and native ownership returns
-on crossing back. The existing iOS rail retains its 170 CSS pixel boundary when regions are unavailable;
-Android continues to use its existing renderer path.
+Once the measured toolbar position crosses below it, the controls project at their
+own position inside the sheet, so a prepared capture takes the sheet's moving
+background instead of a stale rail band (rdlabo/ionic-theme-ios27#349).
+Native rail ownership returns on crossing back. Toolbars whose position cannot be
+measured, and modals that never settle below the boundary, keep the existing
+image handoff. The existing iOS rail retains its 170 CSS pixel boundary when regions
+are unavailable; Android continues to use its existing renderer path.
 The existing image capture method is unchanged.
 
 ## Verification and release order

@@ -6,7 +6,7 @@ import { controlSelected } from './shared/control-options.js';
 import { createCrossfade, fadeMarker } from './shared/crossfade.js';
 import { alignVerticalBarClone, verticalBarFrame } from './shared/vertical-bars-geometry.js';
 import { createVerticalBarsWebSearch, searchProjectionClass } from './vertical-bars-web-search.js';
-import { inVerticalBarsSurface, topModal, projectingModal, modalPreparing, modalPresentation } from './shared/modal.js';
+import { inVerticalBarsSurface, topModal, projectingModal, belowBoundaryModal, modalPreparing, modalPresentation } from './shared/modal.js';
 import type { NativeUIRuntimeHandle, NativeUIOptions, NativeUIStatus } from './definitions.js';
 import { VERTICAL_BARS_TRANSITION_CANCELED } from '../integration/index.js';
 import {
