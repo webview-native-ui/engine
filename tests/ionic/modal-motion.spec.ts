@@ -13,7 +13,7 @@ const bundle = buildSync({
   write: false,
 }).outputFiles[0].text;
 
-const boot = async (page: Page, fixed: number | undefined, initial = 40, theme = true) => {
+const boot = async (page: Page, fixed: number | undefined, initial = 40, theme = true, platform = 'ios') => {
   await page.setContent(`
     <style>
       ion-modal { position:fixed; inset:0;
@@ -23,7 +23,7 @@ const boot = async (page: Page, fixed: number | undefined, initial = 40, theme =
     <ion-app class="ios-theme-vertical-bars"><ion-modal></ion-modal></ion-app>`);
   await page.addScriptTag({ content: bundle });
   await page.evaluate(
-    async ({ y, fixed }) => {
+    async ({ y, fixed, platform }) => {
       const w = window as any;
       const modal = document.querySelector('ion-modal')!;
       const content = document.createElement('div');
@@ -48,7 +48,7 @@ const boot = async (page: Page, fixed: number | undefined, initial = 40, theme =
               },
             ];
       w.api = w.modalMotion.createNativeUI({
-        getPlatform: () => 'ios',
+        getPlatform: () => platform,
         isAvailable: () => true,
         plugin: {
           configure: async () => ({ supported: true }),
@@ -65,7 +65,7 @@ const boot = async (page: Page, fixed: number | undefined, initial = 40, theme =
       modal.dispatchEvent(new CustomEvent('ionModalDidPresent', { bubbles: true }));
       modal.dispatchEvent(new Event('pointerdown', { bubbles: true }));
     },
-    { y: initial, fixed },
+    { y: initial, fixed, platform },
   );
 };
 
@@ -147,5 +147,23 @@ test('programmatic dismissal tracks compositor motion after an idle pointer-free
   expect(await page.evaluate(() => !!(window as any).modalMotion.projectingModal(document))).toBe(false);
   await expect.poll(() => page.evaluate(() => !!(window as any).modalMotion.projectingModal(document))).toBe(true);
   await page.locator('ion-modal').dispatchEvent('ionModalDidDismiss');
+  await page.evaluate(() => (window as any).ui.destroy());
+});
+
+test('Android preserves its existing motion path with or without supplied rail geometry', async ({ page }) => {
+  await boot(page, undefined, 40, true, 'android');
+  expect(await move(page, 100)).toBe(true);
+  expect(await page.locator('ion-modal').evaluate((modal) => modal.style.getPropertyValue('--ios-theme-vertical-bars-toolbar-top'))).toBe(
+    '',
+  );
+  await page.evaluate(() => {
+    const w = window as any;
+    w.ui.setReservedRegions(w.regions(174));
+  });
+  expect(await move(page, 100)).toBe(true);
+  expect(await page.locator('ion-modal').evaluate((modal) => modal.style.getPropertyValue('--ios-theme-vertical-bars-toolbar-top'))).toBe(
+    '',
+  );
+  expect(await move(page, 200)).toBe(true);
   await page.evaluate(() => (window as any).ui.destroy());
 });

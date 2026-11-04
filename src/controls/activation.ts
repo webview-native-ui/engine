@@ -367,6 +367,7 @@ export const createNativeUIActivation = (transport: NativeUITransport) => {
             return physicalEdge === nativeState.edge;
           };
           nativeModalAnimations = () => capabilities.modalAnimation === true && nativeVerticalBars();
+          // Android returned through its existing renderer path above; this is the iOS legacy boundary.
           modalBoundary = () =>
             nativeVerticalBars()
               ? (reservedVerticalBarBoundary(

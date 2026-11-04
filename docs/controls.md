@@ -53,7 +53,8 @@ origin undefined so the applying layout can retain its defaults. Calling
 
 For Ionic modal motion, native controls remain fixed above the supplied boundary.
 Images take over only once the toolbar follows below it, and native ownership returns
-on crossing back. Missing or unusable regions use a 170 CSS pixel native boundary.
+on crossing back. The existing iOS rail retains its 170 CSS pixel boundary when regions are unavailable;
+Android continues to use its existing renderer path.
 The existing image capture method is unchanged.
 
 ## Verification and release order
