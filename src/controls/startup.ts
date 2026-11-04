@@ -1,12 +1,6 @@
 import { createNativeUIActivation } from './activation.js';
 import type { NativeUITransport } from './transport.js';
-import type {
-  NativeUIRuntimeOptions,
-  NativeUIHandle,
-  NativeUIOptions,
-  NativeUIRuntimeHandle,
-  NativeUIReservedRegion,
-} from './definitions.js';
+import type { NativeUIRuntimeOptions, NativeUIHandle, NativeUIOptions, NativeUIRuntimeHandle } from './definitions.js';
 
 export const createNativeUI = (transport: NativeUITransport) => {
   const { enableNativeUI: activate, configureNativeTransition } = createNativeUIActivation(transport);
@@ -16,8 +10,7 @@ export const createNativeUI = (transport: NativeUITransport) => {
   /** Start one shell. Partial options override defaults; markup owns individual placement. */
   const startNativeUI = async (input: NativeUIOptions = {}, overlayFactory?: OverlayFactory): Promise<NativeUIHandle> => {
     const root = input.root ?? (typeof document === 'undefined' ? undefined : document.body);
-    const copyRegions = (regions?: readonly NativeUIReservedRegion[]) => regions?.map((region) => ({ ...region }));
-    const bars = { enabled: true, ...input.verticalBars, reservedRegions: copyRegions(input.verticalBars?.reservedRegions) };
+    const bars = { enabled: true, ...input.verticalBars };
     const host = bars.placement?.webHost;
     if (root && (!root.isConnected || root.ownerDocument !== document))
       throw new Error('Native UI requires a connected root in the current document');
@@ -32,10 +25,7 @@ export const createNativeUI = (transport: NativeUITransport) => {
     };
     const runtime = await activate(options, overlayFactory);
     const existing = handles.get(runtime);
-    if (existing) {
-      if (input.verticalBars?.reservedRegions !== undefined) existing.setReservedRegions(input.verticalBars.reservedRegions);
-      return existing;
-    }
+    if (existing) return existing;
     let stopped = false;
     let queue = Promise.resolve();
     const change = (enabled: boolean) => {
@@ -58,11 +48,6 @@ export const createNativeUI = (transport: NativeUITransport) => {
     let destruction: Promise<void> | undefined;
     const destroy = runtime.destroy.bind(runtime);
     const handle: NativeUIHandle = {
-      setReservedRegions(regions) {
-        if (stopped) return;
-        bars.reservedRegions = copyRegions(regions);
-        root?.ownerDocument.defaultView?.dispatchEvent(new Event('nativeUIRefresh'));
-      },
       markForCheck: runtime.markForCheck.bind(runtime),
       getStatus: runtime.getStatus.bind(runtime),
       suspend: runtime.suspend.bind(runtime),
