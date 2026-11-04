@@ -1332,7 +1332,7 @@ test('pause covers a standalone renderer and local end cannot release it', async
     w.blocked = false;
     w.manager.end();
   });
-  expect(await state()).toEqual({ token: undefined, owners: 0, visible: 1, restoring: true });
+  await expect.poll(state).toEqual({ token: undefined, owners: 0, visible: 1, restoring: true });
   await page.evaluate(() => (window as any).manager.updated(undefined, ['counter'], 2));
   expect(await page.evaluate(() => (window as any).manager.visibleOwners.length)).toBe(0);
 });
@@ -1432,7 +1432,7 @@ for (const localFirst of [true, false]) {
       if (localFirst) w.engine.resume();
       else w.manager.end();
     }, localFirst);
-    expect(await page.evaluate(() => (window as any).manager.restoring)).toBe(true);
+    await expect.poll(() => page.evaluate(() => (window as any).manager.restoring)).toBe(true);
     await page.evaluate(() => (window as any).manager.updated(undefined, ['counter'], 2));
     expect(await page.evaluate(() => (window as any).manager.visibleOwners.length)).toBe(0);
   });

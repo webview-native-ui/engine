@@ -228,3 +228,28 @@ for (const manualFirst of [true, false]) {
       .toEqual([true, true]);
   });
 }
+
+test('final resume waits for Web paint and reopening cancels the pending return', async ({ page }) => {
+  await boot(page);
+  await page.evaluate(() => (window as any).start('first'));
+  await expect(page.locator('#first')).toHaveAttribute('data-native-ui-snapshot', /.+/);
+  await pause(page);
+  await expect(page.locator('#first')).toHaveAttribute('data-native-ui-snapshot-visible', '');
+  await page.clock.install();
+  await page.evaluate(() => {
+    const w = window as any;
+    w.calls.length = 0;
+    w.appEngine.resume();
+    w.otherEngine.resume(); // An unmatched release cannot bypass the paint boundary.
+  });
+  await page.clock.runFor(16);
+  expect(await page.evaluate(() => (window as any).calls.some((call: any) => ['restore', 'resume'].includes(call.action)))).toBe(false);
+  await pause(page);
+  await page.clock.runFor(100);
+  await expect(page.locator('#first')).toHaveAttribute('data-native-ui-destination', 'web');
+  expect(await page.evaluate(() => (window as any).calls.some((call: any) => ['restore', 'resume'].includes(call.action)))).toBe(false);
+  await resume(page);
+  await page.clock.runFor(50);
+  await expect(page.locator('#first')).toHaveAttribute('data-native-ui-destination', 'native');
+  await expect.poll(() => page.evaluate(() => (window as any).visible.first)).toBe(true);
+});

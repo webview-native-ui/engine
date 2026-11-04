@@ -5,15 +5,34 @@ const createPause = (doc: Document) => {
   const overlays = getOverlayCoordinator(doc);
   const listeners = new Set<() => void>();
   let depth = 0;
-  const change = (delta: number) => {
-    const paused = depth > 0;
-    depth = Math.max(0, depth + delta);
-    if (paused === depth > 0) return;
+  let releaseFrame = 0;
+  const paused = () => depth > 0 || releaseFrame !== 0;
+  const notify = () => {
     for (const listener of listeners) listener();
+  };
+  const change = (delta: number) => {
+    if (delta < 0 && depth === 0) return;
+    const wasPaused = paused();
+    depth += delta;
+    const win = doc.defaultView;
+    if (releaseFrame && win) {
+      win.cancelAnimationFrame(releaseFrame);
+      releaseFrame = 0;
+    }
+    if (depth === 0 && win) {
+      // Give DOM dismissal a paint opportunity before requesting Native return.
+      // Keep all consumers paused meanwhile, including Ionic change callbacks.
+      releaseFrame = win.requestAnimationFrame(() => {
+        releaseFrame = win.requestAnimationFrame(() => {
+          releaseFrame = 0;
+          notify();
+        });
+      });
+    } else if (wasPaused !== paused()) notify();
   };
   return {
     // Without a target, only the document-wide request applies; renderers own local coverage.
-    isPaused: (target?: HTMLElement) => depth > 0 || (!!target && overlays.isCovered(target)),
+    isPaused: (target?: HTMLElement) => paused() || (!!target && overlays.isCovered(target)),
     subscribe(listener: () => void) {
       listeners.add(listener);
       const stopOverlays = overlays.subscribe(listener);

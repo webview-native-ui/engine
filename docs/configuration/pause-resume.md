@@ -43,7 +43,9 @@ no effect. Each owner must release exactly once for each pause it requested.
 Both functions return immediately, without waiting for native acknowledgments or
 painting. Returning from `pause()` does not mean native UI has already moved
 behind the Web overlay; it may remain in front until the handoff completes.
-Likewise, removing an overlay and calling `resume()` in the same task does not
-guarantee that its removal is painted before native UI reappears.
+The final `resume()` defers native restoration until the second animation frame,
+allowing overlay removal to paint without guaranteeing compositor completion.
+Call it after removing the overlay or completing
+its dismissal animation. A new `pause()` cancels a pending restoration.
 Calling `pause()` just before a blocking `window.alert()` therefore does
 not guarantee a completed handoff. They do not detect custom overlays automatically.
