@@ -6,7 +6,7 @@ import {
   type OverlayChange,
 } from '../index.js';
 import { enableSupportIonicOverlays, coveredIonicSurface } from '../ionic.js';
-import { movingModal, projectingModal, modalRailBoundary, modalMotionEvent } from './shared/modal.js';
+import { movingModal, modalMotionEvent } from './shared/modal.js';
 import { coverOverlayBackground, usesCoveredBackground } from './overlays/covered-overlay.js';
 import { getProjectionState } from './shared/covered-source.js';
 import { createCoveredSnapshots, type CoveredSnapshots } from './shared/covered-snapshot.js';
@@ -263,8 +263,7 @@ export const createRuntime = async (
   const measuringPointerPages = new WeakSet<HTMLElement>();
   const readEnabledCandidate = (element: HTMLElement): Candidate | undefined => {
     if (projectionState.owns(element)) return;
-    if (imagesFor() && projectingModal(doc) && element.closest('ion-modal') === projectingModal(doc) && isVerticalBarsSource(element))
-      return;
+    if (imagesFor() && movingModal(doc) && element.closest('ion-modal') === movingModal(doc) && isVerticalBarsSource(element)) return;
     if (options.root && !options.root.contains(element)) return;
     if (element.matches('ion-back-button') && element.closest('ion-app.ios-theme-vertical-bars') && !isVerticalBarsCandidate(element))
       return;
@@ -593,12 +592,7 @@ export const createRuntime = async (
       const enteringModal = topModal(doc);
       // Geometry refreshes continue for the Web rail during the Ionic animation.
       // Once native has acknowledged retirement, they must not publish it again.
-      if (enteringModal && modalDismissing(enteringModal)) {
-        if (renderedSnapshot?.controls.length === 0) return;
-        // Until the closing toolbar clears the OS reservation, its native bars
-        // remain at the fixed system position. Do not retire them on WillDismiss.
-        if (modalRailBoundary(doc) !== undefined && projectingModal(doc) !== enteringModal) return;
-      }
+      if (enteringModal && modalDismissing(enteringModal) && renderedSnapshot?.controls.length === 0) return;
       if (enteringModal && modalPresentation(enteringModal)?.animation.id === playingModalAnimation && playingModalAnimation !== undefined)
         return;
       modalHandoff = false;
@@ -773,7 +767,7 @@ export const createRuntime = async (
             : undefined;
       const modal = topModal(doc);
       const verticalBarFrame =
-        modal && !(imagesFor() && projectingModal(doc)) && !modalPreparing(modal) && !modalDismissing(modal) && modalUsesVerticalBars(modal)
+        modal && !(imagesFor() && movingModal(doc)) && !modalPreparing(modal) && !modalDismissing(modal) && modalUsesVerticalBars(modal)
           ? modalVerticalBarFrame(modal)
           : undefined;
       const transition = navigation.current;
@@ -1275,7 +1269,7 @@ export const createRuntime = async (
         imagesFor(coveredSurface(modal))?.invalidate();
     }
     if (phase === 'willDismiss' && element.matches('ion-modal')) {
-      if (modalRailBoundary(doc) === undefined) projectionSurfaces.get(element as HTMLIonModalElement)?.begin();
+      projectionSurfaces.get(element as HTMLIonModalElement)?.begin();
       modalHandoff = true;
       if (updateQueue.running) handoffInstant = true;
       schedule();
@@ -1533,7 +1527,7 @@ export const createRuntime = async (
                 topModal(doc) !== modal ||
                 modalPreparing(modal) ||
                 !!modalPresentation(modal) ||
-                projectingModal(doc) === modal ||
+                movingModal(doc) === modal ||
                 !!navigation.current ||
                 stopped ||
                 overlayOpen(true, true),

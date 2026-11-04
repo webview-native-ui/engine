@@ -1,4 +1,3 @@
-import { reservedVerticalBarTop } from '../integration/reserved-regions.js';
 import { controlDefault } from './shared/control-options.js';
 import { toolbarOptions } from './shared/toolbar-options.js';
 import { createDiagnostics } from './shared/diagnostics.js';
@@ -247,15 +246,7 @@ export const createNativeUIActivation = (transport: NativeUITransport) => {
         const platform = transport.getPlatform();
         const diagnose = createDiagnostics(options.debug);
         let nativeModalAnimations = () => false;
-        let modalBoundary: () => number | undefined = () => undefined;
-        const stopModals =
-          options.source === 'html'
-            ? () => {}
-            : observeVerticalBarsModals(
-                document,
-                () => nativeModalAnimations(),
-                () => modalBoundary(),
-              );
+        const stopModals = options.source === 'html' ? () => {} : observeVerticalBarsModals(document, () => nativeModalAnimations());
         const prehide =
           platform !== 'android' && options.source !== 'html' && options.ionic?.auto !== false
             ? prehideVerticalBarsToolbarSources(document, () => options.verticalBars?.enabled !== false, options.root, options)
@@ -367,15 +358,6 @@ export const createNativeUIActivation = (transport: NativeUITransport) => {
             return physicalEdge === nativeState.edge;
           };
           nativeModalAnimations = () => capabilities.modalAnimation === true && nativeVerticalBars();
-          modalBoundary = () =>
-            nativeVerticalBars()
-              ? reservedVerticalBarTop(
-                  options.verticalBars?.reservedRegions,
-                  nativeState.edge!,
-                  document.defaultView!.innerWidth,
-                  document.defaultView!.innerHeight,
-                )
-              : undefined;
           const applyMetrics = (metrics: WebViewMetrics) => {
             if (ordinaryControls) nativeWebViewMetrics.radius = metrics.radius;
             deviceEdge = metrics.verticalBarEdge ?? null;

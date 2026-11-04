@@ -37,43 +37,31 @@ The public handle updates the running shell without restarting native controls.
 import { Foldable } from '@erkamyaman/capacitor-foldable';
 import { resolveVerticalBarsLayout } from '@webview-native-ui/engine/integration';
 
-// enableNativeUI is supplied by the application's Capacitor or Cordova adapter.
-const ui = await enableNativeUI();
-let generation = 0;
-let disposed = false;
-const refreshRegions = async () => {
-  const current = ++generation;
-  try {
-    const metrics = await resolveVerticalBarsLayout(Foldable);
-    if (!disposed && current === generation) ui.setReservedRegions(metrics.reservedRegions);
-  } catch {
-    if (!disposed && current === generation) ui.setReservedRegions();
-  }
-};
-const fold = await Foldable.addListener('foldStateChange', refreshRegions);
-const placement = await Foldable.addListener('barPlacementChange', refreshRegions);
-window.addEventListener('resize', refreshRegions);
-await refreshRegions();
-
-// Call on application teardown; ignore any in-flight response first.
-const stop = async () => {
-  disposed = true;
-  ++generation;
-  window.removeEventListener('resize', refreshRegions);
-  await Promise.all([fold.remove(), placement.remove()]);
-  await ui.destroy();
-};
+// In the application's existing layout refresh handler, using its running handle:
+const metrics = await resolveVerticalBarsLayout(Foldable);
+ui.setReservedRegions(metrics.reservedRegions);
 ```
+
+Reuse the application's initial layout read, device-change listeners and resize handler.
+The resolver owns no subscriptions. If refreshes overlap, the application must discard
+stale results and stop applying updates when its owner is disposed.
+
+`resolveVerticalBarsLayout(provider)` accepts an object exposing `getBarPlacement()` and
+`getReservedRegions()`, without importing the device plugin. It returns logical `edge`,
+`inset`, `toolbarTop` and `reservedRegions`. Unsupported or failed reads leave the
+corresponding fields undefined. Web defaults belong to the theme's
+`setVerticalBarsLayout(metrics)` (requires the corresponding theme layout-input update).
+The resolver uses the current browser viewport and document direction to resolve the
+physical occlusion.
 
 Region frames use Web viewport CSS pixels and already include OS interaction margins;
 Engine does not add `margins` again. Only active top-edge occlusions on the current rail
-contribute to the boundary. Missing, empty or unusable regions use a **170 CSS pixel fallback**.
-A valid smaller region overrides that fallback too. Calling `setReservedRegions()` clears
-the supplied geometry; calls after `destroy()` have no effect.
+contribute to the resolved top origin. Missing, empty or unusable regions leave the
+origin undefined so the applying layout can retain its defaults. Calling
+`setReservedRegions()` clears the supplied geometry; calls after `destroy()` have no effect.
 
-For Ionic modal motion, native controls remain fixed above this boundary. Images take
-over only once the toolbar follows below it, and native ownership returns on crossing back.
-The existing image capture method is unchanged.
+These APIs provide layout data only. Modal ownership timing and image capture are
+unchanged in this change.
 
 ## Verification and release order
 
@@ -86,12 +74,3 @@ Build and verify Engine first, including both signed Maven artifacts in the same
 both npm-distributed podspecs. Release the Engine native artifacts and npm package at the same version
 before refreshing the Capacitor and theme registry lockfiles. Candidate verification uses local npm
 tarballs and a temporary SwiftPM path or local Maven repository; do not commit these temporary paths.
-
-`resolveVerticalBarsLayout(source)` accepts an object exposing `getBarPlacement()` and
-`getReservedRegions()`, without importing the device plugin. It returns logical `edge`,
-`inset`, `toolbarTop` and `reservedRegions`. Unsupported or failed reads leave the
-corresponding fields undefined. Web defaults belong to the theme's
-`setVerticalBarsLayout(metrics)` (requires the corresponding theme layout-input update);
-the native modal boundary independently retains its
-170px fallback when no regions are supplied. The resolver uses the current browser
-viewport and document direction to resolve the physical occlusion.

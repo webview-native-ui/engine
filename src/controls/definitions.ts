@@ -74,7 +74,7 @@ export interface NativeUIRuntimeOptions extends NativeUIOptions {
 
 /** A running shell. Placement changes preserve all other startup settings. */
 export interface NativeUIHandle extends NativeUIRuntimeHandle {
-  /** Replace externally supplied viewport regions. Omit to restore the fallback. No-op after destroy. */
+  /** Replace externally supplied viewport regions. Omit to clear the supplied geometry. No-op after destroy. */
   setReservedRegions(regions?: readonly NativeUIReservedRegion[]): void;
   /** Enable rail projection when available, preserving other settings. Rejects after destroy. */
   enableVerticalControlArea(): Promise<void>;
@@ -84,7 +84,6 @@ export interface NativeUIHandle extends NativeUIRuntimeHandle {
 
 export interface NativeUIVerticalBarsOptions {
   /** Initial OS-reserved regions. Update through handle.setReservedRegions after posture/size changes.
-   * Missing or unusable top-rail geometry falls back to 170 CSS pixels.
    */
   reservedRegions?: readonly NativeUIReservedRegion[];
   /** Defaults to true. Availability is always determined separately. */

@@ -10,7 +10,7 @@ export interface NativeUIReservedRegion extends Frame {
 
 /** OS frames include their margins. Only the active top reservation on the rail
  * contributes; cameras below the toolbar and hinge divisions do not move it. */
-const reservedVerticalBarBoundary = (
+export const reservedVerticalBarBoundary = (
   regions: readonly NativeUIReservedRegion[] | undefined,
   edge: 'left' | 'right',
   width: number,
@@ -33,14 +33,6 @@ const reservedVerticalBarBoundary = (
   });
   return bottoms.length ? Math.max(...bottoms) : undefined;
 };
-
-/** Native motion retains its established boundary when no device geometry is available. */
-export const reservedVerticalBarTop = (
-  regions: readonly NativeUIReservedRegion[] | undefined,
-  edge: 'left' | 'right',
-  width: number,
-  height: number,
-): number => reservedVerticalBarBoundary(regions, edge, width, height) ?? 170;
 
 /** Structural source: no dependency on a specific device plugin. */
 export interface VerticalBarsLayoutProvider {

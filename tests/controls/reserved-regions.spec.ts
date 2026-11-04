@@ -1,7 +1,7 @@
 import { beforeEach, expect, test, vi } from 'vitest';
 import { createNativeUI } from '../../src/controls/startup';
 import { resolveVerticalBarsLayout } from '../../src/integration/index';
-import { reservedVerticalBarTop } from '../../src/integration/reserved-regions';
+import { reservedVerticalBarBoundary } from '../../src/integration/reserved-regions';
 import type { NativeUIReservedRegion, NativeUIRuntimeHandle, NativeUITransport } from '../../src/controls/index';
 
 const { activate } = vi.hoisted(() => ({ activate: vi.fn() }));
@@ -18,7 +18,7 @@ const region = (height: number): NativeUIReservedRegion => ({
   height,
   margins: { top: 0, right: 0, bottom: 20, left: 0 },
 });
-const top = (regions?: readonly NativeUIReservedRegion[]) => reservedVerticalBarTop(regions, 'right', 466, 678);
+const top = (regions?: readonly NativeUIReservedRegion[]) => reservedVerticalBarBoundary(regions, 'right', 466, 678);
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -32,9 +32,9 @@ beforeEach(() => {
   activate.mockResolvedValue(runtime);
 });
 
-test('external regions override the fallback, including smaller future-device dimensions, without adding margins twice', () => {
-  expect(top()).toBe(170);
-  expect(top([])).toBe(170);
+test('external regions leave defaults unset and preserve smaller future-device dimensions without adding margins twice', () => {
+  expect(top()).toBeUndefined();
+  expect(top([])).toBeUndefined();
   expect(top([region(174)])).toBe(174);
   expect(top([region(120)])).toBe(120);
   expect(top([region(230)])).toBe(230);
@@ -48,13 +48,13 @@ test('inactive regions, hinges, bottom cameras and invalid geometry do not repla
     { ...region(37), x: 400, y: 29, width: 37 },
     { ...region(200), height: Number.NaN },
   ];
-  expect(top(irrelevant)).toBe(170);
+  expect(top(irrelevant)).toBeUndefined();
   expect(top([...irrelevant, region(174)])).toBe(174);
-  expect(reservedVerticalBarTop([{ ...region(230), x: 0, width: 100 }], 'left', 600, 800)).toBe(230);
-  expect(reservedVerticalBarTop([region(174)], 'left', 466, 678)).toBe(170);
+  expect(reservedVerticalBarBoundary([{ ...region(230), x: 0, width: 100 }], 'left', 600, 800)).toBe(230);
+  expect(reservedVerticalBarBoundary([region(174)], 'left', 466, 678)).toBeUndefined();
 });
 
-test('the public receiver copies geometry, updates the running shell and resets to the fallback without restarting', async () => {
+test('the public receiver copies geometry, updates the running shell and clears supplied geometry without restarting', async () => {
   const api = createNativeUI({} as NativeUITransport);
   const input = [region(174)];
   const handle = await api.enableNativeUI({ verticalBars: { reservedRegions: input } });
@@ -69,7 +69,7 @@ test('the public receiver copies geometry, updates the running shell and resets 
     received[0].height = 999;
     expect(top(options.verticalBars.reservedRegions)).toBe(230);
     handle.setReservedRegions();
-    expect(top(options.verticalBars.reservedRegions)).toBe(170);
+    expect(top(options.verticalBars.reservedRegions)).toBeUndefined();
     expect(activate).toHaveBeenCalledTimes(1);
     expect(changed).toHaveBeenCalledTimes(2);
     await handle.destroy();

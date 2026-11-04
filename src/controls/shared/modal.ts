@@ -13,15 +13,11 @@ export const modalDismissing = (modal: Element) => dismissing.has(modal);
 interface ModalState {
   top?: HTMLIonModalElement;
   moving?: HTMLIonModalElement;
-  projecting?: HTMLIonModalElement;
-  boundary?: number;
   stack: HTMLIonModalElement[];
 }
 const states = new WeakMap<Document, ModalState>();
 export const modalStack = (doc: Document): readonly HTMLIonModalElement[] => states.get(doc)?.stack ?? [];
 export const movingModal = (doc: Document) => states.get(doc)?.moving;
-export const projectingModal = (doc: Document) => states.get(doc)?.projecting;
-export const modalRailBoundary = (doc: Document) => states.get(doc)?.boundary;
 export const modalMotionEvent = 'nativeUIModalMotion';
 
 export const topModal = (doc: Document): HTMLIonModalElement | undefined => states.get(doc)?.top;
@@ -77,11 +73,7 @@ export const releaseSheetBackdropGesture = (modal: HTMLElement, role?: string): 
   }
 };
 
-export const observeVerticalBarsModals = (
-  doc: Document,
-  animate: () => boolean = () => false,
-  readBoundary: () => number | undefined = () => undefined,
-): (() => void) => {
+export const observeVerticalBarsModals = (doc: Document, animate: () => boolean = () => false): (() => void) => {
   const win = doc.defaultView!;
   const state: ModalState = { stack: [] };
   states.set(doc, state);
@@ -94,29 +86,6 @@ export const observeVerticalBarsModals = (
   let touchActive = false;
   let bounds = '';
   const toolbarTop = '--ios-theme-vertical-bars-modal-offset-top';
-  const toolbarBase = '--ios-theme-vertical-bars-toolbar-top';
-  const railLayouts = new Map<HTMLIonModalElement, { previous: string; priority: string; value: string; probe: HTMLElement }>();
-  const restoreRailLayout = (modal: HTMLIonModalElement) => {
-    const saved = railLayouts.get(modal);
-    if (!saved) return;
-    if (modal.style.getPropertyValue(toolbarBase) === saved.value) {
-      if (saved.previous) modal.style.setProperty(toolbarBase, saved.previous, saved.priority);
-      else modal.style.removeProperty(toolbarBase);
-    }
-    saved.probe.remove();
-    railLayouts.delete(modal);
-  };
-  const railFollowsModal = (modal: HTMLIonModalElement, boundary: number | undefined) => {
-    if (boundary === undefined || !Number.isFinite(boundary) || boundary < 0) return true;
-    const probe = railLayouts.get(modal)?.probe;
-    if (!probe || !win.getComputedStyle(modal).getPropertyValue('--ios-theme-vertical-bars-modal-toolbar-top').trim()) return true;
-    // The caller supplies the boundary or its fallback. CSS resolves app spacing
-    // and clamp, so custom calc()/env() lengths need no duplicated arithmetic.
-    const top = parseFloat(win.getComputedStyle(probe).top);
-    const content = modal.shadowRoot?.querySelector('[part~="content"]');
-    return !content || !Number.isFinite(top) || content.getBoundingClientRect().top + top > boundary + 1 / (win.devicePixelRatio || 1);
-  };
-
   const refresh = () => {
     win.cancelAnimationFrame(frame);
     frame = 0;
@@ -145,15 +114,11 @@ export const observeVerticalBarsModals = (
     bounds = nextBounds;
     const wrapper = top?.shadowRoot?.querySelector<HTMLElement>('[part~="content"]');
     const animating = wrapper?.getAnimations().some((animation) => animation.playState === 'running') ?? false;
-    const reportedBoundary = readBoundary();
-    const boundary =
-      reportedBoundary !== undefined && Number.isFinite(reportedBoundary) && reportedBoundary >= 0 ? reportedBoundary : undefined;
-    state.boundary = boundary;
     const moving =
       top &&
       app &&
       !modalPreparing(top) &&
-      (!modalDismissing(top) || boundary !== undefined) &&
+      !modalDismissing(top) &&
       (state.moving === top ? pointerActive || touchActive || animating || moved : moved && (pointerActive || touchActive || animating))
         ? top
         : undefined;
@@ -164,29 +129,6 @@ export const observeVerticalBarsModals = (
       // offsetWidth is unaffected by Ionic's presentation transforms.
       const fullWidth = !!content && Math.abs(content.offsetWidth - win.innerWidth) <= 1 && Math.abs(content.offsetLeft) <= 1;
       const enabled = !!app?.contains(modal) && active.includes(modal) && fullWidth;
-      if (enabled && boundary !== undefined && Number.isFinite(boundary) && boundary >= 0) {
-        let saved = railLayouts.get(modal);
-        if (!saved) {
-          const probe = doc.createElement('span');
-          probe.setAttribute('aria-hidden', 'true');
-          probe.style.cssText =
-            'position:absolute;visibility:hidden;pointer-events:none;width:0;height:0;top:var(--ios-theme-vertical-bars-modal-toolbar-top)';
-          saved = {
-            previous: modal.style.getPropertyValue(toolbarBase),
-            priority: modal.style.getPropertyPriority(toolbarBase),
-            value: '',
-            probe,
-          };
-          railLayouts.set(modal, saved);
-          modal.append(probe);
-        }
-        const value = `${boundary}px`;
-        if (modal.style.getPropertyValue(toolbarBase) !== value) {
-          modal.style.setProperty(toolbarBase, value);
-          changed = true;
-        }
-        saved.value = value;
-      } else restoreRailLayout(modal);
       if (enabled) {
         const top = modalPreparing(modal) ? 0 : (modalVerticalBarFrame(modal)?.y ?? 0);
         const offset = `${top}px`;
@@ -200,16 +142,10 @@ export const observeVerticalBarsModals = (
         changed = true;
       }
     }
-    for (const modal of railLayouts.keys()) if (!active.includes(modal)) restoreRailLayout(modal);
     if (state.moving !== moving) {
+      const previous = state.moving;
       state.moving = moving;
-      changed = true;
-    }
-    const projecting = moving && railFollowsModal(moving, boundary) ? moving : undefined;
-    if (state.projecting !== projecting) {
-      const previous = state.projecting;
-      state.projecting = projecting;
-      win.dispatchEvent(new CustomEvent(modalMotionEvent, { detail: { modal: projecting ?? previous, moving: !!projecting } }));
+      win.dispatchEvent(new CustomEvent(modalMotionEvent, { detail: { modal: moving ?? previous, moving: !!moving } }));
       changed = true;
     }
     if (wanted.size !== observed.size || [...wanted].some((element) => !observed.has(element))) {
@@ -310,7 +246,6 @@ export const observeVerticalBarsModals = (
   refresh();
   return () => {
     stopped = true;
-    for (const modal of railLayouts.keys()) restoreRailLayout(modal);
     stopOverlays();
     win.cancelAnimationFrame(frame);
     observer.disconnect();
