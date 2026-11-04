@@ -49,6 +49,7 @@ that require each option. Read only the relevant detail:
 - [Value bindings](configuration/values.md): keep the fallback host's component data aligned with native state.
 - [Capture timing](configuration/capture.md): prepare pixels after native appearance settles.
 - [Ionic overlays](configuration/ionic-overlays.md): connect Ionic coverage with one shared application initializer.
+- [Custom Web overlays](configuration/pause-resume.md): re-export pause/resume from a plugin so applications can bracket their own overlays.
 
 ## 4. Use advanced APIs when you own a renderer
 
