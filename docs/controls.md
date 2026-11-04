@@ -51,8 +51,10 @@ contribute to the resolved top origin. Missing, empty or unusable regions leave 
 origin undefined so the applying layout can retain its defaults. Calling
 `setReservedRegions()` clears the supplied geometry; calls after `destroy()` have no effect.
 
-These APIs provide layout data only. Modal ownership timing and image capture are
-unchanged in this change.
+For Ionic modal motion, native controls remain fixed above the supplied boundary.
+Images take over only once the toolbar follows below it, and native ownership returns
+on crossing back. Missing or unusable regions use a 170 CSS pixel native boundary.
+The existing image capture method is unchanged.
 
 ## Verification and release order
 

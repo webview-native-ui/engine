@@ -1,3 +1,4 @@
+import { reservedVerticalBarBoundary } from '../integration/reserved-regions.js';
 import { controlDefault } from './shared/control-options.js';
 import { toolbarOptions } from './shared/toolbar-options.js';
 import { createDiagnostics } from './shared/diagnostics.js';
@@ -246,7 +247,15 @@ export const createNativeUIActivation = (transport: NativeUITransport) => {
         const platform = transport.getPlatform();
         const diagnose = createDiagnostics(options.debug);
         let nativeModalAnimations = () => false;
-        const stopModals = options.source === 'html' ? () => {} : observeVerticalBarsModals(document, () => nativeModalAnimations());
+        let modalBoundary: () => number | undefined = () => undefined;
+        const stopModals =
+          options.source === 'html'
+            ? () => {}
+            : observeVerticalBarsModals(
+                document,
+                () => nativeModalAnimations(),
+                () => modalBoundary(),
+              );
         const prehide =
           platform !== 'android' && options.source !== 'html' && options.ionic?.auto !== false
             ? prehideVerticalBarsToolbarSources(document, () => options.verticalBars?.enabled !== false, options.root, options)
@@ -358,6 +367,15 @@ export const createNativeUIActivation = (transport: NativeUITransport) => {
             return physicalEdge === nativeState.edge;
           };
           nativeModalAnimations = () => capabilities.modalAnimation === true && nativeVerticalBars();
+          modalBoundary = () =>
+            nativeVerticalBars()
+              ? (reservedVerticalBarBoundary(
+                  options.verticalBars?.reservedRegions,
+                  nativeState.edge!,
+                  document.defaultView!.innerWidth,
+                  document.defaultView!.innerHeight,
+                ) ?? 170)
+              : undefined;
           const applyMetrics = (metrics: WebViewMetrics) => {
             if (ordinaryControls) nativeWebViewMetrics.radius = metrics.radius;
             deviceEdge = metrics.verticalBarEdge ?? null;
