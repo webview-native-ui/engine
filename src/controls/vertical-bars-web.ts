@@ -6,7 +6,7 @@ import { controlSelected } from './shared/control-options.js';
 import { createCrossfade, fadeMarker } from './shared/crossfade.js';
 import { alignVerticalBarClone, verticalBarFrame } from './shared/vertical-bars-geometry.js';
 import { createVerticalBarsWebSearch, searchProjectionClass } from './vertical-bars-web-search.js';
-import { inVerticalBarsSurface, topModal, movingModal, modalPreparing, modalPresentation } from './shared/modal.js';
+import { inVerticalBarsSurface, topModal, projectingModal, modalPreparing, modalPresentation } from './shared/modal.js';
 import type { NativeUIRuntimeHandle, NativeUIOptions, NativeUIStatus } from './definitions.js';
 import { VERTICAL_BARS_TRANSITION_CANCELED } from '../integration/index.js';
 import {
@@ -98,7 +98,7 @@ export const createVerticalBarsWebProjection = (
   };
   // Covered toolbar controls keep a Web visual on their own surface, below the modal.
   const isCovered = (element: Element) =>
-    (!!movingModal(doc) && element.closest('ion-modal') === movingModal(doc)) ||
+    (!!projectingModal(doc) && element.closest('ion-modal') === projectingModal(doc)) ||
     projectionState.owns(element as HTMLElement) ||
     projectionState.isVisible(element as HTMLElement) ||
     isPrepared(element) ||

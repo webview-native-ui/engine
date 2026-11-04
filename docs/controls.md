@@ -26,6 +26,55 @@ re-exports that module. Resolve a single Engine version in the application; do n
 copy of integration into the theme or adapter. The `/controls` entry does not load Ionic runtime code;
 load `/controls/ionic` only when opting into Ionic overlays.
 
+## External reserved regions
+
+Applications supply viewport geometry; Engine does not import or call capacitor-foldable.
+Pass its `getReservedRegions().regions` through `verticalBars.reservedRegions` at startup,
+or call `handle.setReservedRegions(regions)` after posture, bar placement or viewport changes.
+The public handle updates the running shell without restarting native controls.
+
+```ts
+import { Foldable } from '@erkamyaman/capacitor-foldable';
+import { resolveVerticalBarsLayout } from '@webview-native-ui/engine/integration';
+
+// enableNativeUI is supplied by the application's Capacitor or Cordova adapter.
+const ui = await enableNativeUI();
+let generation = 0;
+let disposed = false;
+const refreshRegions = async () => {
+  const current = ++generation;
+  try {
+    const metrics = await resolveVerticalBarsLayout(Foldable);
+    if (!disposed && current === generation) ui.setReservedRegions(metrics.reservedRegions);
+  } catch {
+    if (!disposed && current === generation) ui.setReservedRegions();
+  }
+};
+const fold = await Foldable.addListener('foldStateChange', refreshRegions);
+const placement = await Foldable.addListener('barPlacementChange', refreshRegions);
+window.addEventListener('resize', refreshRegions);
+await refreshRegions();
+
+// Call on application teardown; ignore any in-flight response first.
+const stop = async () => {
+  disposed = true;
+  ++generation;
+  window.removeEventListener('resize', refreshRegions);
+  await Promise.all([fold.remove(), placement.remove()]);
+  await ui.destroy();
+};
+```
+
+Region frames use Web viewport CSS pixels and already include OS interaction margins;
+Engine does not add `margins` again. Only active top-edge occlusions on the current rail
+contribute to the boundary. Missing, empty or unusable regions use a **170 CSS pixel fallback**.
+A valid smaller region overrides that fallback too. Calling `setReservedRegions()` clears
+the supplied geometry; calls after `destroy()` have no effect.
+
+For Ionic modal motion, native controls remain fixed above this boundary. Images take
+over only once the toolbar follows below it, and native ownership returns on crossing back.
+The existing image capture method is unchanged.
+
 ## Verification and release order
 
 Run `npm run test:controls` for the migrated control tests and `npm test` for generic projection.
@@ -37,3 +86,12 @@ Build and verify Engine first, including both signed Maven artifacts in the same
 both npm-distributed podspecs. Release the Engine native artifacts and npm package at the same version
 before refreshing the Capacitor and theme registry lockfiles. Candidate verification uses local npm
 tarballs and a temporary SwiftPM path or local Maven repository; do not commit these temporary paths.
+
+`resolveVerticalBarsLayout(source)` accepts an object exposing `getBarPlacement()` and
+`getReservedRegions()`, without importing the device plugin. It returns logical `edge`,
+`inset`, `toolbarTop` and `reservedRegions`. Unsupported or failed reads leave the
+corresponding fields undefined. Web defaults belong to the theme's
+`setVerticalBarsLayout(metrics)` (requires the corresponding theme layout-input update);
+the native modal boundary independently retains its
+170px fallback when no regions are supplied. The resolver uses the current browser
+viewport and document direction to resolve the physical occlusion.
