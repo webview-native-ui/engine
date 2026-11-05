@@ -109,3 +109,43 @@ test('card modal uses the same prepared background handoff', () => {
   coverOverlayBackground(modal, snapshots);
   expect(snapshots.begin).toHaveBeenCalledWith(document.body);
 });
+
+test.each([
+  ['outer portrait right', 466, 8, 450, false, 84, true],
+  ['outer landscape left', 678, 8, 662, true, 84, true],
+  ['inner floating right', 951, 149, 653, false, 84, false],
+  ['inner floating left', 951, 149, 653, true, 84, false],
+  ['touching right boundary', 951, 214, 653, false, 84, false],
+  ['touching left boundary', 951, 84, 653, true, 84, false],
+  ['no side inset', 466, 8, 450, false, 0, false],
+] as const)('%s selects the rail using logical dialog bounds', async (_name, viewport, x, width, left, inset, expected) => {
+  vi.useFakeTimers();
+  vi.stubGlobal('innerWidth', viewport);
+  document.body.innerHTML = '<ion-app class="ios-theme-vertical-bars"><ion-modal></ion-modal></ion-app>';
+  const app = document.querySelector('ion-app')!;
+  if (left) app.classList.add('ios-theme-vertical-bars-left');
+  app.style.setProperty(`--ios-theme-vertical-bars-safe-area-${left ? 'left' : 'right'}-resolved`, `${inset}px`);
+  // An explicit zero must override the legacy native inset.
+  app.style.setProperty('--ios-theme-vertical-bars-native-inset', '84px');
+  const modal = document.querySelector('ion-modal')!;
+  const wrapper = document.createElement('div');
+  wrapper.setAttribute('part', 'content');
+  modal.attachShadow({ mode: 'open' }).append(wrapper);
+  Object.defineProperties(wrapper, { offsetLeft: { value: x }, offsetWidth: { value: width } });
+  wrapper.getAnimations = () => [];
+  // Presentation transforms must not change rail eligibility.
+  wrapper.getBoundingClientRect = () => DOMRect.fromRect({ x: 200, y: 8, width: 100, height: 300 });
+  const stop = observeVerticalBarsModals(document);
+  try {
+    modal.dispatchEvent(new CustomEvent('ionModalDidPresent', { bubbles: true }));
+    await vi.advanceTimersByTimeAsync(40);
+    expect(modal.classList.contains('ios-theme-vertical-bars-modal')).toBe(expected);
+    app.classList.remove('ios-theme-vertical-bars');
+    await vi.advanceTimersByTimeAsync(40);
+    expect(modal.classList.contains('ios-theme-vertical-bars-modal')).toBe(false);
+  } finally {
+    stop();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  }
+});

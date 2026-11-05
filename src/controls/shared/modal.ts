@@ -122,13 +122,25 @@ export const observeVerticalBarsModals = (doc: Document, animate: () => boolean 
       (state.moving === top ? pointerActive || touchActive || animating || moved : moved && (pointerActive || touchActive || animating))
         ? top
         : undefined;
+    const appStyle = app && win.getComputedStyle(app);
+    const leftRail = app?.classList.contains('ios-theme-vertical-bars-left') ?? false;
+    const resolvedInset = parseFloat(
+      appStyle?.getPropertyValue(`--ios-theme-vertical-bars-safe-area-${leftRail ? 'left' : 'right'}-resolved`) ?? '',
+    );
+    const inset = Number.isFinite(resolvedInset)
+      ? resolvedInset
+      : parseFloat(appStyle?.getPropertyValue('--ios-theme-vertical-bars-native-inset') ?? '') || 0;
     const wanted = new Set<Element>();
     for (const modal of modals) {
       const content = modal.shadowRoot?.querySelector<HTMLElement>('[part~="content"]');
       if (content) wanted.add(content);
       // offsetWidth is unaffected by Ionic's presentation transforms.
       const fullWidth = !!content && Math.abs(content.offsetWidth - win.innerWidth) <= 1 && Math.abs(content.offsetLeft) <= 1;
-      const enabled = !!app?.contains(modal) && active.includes(modal) && fullWidth;
+      const overlapsRail =
+        !!content &&
+        inset > 0 &&
+        (leftRail ? content.offsetLeft < inset : content.offsetLeft + content.offsetWidth > win.innerWidth - inset);
+      const enabled = !!app?.contains(modal) && active.includes(modal) && (fullWidth || overlapsRail);
       if (enabled) {
         const top = modalPreparing(modal) ? 0 : (modalVerticalBarFrame(modal)?.y ?? 0);
         const offset = `${top}px`;
