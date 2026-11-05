@@ -143,6 +143,83 @@ const prepare = async (
   await expect(page.locator(shared ? '#projection-host' : proxy ? '#proxy' : '#source')).toHaveAttribute('data-native-ui-snapshot', /.+/);
 };
 
+for (const composite of ['partial', 'companion', 'replacement'] as const)
+  test(`image leases and source-context validation use the declared ${composite} sources`, async ({ page }) => {
+    await boot(page);
+    await page.evaluate(async (composite) => {
+      const w = window as any;
+      const anchor = document.getElementById('source')!;
+      anchor.innerHTML = '<button id="selected">Native</button><button id="unselected">Web</button>';
+      const selected = document.getElementById('selected')!;
+      const fallback = document.createElement('div');
+      document.body.append(fallback);
+      w.claimCalls = [];
+      w.claimManager = await w.createProjection(
+        fallback,
+        'claims',
+        async (request: any) => {
+          w.claimCalls.push(request);
+          if (request.action === 'prepare')
+            return { token: 'claims-image', parts: [{ ids: ['group'], url: 'file:///image.png', x: 0, y: 0, width: 120, height: 40 }] };
+          return { shown: true };
+        },
+        {
+          current: (sources: HTMLElement[]) => {
+            w.currentClaimIDs = sources.map((source) => source.id);
+            return sources.every((source) => !!source.closest('#surface'));
+          },
+        },
+      );
+      w.claimManager.consider(1, [
+        {
+          element: anchor,
+          sources: composite !== 'companion' ? [selected] : [anchor, selected],
+          control: { id: 'group', x: 0, y: 0, width: 120, height: 40 },
+        },
+      ]);
+    }, composite);
+    const expected = composite !== 'companion' ? ['selected'] : ['source', 'selected'];
+    await expect
+      .poll(() => page.evaluate(() => (window as any).claimManager.preparedOwners.map((source: HTMLElement) => source.id)))
+      .toEqual(expected);
+    if (composite === 'replacement') {
+      const owners = await page.evaluate(() => {
+        const w = window as any;
+        w.claimManager.consider(2, [
+          {
+            element: document.getElementById('source'),
+            sources: [document.getElementById('unselected')],
+            control: { id: 'group', x: 0, y: 0, width: 120, height: 40 },
+          },
+        ]);
+        w.claimManager.begin();
+        return w.claimManager.owners.length;
+      });
+      expect(owners).toBe(0); // Matching geometry cannot lease the previous DOM source.
+      await page.evaluate(() => (window as any).claimManager.destroy());
+      return;
+    }
+    await page.evaluate(() => (window as any).claimManager.begin());
+    await expect
+      .poll(() => page.evaluate(() => (window as any).claimManager.visibleOwners.map((source: HTMLElement) => source.id)))
+      .toEqual(expected);
+    expect(await page.evaluate(() => (window as any).currentClaimIDs)).toEqual(expected);
+    if (composite === 'partial')
+      expect(
+        await page.evaluate(() =>
+          (window as any).claimManager.owners.some((source: HTMLElement) => source.contains(document.getElementById('unselected'))),
+        ),
+      ).toBe(false);
+    await page.evaluate(() => {
+      // The anchor remains mounted, but a represented source has left its context.
+      document.getElementById('other')!.append(document.getElementById('selected')!);
+      (window as any).claimManager.end();
+    });
+    expect(await page.evaluate(() => (window as any).claimManager.token)).toBeUndefined();
+    expect(await page.evaluate(() => (window as any).claimManager.visibleOwners.length)).toBe(0);
+    await page.evaluate(() => (window as any).claimManager.destroy());
+  });
+
 test('returning images follow host motion until native acknowledges restoration', async ({ page }) => {
   await prepare(page);
   await page.clock.install();
@@ -173,8 +250,15 @@ test('returning images follow host motion until native acknowledges restoration'
 
 test('prepared pixels appear without a new capture; only matching restore ACK retires them', async ({ page }) => {
   await prepare(page);
+  const ownership = () =>
+    page.evaluate(() => {
+      const manager = (window as any).manager;
+      return [manager.owners.length, manager.visibleOwners.length, manager.preparedOwners.length];
+    });
+  expect(await ownership()).toEqual([0, 0, 1]);
   await page.evaluate(() => (window as any).manager.begin());
   await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
+  expect(await ownership()).toEqual([1, 1, 1]);
   expect(await page.evaluate(() => getComputedStyle(document.querySelector('#source > img')!).opacity)).toBe('1');
   expect(await page.evaluate(() => (window as any).calls.filter((c: any) => c.action === 'prepare').length)).toBe(1);
   await page.evaluate(() => {
@@ -183,13 +267,21 @@ test('prepared pixels appear without a new capture; only matching restore ACK re
     w.manager.updated(undefined, ['counter'], 1);
   });
   await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
+  expect(await ownership()).toEqual([0, 1, 1]);
   await page.evaluate(() => (window as any).manager.updated(undefined, ['counter'], 2));
   await expect(page.locator('#source')).not.toHaveAttribute('data-native-ui-snapshot-visible');
   await expect(page.locator('button')).toBeVisible();
+  expect(await ownership()).toEqual([0, 0, 1]);
 });
 for (const related of [true, false])
   test(`image geometry invalidation is owner-scoped (${related})`, async ({ page }) => {
     await prepare(page);
+    await page.evaluate(() => {
+      const w = window as any;
+      w.source.sources = [document.querySelector('#source button')];
+      w.manager.consider(2, [w.source]);
+    });
+    await expect.poll(() => page.evaluate(() => (window as any).manager.preparedOwners[0]?.tagName)).toBe('BUTTON');
     const layers = await page.evaluate((related) => {
       const w = window as any,
         owner = document.querySelector('#scroll') as HTMLElement;
@@ -1403,39 +1495,47 @@ test('pause preserves renderer intent and re-covers a native shown notification'
   expect(await page.evaluate(() => (window as any).manager.visibleOwners.length)).toBe(0);
 });
 
-test('a new batched renderer inherits a pause when its first image is prepared', async ({ page }) => {
-  await boot(page);
-  await page.evaluate(async () => {
-    const w = window as any;
-    w.engine.pause();
-    const source = document.querySelector<HTMLElement>('#source')!;
-    const { x, y, width, height } = source.getBoundingClientRect();
-    w.calls = [];
-    w.surface = await w.engine.createWebProjectionSurface(
-      {
-        listen: async () => ({ remove() {} }),
-        send: async (request: any) => {
-          w.calls.push(request);
-          if (request.action === 'prepare')
-            return { token: 'late', parts: [{ ids: ['counter'], url: 'file:///image.png', x, y, width, height }] };
-          if (request.action === 'cover') return { shown: true };
-          return {};
+for (const request of ['pause', 'begin', 'cancel'] as const)
+  test(`a lazy renderer preserves image intent until preparation (${request})`, async ({ page }) => {
+    await boot(page);
+    await page.evaluate(async (request) => {
+      const w = window as any;
+      if (request === 'pause') w.engine.pause();
+      const source = document.querySelector<HTMLElement>('#source')!;
+      const { x, y, width, height } = source.getBoundingClientRect();
+      w.calls = [];
+      w.surface = await w.engine.createWebProjectionSurface(
+        {
+          listen: async () => ({ remove() {} }),
+          send: async (request: any) => {
+            w.calls.push(request);
+            if (request.action === 'prepare')
+              return { token: 'late', parts: [{ ids: ['counter'], url: 'file:///image.png', x, y, width, height }] };
+            if (request.action === 'cover') return { shown: true };
+            return {};
+          },
         },
-      },
-      { namespace: 'late', target: () => source, wake() {}, blocked: () => false },
-    );
-    w.surface.consider(1, [{ element: source, control: { id: 'counter', x, y, width, height } }]);
+        { namespace: 'late', target: () => source, wake() {}, blocked: () => false },
+      );
+      if (request !== 'pause') w.surface.begin();
+      if (request === 'cancel') w.surface.end();
+      if (w.surface.owners.length) throw new Error('A request cannot acquire pixels before preparation');
+      w.surface.consider(1, [{ element: source, control: { id: 'counter', x, y, width, height } }]);
+    }, request);
+    await expect.poll(() => page.evaluate(() => (window as any).surface.preparedOwners.length)).toBe(1);
+    if (request === 'cancel') {
+      expect(await page.evaluate(() => (window as any).surface.token)).toBeUndefined();
+      expect(await page.evaluate(() => (window as any).calls.some((call: any) => call.action === 'cover'))).toBe(false);
+    } else await expect.poll(() => page.evaluate(() => (window as any).surface.token)).toBe('late');
+    await page.evaluate(async () => {
+      const w = window as any;
+      await w.surface.destroy();
+      w.calls.length = 0;
+      w.engine.resume();
+      w.engine.pause();
+    });
+    expect(await page.evaluate(() => (window as any).calls)).toEqual([]);
   });
-  await expect.poll(() => page.evaluate(() => (window as any).surface.token)).toBe('late');
-  await page.evaluate(async () => {
-    const w = window as any;
-    await w.surface.destroy();
-    w.calls.length = 0;
-    w.engine.resume();
-    w.engine.pause();
-  });
-  expect(await page.evaluate(() => (window as any).calls)).toEqual([]);
-});
 
 test('reconciliation can repeat begin while paused without a cover loop', async ({ page }) => {
   await prepare(page);

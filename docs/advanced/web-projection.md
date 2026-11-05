@@ -37,10 +37,23 @@ The container, bridge and update callbacks above belong to the consuming plugin.
 
 1. After an accepted native update, call `projection.consider(revision, sources)`. Sources associate the native IDs and viewport frames with their source DOM; they need not be inside the fallback element. Images are captured and decoded in advance.
 2. Call `projection.changed()` for appearance changes, or `projection.changed(scrollElement)` to invalidate scroll geometry. Layout updates go through `consider`; use `invalidate()` for other geometry changes.
-3. Before covering Native with a Web overlay, call `projection.begin()`. It displays already prepared pixels at the fixed fallback. No new capture or decode starts here. If capture is unavailable, the plugin keeps its ordinary Web fallback.
-4. Exclude `projection.owners` from normal Native updates while the image owns those sources. `visibleOwners` keeps their return pixels while Native is being restored; `preparedOwners` identifies sources with prepared images. These arrays are read-only snapshots.
+3. Before covering Native with a Web overlay, call `projection.begin()`. It displays already prepared pixels at the fixed fallback. No new capture or decode starts here. If no image is ready, no pixel lease is acquired. The plugin retains its existing ownership and chooses how to handle unavailable images.
+4. Exclude `projection.owners` from normal Native updates while their pixels are delegated to the image. `visibleOwners` keeps their return pixels while Native is being restored; `preparedOwners` identifies sources with prepared images. These arrays are read-only snapshots.
 5. Call `projection.end()`, send the normal native update, then call `projection.updated(snapshotToken, acceptedIDs, revision)`. A newer acknowledgement containing all captured IDs retires the image.
 6. Call `projection.destroy()` when disposing the surface. It releases only its own images and listener; the plugin owns final Native reset and its DOM.
+
+Image requests, pixel handoffs, and renderer ownership are separate. `begin()` requests an image; it does not release Native ownership or imply that pixels are ready. The request survives lazy initialization and preparation until `end()` cancels it. A Document pause holds the same request independently.
+
+| Image state                     | `owners`         | `visibleOwners`            | Renderer action                                                                           |
+| ------------------------------- | ---------------- | -------------------------- | ----------------------------------------------------------------------------------------- |
+| Idle / preparing                | Empty            | Empty                      | Keep normal Native rendering. A prepared cache alone does not transfer pixels.            |
+| Cover pending (prepared pixels) | Captured sources | Empty                      | Use the ordered cover transport; Native's entry copy bridges its acknowledgement.         |
+| Image displayed                 | Captured sources | Captured sources           | Temporarily omit these controls from Native updates, retaining renderer source ownership. |
+| Restoring Native                | Empty            | Previously visible sources | Send the Native controls again. Keep the image until a newer, complete acknowledgement.   |
+
+The image state is the single source for these read-only arrays. Motion, cache misses, and the end of an image handoff do not themselves return a renderer's source to Web. The consuming renderer makes that decision for removed/ineligible sources, rejected Native controls, or disposal. The `painted` notification crosses a rendering opportunity before retiring Native's entry copy; it is not a compositor completion API.
+
+For composite controls, `sources` declares the exact DOM elements represented by the image and replaces the default `[element]`. The `element` remains the control/layout anchor; include it explicitly only when the image also represents that whole element. For a partial button group, list only the selected children so unselected siblings retain their own presentation. For searchable tabs, include the represented trigger/footer companions. `options.current(sources)` receives this same captured source set when validating presentation and restoration, so moving a companion to another context invalidates its old image even if the layout anchor remains connected.
 
 The engine prepares a noninteractive `img` inside the fallback container (directly inside its open ShadowRoot when present) while Native is visible. It reuses the decoded image and DOM node across handoffs, and releases them when the scope is retired or destroyed. The image is `inert`, hidden from accessibility and excluded from hit testing. The existing fallback and its children are never cloned, replaced, removed or assigned `inert`/`aria-hidden`; their listeners, values and application changes survive projection. Both `::before` and `::after` remain available to the application.
 
