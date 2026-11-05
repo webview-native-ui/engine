@@ -722,16 +722,20 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
           updateOffsets();
         }
         win.cancelAnimationFrame(paintFrame);
+        // rAF callbacks run before paint. Cross a paint boundary before retiring
+        // Native's entry copy, keeping it over WebKit's compositing interval.
         paintFrame = win.requestAnimationFrame(() => {
-          paintFrame = 0;
-          if (!isCurrent()) return;
-          void call({ action: 'painted', token: image.data.token })
-            .then((result) => {
-              if (isCurrent() && result?.shown === false) abandon(image, false);
-            })
-            .catch(() => {
-              if (isCurrent()) abandon(image, false);
-            });
+          paintFrame = win.requestAnimationFrame(() => {
+            paintFrame = 0;
+            if (!isCurrent()) return;
+            void call({ action: 'painted', token: image.data.token })
+              .then((result) => {
+                if (isCurrent() && result?.shown === false) abandon(image, false);
+              })
+              .catch(() => {
+                if (isCurrent()) abandon(image, false);
+              });
+          });
         });
         callbacks.wake();
       })

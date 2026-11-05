@@ -372,6 +372,46 @@ for (const shared of [false, true])
     expect(await page.evaluate(() => (window as any).calls.filter((c: any) => c.action === 'prepare').length)).toBe(1);
   });
 
+for (const completion of ['paint', 'restore', 'destroy'] as const)
+  test(`entry copy waits for a paint boundary and cancels stale painted notifications (${completion})`, async ({ page }) => {
+    await prepare(page);
+    await page.evaluate(() => {
+      const w = window as any;
+      const callbacks = new Map<number, FrameRequestCallback>();
+      let next = 0;
+      window.requestAnimationFrame = (callback) => {
+        callbacks.set(++next, callback);
+        return next;
+      };
+      window.cancelAnimationFrame = (id) => {
+        callbacks.delete(id);
+      };
+      w.paintFrame = () => {
+        const frame = [...callbacks.values()];
+        callbacks.clear();
+        frame.forEach((callback) => callback(performance.now()));
+      };
+      w.holdCover = true;
+      w.manager.begin();
+      w.coverReplies.shift()({ shown: true });
+    });
+    expect(await page.evaluate(() => (window as any).calls.filter((call: any) => call.action === 'painted'))).toHaveLength(0);
+    await page.evaluate(() => (window as any).paintFrame());
+    // The first callback is still before WebKit can paint the newly visible image.
+    expect(await page.evaluate(() => (window as any).calls.filter((call: any) => call.action === 'painted'))).toHaveLength(0);
+    await page.evaluate(async (completion) => {
+      const w = window as any;
+      if (completion === 'restore') {
+        w.manager.end();
+        w.manager.updated(undefined, ['counter'], 2);
+      } else if (completion === 'destroy') await w.manager.destroy();
+      w.paintFrame();
+    }, completion);
+    expect(await page.evaluate(() => (window as any).calls.filter((call: any) => call.action === 'painted'))).toHaveLength(
+      completion === 'paint' ? 1 : 0,
+    );
+  });
+
 test('a late cover reply cannot expose a reopened cached image before its own cover succeeds', async ({ page }) => {
   await prepare(page);
   await page.evaluate(() => {
