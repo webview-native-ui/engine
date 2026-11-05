@@ -1,6 +1,6 @@
 {
   "name": "@webview-native-ui/engine",
-  "version": "1.0.2-0",
+  "version": "1.0.2",
   "description": "Native UI placement, scroll tracking, and Web projection for Capacitor and Cordova plugin maintainers.",
   "type": "module",
   "license": "MIT",
