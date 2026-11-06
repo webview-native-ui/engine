@@ -5,6 +5,47 @@ import UIKit
 @testable import WebViewNativeUIEngine
 
 final class NativeUICoveredSnapshotsTests: XCTestCase {
+    @MainActor func testOnlyRendererInteractionBlocksCapture() async throws {
+        let window = SnapshotTestWindow(frame: UIScreen.main.bounds)
+        window.rootViewController = UIViewController()
+        window.makeKeyAndVisible()
+        let web = window.rootViewController!.view!
+        let native = UIView(frame: CGRect(x: 20, y: 80, width: 60, height: 44))
+        window.addSubview(native)
+        let snapshots = NativeUICoveredSnapshots()
+        defer { snapshots.reset(); window.isHidden = true }
+        var changes: [Bool] = []
+        snapshots.observe(window, acceptsTouch: { $0.isDescendant(of: native) }) { changes.append($0) }
+        let observer = try XCTUnwrap(window.gestureRecognizers?.last)
+        let webTouch = SnapshotTestTouch(web)
+        let nativeTouch = SnapshotTestTouch(native)
+        let anotherWebTouch = SnapshotTestTouch(web)
+        let event = UIEvent()
+        observer.touchesBegan([webTouch, anotherWebTouch], with: event)
+        observer.touchesEnded([anotherWebTouch], with: event)
+        XCTAssertNotEqual(observer.state, .failed)
+        XCTAssertTrue(changes.isEmpty)
+        func prepare() async -> [String: Any] {
+            await withCheckedContinuation { continuation in
+                snapshots.prepare(frames: { ["button": native.frame] }, in: web, viewportWidth: web.bounds.width) {
+                    continuation.resume(returning: $0)
+                }
+            }
+        }
+        let duringWebDrag = await prepare()
+        XCTAssertNotNil(duringWebDrag["token"])
+        observer.touchesBegan([nativeTouch], with: event)
+        XCTAssertEqual(changes, [true])
+        let duringNativePress = await prepare()
+        XCTAssertNil(duringNativePress["token"])
+        observer.touchesEnded([webTouch], with: event)
+        XCTAssertEqual(changes, [true])
+        observer.touchesEnded([nativeTouch], with: event)
+        XCTAssertEqual(changes, [true, false])
+        let afterNativePress = await prepare()
+        XCTAssertNotNil(afterNativePress["token"])
+    }
+
     @MainActor func testRequestHandoffValidatesDestinationsAndRetainsRendererVisibility() async throws {
         let window = SnapshotTestWindow(frame: UIScreen.main.bounds)
         window.rootViewController = UIViewController()
@@ -342,3 +383,9 @@ final class SnapshotTestWindow: UIWindow {
 }
 
 // swiftlint:enable force_unwrapping force_cast
+
+private final class SnapshotTestTouch: UITouch {
+    private let target: UIView
+    init(_ target: UIView) { self.target = target; super.init() }
+    override var view: UIView? { target }
+}
