@@ -769,7 +769,16 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
       // image until its replacement is ready; resizing still invalidates it.
       if (
         callbacks.opaqueUnderlay ||
-        parts.every((part, index) => part.width === image.data.parts[index].width && part.height === image.data.parts[index].height)
+        parts.every((part, index) => {
+          const original = image.data.parts[index];
+          const scale = win.devicePixelRatio || 1;
+          // Transformed DOMRects can differ by floating-point noise. Reuse pixels
+          // only when their raster dimensions still match at the display scale.
+          return (
+            Math.round(part.width * scale) === Math.round(original.width * scale) &&
+            Math.round(part.height * scale) === Math.round(original.height * scale)
+          );
+        })
       )
         image.data = { ...image.data, parts };
       else cached = undefined;

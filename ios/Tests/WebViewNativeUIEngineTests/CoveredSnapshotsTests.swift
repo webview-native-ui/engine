@@ -15,11 +15,16 @@ final class NativeUICoveredSnapshotsTests: XCTestCase {
         let control = UIView()
         let snapshots = NativeUICoveredSnapshots()
         defer { snapshots.reset(); window.isHidden = true }
+        var rendererRetired = false
+        var selectionRejected = false
         func send(_ request: [String: Any]) async -> [String: Any] {
             await withCheckedContinuation { continuation in
                 snapshots.handle(request, in: web, frames: { ids, revision in
                     revision == 7 && ids == ["button"] ? ["button": CGRect(x: 20, y: 80, width: 60, height: 44)] : [:]
-                }, views: { ids in ids == ["button"] ? [control, control] : nil }, complete: { continuation.resume(returning: $0) })
+                }, views: { ids in
+                    guard ids == ["button"], !selectionRejected else { return nil }
+                    return rendererRetired ? [] : [control, control]
+                }, complete: { continuation.resume(returning: $0) })
             }
         }
         let capture = await send(["action": "prepare", "ids": ["button"], "revision": 7, "viewportWidth": Double(web.bounds.width / 2)])
@@ -48,6 +53,15 @@ final class NativeUICoveredSnapshotsTests: XCTestCase {
         XCTAssertFalse(control.isHidden)
         _ = await send(["action": "restored", "token": token])
         XCTAssertTrue(window.subviews.compactMap { $0 as? UIImageView }.isEmpty)
+        // Image presentation can retire renderer views without releasing its source.
+        rendererRetired = true
+        let reopened = await send(request)
+        XCTAssertEqual(reopened["shown"] as? Bool, true)
+        XCTAssertFalse(control.isHidden)
+        _ = await send(["action": "painted", "token": token])
+        selectionRejected = true
+        let refused = await send(request)
+        XCTAssertEqual(refused["shown"] as? Bool, false)
         _ = await send(["action": "release", "token": token])
         let stale = await send(request)
         XCTAssertEqual(stale["shown"] as? Bool, false)

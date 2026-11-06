@@ -29,6 +29,7 @@ public final class NativeUICoveredSnapshots {
     public private(set) var coveringToken: String?
     /// Dispatch the renderer's existing ordered image-handoff transport on the main thread.
     /// The renderer supplies eligible native bounds and the complete views that may be hidden.
+    /// A nil view selection rejects the handoff; an empty selection means the valid image has no live views to retire.
     public func handle(_ request: [String: Any], in webView: UIView,
                        frames: @escaping (Set<String>, Int) -> [String: CGRect],
                        views: (Set<String>) -> [UIView]?, complete: @escaping ([String: Any]) -> Void) {
@@ -50,7 +51,7 @@ public final class NativeUICoveredSnapshots {
         case "cover":
             let ids = identifiers(for: token)
             let destination = request["parts"] == nil ? nil : projectionFrames(request, in: webView)
-            guard !ids.isEmpty, let selected = views(ids), !selected.isEmpty,
+            guard !ids.isEmpty, let selected = views(ids),
                   request["parts"] == nil || destination != nil else { complete(["shown": false]); return }
             var seen = Set<ObjectIdentifier>()
             complete(["shown": cover(token, in: webView, views: selected.filter { seen.insert(ObjectIdentifier($0)).inserted },
