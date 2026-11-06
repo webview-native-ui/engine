@@ -90,12 +90,11 @@ public final class NativeUICoveredSnapshots {
 
     public var covering: Bool { coveringToken != nil }
 
-    public func observe(_ window: UIWindow, acceptsTouch: @escaping (UIView) -> Bool = { _ in true },
-                        changed: @escaping (Bool) -> Void) {
+    public func observe(_ window: UIWindow, changed: @escaping (Bool) -> Void) {
         guard self.window !== window else { return }
         if let observer { self.window?.removeGestureRecognizer(observer) }
         self.window = window
-        let observer = SnapshotTouchObserver(acceptsTouch: acceptsTouch) { [weak self] active in
+        let observer = SnapshotTouchObserver { [weak self] active in
             guard let self else { return }
             self.touching = active
             if active { self.generation += 1 }
@@ -301,15 +300,11 @@ public final class NativeUICoveredSnapshots {
     }
 }
 
-// Only renderer-selected interaction invalidates pixels; Web gestures do not press Native controls.
-// The observer never recognizes or delays the app's gestures.
+// Observes the start of interaction without recognizing or delaying the app's gestures.
 private final class SnapshotTouchObserver: UIGestureRecognizer {
-    private let acceptsTouch: (UIView) -> Bool
     private let changed: (Bool) -> Void
     private var touches = Set<UITouch>()
-    private var allTouches = Set<UITouch>()
-    init(acceptsTouch: @escaping (UIView) -> Bool, changed: @escaping (Bool) -> Void) {
-        self.acceptsTouch = acceptsTouch
+    init(changed: @escaping (Bool) -> Void) {
         self.changed = changed
         super.init(target: nil, action: nil)
         cancelsTouchesInView = false
@@ -320,17 +315,13 @@ private final class SnapshotTouchObserver: UIGestureRecognizer {
     override func canBePrevented(by other: UIGestureRecognizer) -> Bool { false }
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
         let first = self.touches.isEmpty
-        allTouches.formUnion(touches)
-        self.touches.formUnion(touches.filter { $0.view.map(acceptsTouch) ?? false })
-        if first && !self.touches.isEmpty { changed(true) }
+        self.touches.formUnion(touches)
+        if first { changed(true) }
     }
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) { finish(touches) }
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) { finish(touches) }
     private func finish(_ touches: Set<UITouch>) {
-        let wasActive = !self.touches.isEmpty
         self.touches.subtract(touches)
-        allTouches.subtract(touches)
-        if wasActive && self.touches.isEmpty { changed(false) }
-        if allTouches.isEmpty { state = .failed }
+        if self.touches.isEmpty { changed(false); state = .failed }
     }
 }
