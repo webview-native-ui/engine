@@ -26,7 +26,7 @@ export interface WebProjectionOptions {
   captureRevision?(): number;
   /** Select this surface's sources, e.g. the underlying page or the active overlay. */
   eligible?(source: Candidate): boolean;
-  /** Reject a cached image when its owning surface has changed. */
+  /** Validate the captured source set, including composite sources, against its owning surface. */
   current?(sources: HTMLElement[]): boolean;
   /** Temporary movement handoff: rebase return pixels to the current display DOM. */
   transient?: boolean;
@@ -46,6 +46,10 @@ interface Prepared {
   revision: number;
   layout: string;
 }
+
+/** One pixel handoff; requests and renderer source ownership remain independent. */
+type ImageHandoff =
+  { phase: 'covering' | 'image'; image: Prepared } | { phase: 'restoring'; image: Prepared; visible: boolean; revision: number };
 
 const layout = ({ control: c }: Candidate, positionIndependent = false) => [
   c.id,
@@ -68,6 +72,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
   const doc = scope.element.ownerDocument;
   const projectionRequest = getProjectionPause(doc);
   let locallyRequested = false;
+  const imageRequested = () => locallyRequested || projectionRequest.isPaused();
   const win = doc.defaultView!;
   // Native tokens are local to a transport; never use them as global CSS identities.
   const imageIdentity = Array.from(win.crypto.getRandomValues(new Uint32Array(4)), (value) => value.toString(16)).join('-');
@@ -86,11 +91,15 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
   const call = transport.send.bind(transport);
   const imageMarker = 'data-native-ui-snapshot';
   const sourcesChangedEvent = `${scope.namespace}:sources-change`;
-  const owners = new Set<HTMLElement>(),
-    visibleOwners = new Set<HTMLElement>(),
-    preparedOwners = new Set<HTMLElement>();
+  const preparedOwners = new Set<HTMLElement>();
   const scopeIDs = new WeakMap<WebProjectionScope, number>();
   let scopeSerial = 0;
+  const sourceIDs = new WeakMap<HTMLElement, number>();
+  let sourceSerial = 0;
+  const sourceIdentity = (source: HTMLElement) => {
+    if (!sourceIDs.has(source)) sourceIDs.set(source, ++sourceSerial);
+    return sourceIDs.get(source)!;
+  };
   const signature = (candidates: Candidate[]) =>
     JSON.stringify(
       candidates.map((candidate) => {
@@ -99,7 +108,11 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
         const relative = origin
           ? { ...candidate, control: { ...candidate.control, x: candidate.control.x - origin.x, y: candidate.control.y - origin.y } }
           : candidate;
-        return [scopeIDs.get(candidate.scope), layout(relative, !!callbacks.opaqueUnderlay)];
+        return [
+          scopeIDs.get(candidate.scope),
+          layout(relative, !!callbacks.opaqueUnderlay),
+          (candidate.sources ?? [candidate.element]).map(sourceIdentity),
+        ];
       }),
     );
   const sheets = new Map<Document | ShadowRoot, HTMLStyleElement>();
@@ -147,16 +160,16 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
   };
   const viewport = () => `${win.innerWidth}:${win.innerHeight}:${win.devicePixelRatio}`;
   let handoffPending = false;
-  let presented = false;
   let paintFrame = 0;
   let presentation = 0;
   let cached: Prepared | undefined;
   let retiring: object | undefined;
-  let active: Prepared | undefined;
+  let handoff: ImageHandoff | undefined;
+  const restoring = () => handoff?.phase === 'restoring';
+  const imageVisible = () =>
+    !!handoff && (!!callbacks.opaqueUnderlay || handoff.phase === 'image' || (handoff.phase === 'restoring' && handoff.visible));
   let touching = false;
-  let ending = false;
   let restoreTimeout = 0;
-  let restoreRevision = 0;
   let generation = 0;
   let timer = 0;
   let visualRevision = 0;
@@ -168,7 +181,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     const targets = new Set(latest?.candidates.map((candidate) => candidate.scope.element));
     for (const [target, pool] of imagePool) {
       const reusable = !stopped && target.isConnected && targets.has(target);
-      if (reusable && (active || ending || handoffPending)) continue;
+      if (reusable && (handoff || handoffPending)) continue;
       const limit = reusable ? 2 * Math.max(1, cached?.scopes.filter((scope) => scope.element === target).length ?? 0) : 0;
       let spare = Math.max(0, limit - pool.filter((image) => leasedImages.has(image)).length);
       const retained = pool.filter((image) => {
@@ -181,7 +194,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     }
     const liveRoots = new Set<Node>([
       ...(latest?.candidates.map((candidate) => candidate.scope.element.getRootNode()) ?? []),
-      ...(active?.scopes.map((scope) => scope.element.getRootNode()) ?? []),
+      ...(handoff?.image.scopes.map((scope) => scope.element.getRootNode()) ?? []),
       ...(cached?.scopes.map((scope) => scope.element.getRootNode()) ?? []),
       ...[...leasedImages].map((image) => image.getRootNode()),
       ...[...shadowHosts.values()].flatMap((hosts) => [...hosts].map((host) => host.shadowRoot!)),
@@ -209,7 +222,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     preparedSources.clear();
   };
   const dispose = (item: Prepared | undefined, afterPaint = false) => {
-    if (!item || item === cached || item === active) return;
+    if (!item || item === cached || item === handoff?.image) return;
     item.images.forEach((image) => {
       retireImage(image);
     });
@@ -235,7 +248,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
       destination !== 'native' ||
       flight ||
       touching ||
-      active ||
+      handoff ||
       callbacks.blocked() ||
       !latest ||
       (cached?.revision === latest.revision && preparedVisualRevision === visualRevision)
@@ -320,7 +333,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
         stopped ||
         destination !== 'native' ||
         touching ||
-        active ||
+        handoff ||
         callbacks.blocked() ||
         generation !== stamp ||
         viewport() !== size ||
@@ -334,7 +347,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
       const prepared: Prepared = {
         data: result as CoveredSnapshot,
         images,
-        sources: Array.from(new Set(selected.flatMap((item) => [item.element, ...(item.sources ?? [])]))),
+        sources: Array.from(new Set(selected.flatMap((item) => item.sources ?? [item.element]))),
         targets: partSources.map((source) => source.element),
         scopes: partSources.map((source) => source.scope),
         parents: partSources.map((source) => source.scope.element.parentNode),
@@ -371,7 +384,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
       preparedVisualRevision = visual;
       adopted = true;
       dispose(previous);
-      if (projectionRequest.isPaused()) present();
+      if (imageRequested()) present();
     } catch {
       // Preparing a visual is optional. Preserve the previous image or the Web fallback.
     } finally {
@@ -388,7 +401,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
   // available while their replacement is being rendered and decoded.
   const schedule = () => {
     win.clearTimeout(timer);
-    if (!stopped && destination === 'native' && !active && !touching && !callbacks.blocked())
+    if (!stopped && destination === 'native' && !handoff && !touching && !callbacks.blocked())
       timer = win.setTimeout(() => void prepare(), captureDelayMs);
   };
   let consideredLayout: string | undefined;
@@ -404,7 +417,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     // Overlay retirement is not a new source layout. Preserve the pre-overlay
     // image until the presentation path has chosen whether to use it.
     if (callbacks.blocked()) return;
-    if (!active && cached && cached.layout !== signature(select(candidates))) invalidate();
+    if (!handoff && cached && cached.layout !== signature(select(candidates))) invalidate();
     const nextLayout = signature(candidates);
     if (consideredLayout !== nextLayout) {
       consideredLayout = nextLayout;
@@ -420,13 +433,17 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     // A pre-interaction state image is reusable; an image from another scroll
     // position/clip is not. Invalidate only the surface containing that owner.
     if (
-      !active &&
+      !handoff &&
       cached &&
       scrollOwner &&
-      latest?.candidates.some((candidate) => candidate.scrollElement === scrollOwner && cached!.sources.includes(candidate.element))
+      latest?.candidates.some(
+        (candidate) =>
+          candidate.scrollElement === scrollOwner &&
+          (candidate.sources ?? [candidate.element]).some((source) => cached!.sources.includes(source)),
+      )
     )
       invalidate();
-    if (active) {
+    if (handoff) {
       updateOffsets();
     }
     visualRevision++;
@@ -461,12 +478,8 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     offsets.clear();
     paintFrame = 0;
     handoffPending = false;
-    presented = false;
     clearPrepared();
-    active?.sources.forEach((source) => {
-      owners.delete(source);
-      visibleOwners.delete(source);
-    });
+    handoff = undefined;
     rendered.forEach(clearTarget);
     rendered.clear();
     sheets.forEach((style, root) => {
@@ -476,38 +489,31 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
       }
     });
   };
-  const abandon = (expected = active, afterPaint = ending) => {
-    if (active !== expected) return;
-    const previous = new Set([active, cached]);
+  const abandon = (expected = handoff?.image, afterPaint = restoring()) => {
+    if (handoff?.image !== expected) return;
+    const previous = new Set([handoff?.image, cached]);
     detach();
-    active = undefined;
     cached = undefined;
-    ending = false;
     win.clearTimeout(restoreTimeout);
     previous.forEach((item) => dispose(item, afterPaint));
     callbacks.wake();
   };
   const finishRestoration = () => {
-    if (!active) return;
+    if (!handoff) return;
     // A moved return invalidates the cached coordinates, but keeps the active
     // visual until Native has taken ownership at its destination.
-    if (cached !== active) {
+    if (cached !== handoff?.image) {
       abandon();
       return;
     }
-    const image = active;
+    const image = handoff.image;
     presentation++;
     win.cancelAnimationFrame(paintFrame);
     paintFrame = 0;
-    handoffPending = presented = false;
-    image.sources.forEach((source) => {
-      owners.delete(source);
-      visibleOwners.delete(source);
-    });
+    handoffPending = false;
     rendered.forEach((target) => target.removeAttribute('data-native-ui-snapshot-source'));
     showImages(image, !!callbacks.opaqueUnderlay);
-    active = undefined;
-    ending = false;
+    handoff = undefined;
     win.clearTimeout(restoreTimeout);
     // Retire only the temporary return copy. Keep the pre-interaction image
     // available until a replacement finishes, including rapid overlay reopening.
@@ -522,7 +528,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     callbacks.wake();
   };
   const retireRestoration = () => {
-    if (ending) finishRestoration();
+    if (restoring()) finishRestoration();
     pendingCleanup.forEach((run) => run());
   };
   const targetsFor = (image: Prepared) => image.scopes.map((scope) => (validTarget(scope.element) ? scope.element : undefined));
@@ -568,16 +574,16 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
         if (element.style.getPropertyValue(property) !== next) element.style.setProperty(property, next, 'important');
       }
   };
-  const render = (image = active ?? cached) => {
-    if (!image || ending) return false;
+  const render = (image = handoff?.image ?? cached) => {
+    if (!image || restoring()) return false;
     if (!image.sources.every(validSource) || targetsFor(image).some((target) => !target)) {
       invalidate();
       return false;
     }
     const targets = targetsFor(image);
-    if (active) {
+    if (handoff) {
       if (targets.some((target) => !target?.isConnected || !sheets.has(rootFor(target)))) {
-        abandon(active, false);
+        abandon(handoff.image, false);
         return false;
       }
       const next = new Set<HTMLElement>();
@@ -592,7 +598,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
       for (const target of rendered) if (!next.has(target)) clearTarget(target);
       rendered.clear();
       next.forEach((target) => rendered.add(target));
-      showImages(image, presented);
+      showImages(image, imageVisible());
       return true;
     }
     imagePool.forEach((pool) =>
@@ -661,13 +667,13 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
 
   const present = (force = false) => {
     retireRestoration();
-    if (stopped || destination === 'none' || (active && !force)) return;
-    const image = active ?? cached;
+    if (stopped || destination === 'none' || (handoff && !force)) return;
+    const image = handoff?.image ?? cached;
     if (
       !image ||
       image.viewport !== viewport() ||
       !image.sources.every(validSource) ||
-      (callbacks.current && !callbacks.current(image.targets)) ||
+      (callbacks.current && !callbacks.current(image.sources)) ||
       image.targets.some((source) => !preparedKeys.has(source)) ||
       targetsFor(image).some((target) => !target?.isConnected) ||
       [...rendered].some((target) => !target.isConnected)
@@ -681,16 +687,12 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     const currentPresentation = ++presentation;
     const isCurrent = () => presentation === currentPresentation;
     handoffPending = true;
-    presented = !!callbacks.opaqueUnderlay;
-    active = image;
+    handoff = { phase: 'covering', image };
     // Reuse decoded pixels; no capture, bridge acknowledgement or animation wait.
     generation++;
     win.clearTimeout(timer);
-    image.sources.forEach((source) => {
-      owners.add(source);
-    });
     rendered.forEach((target) => target.setAttribute('data-native-ui-snapshot-source', ''));
-    showImages(image, presented);
+    showImages(image, imageVisible());
     // Reconciliation may continue after one frame even if the optional bridge reply
     // is delayed. The ordered native transport processes cover before that update.
     paintFrame = win.requestAnimationFrame(() => {
@@ -715,23 +717,26 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
         }
         // Live translucent Native must be hidden before its composited Web image
         // becomes visible. Native's prepared entry copy spans this bridge interval.
-        if (!ending) {
-          presented = true;
-          image.sources.forEach((source) => visibleOwners.add(source));
+        if (!restoring()) {
+          handoff = { phase: 'image', image };
           render();
           updateOffsets();
         }
         win.cancelAnimationFrame(paintFrame);
+        // rAF callbacks run before paint. Cross a paint boundary before retiring
+        // Native's entry copy, keeping it over WebKit's compositing interval.
         paintFrame = win.requestAnimationFrame(() => {
-          paintFrame = 0;
-          if (!isCurrent()) return;
-          void call({ action: 'painted', token: image.data.token })
-            .then((result) => {
-              if (isCurrent() && result?.shown === false) abandon(image, false);
-            })
-            .catch(() => {
-              if (isCurrent()) abandon(image, false);
-            });
+          paintFrame = win.requestAnimationFrame(() => {
+            paintFrame = 0;
+            if (!isCurrent()) return;
+            void call({ action: 'painted', token: image.data.token })
+              .then((result) => {
+                if (isCurrent() && result?.shown === false) abandon(image, false);
+              })
+              .catch(() => {
+                if (isCurrent()) abandon(image, false);
+              });
+          });
         });
         callbacks.wake();
       })
@@ -740,20 +745,20 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
       });
   };
   const restore = () => {
-    if (!active || stopped || ending) return;
+    if (!handoff || stopped || restoring()) return;
     // A return belongs to the captured surface, never to the modal exposed beneath it.
     if (
-      !active.sources.every(validSource) ||
-      targetsFor(active).some((target) => !target) ||
-      (callbacks.current && !callbacks.current(active.targets))
+      !handoff.image.sources.every(validSource) ||
+      targetsFor(handoff.image).some((target) => !target) ||
+      (callbacks.current && !callbacks.current(handoff.image.sources))
     ) {
-      abandon(active, false);
+      abandon(handoff.image, false);
       return;
     }
     if (callbacks.blocked()) return;
     updateOffsets();
     if (callbacks.transient) {
-      const image = active;
+      const image = handoff.image;
       const targets = targetsFor(image);
       if (targets.some((target) => !target?.isConnected)) {
         abandon(image, false);
@@ -764,25 +769,37 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
       // image until its replacement is ready; resizing still invalidates it.
       if (
         callbacks.opaqueUnderlay ||
-        parts.every((part, index) => part.width === image.data.parts[index].width && part.height === image.data.parts[index].height)
+        parts.every((part, index) => {
+          const original = image.data.parts[index];
+          const scale = win.devicePixelRatio || 1;
+          // Transformed DOMRects can differ by floating-point noise. Reuse pixels
+          // only when their raster dimensions still match at the display scale.
+          return (
+            Math.round(part.width * scale) === Math.round(original.width * scale) &&
+            Math.round(part.height * scale) === Math.round(original.height * scale)
+          );
+        })
       )
         image.data = { ...image.data, parts };
       else cached = undefined;
       // Both requests use the same ordered bridge. Reprojection need not await this optional copy.
       void call({ action: 'restore', token: image.data.token, viewportWidth: win.innerWidth, parts }).catch(() => {});
     }
-    restoreRevision = callbacks.revision?.() ?? latest?.revision ?? 0;
-    ending = true;
-    active.sources.forEach((source) => owners.delete(source));
+    handoff = {
+      phase: 'restoring',
+      image: handoff.image,
+      visible: handoff.phase === 'image',
+      revision: callbacks.revision?.() ?? latest?.revision ?? 0,
+    };
     restoreTimeout = win.setTimeout(() => {
-      if (ending) abandon(active, false);
+      if (handoff?.phase === 'restoring') abandon(handoff.image, false);
     }, 250);
     callbacks.wake();
   };
   const updated = (token: string | undefined, restoredIDs?: string[], revision?: number) => {
-    if (!ending || !active || revision === undefined || revision <= restoreRevision) return;
+    if (handoff?.phase !== 'restoring' || revision === undefined || revision <= handoff.revision) return;
     if (!callbacks.transient && token) return;
-    if (!active.data.parts.every((part) => part.ids.every((id) => restoredIDs?.includes(id)))) return;
+    if (!handoff.image.data.parts.every((part) => part.ids.every((id) => restoredIDs?.includes(id)))) return;
     // Retire the Web image at the native restore acknowledgement, not after
     // another complete reconciliation/paint cycle over live glass.
     finishRestoration();
@@ -795,7 +812,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     const previous = cached;
     cached = undefined;
     if (nativeHidden || stopped) retiring = undefined;
-    if (callbacks.retainPreparedUntilRelease && !active && !nativeHidden && !stopped) {
+    if (callbacks.retainPreparedUntilRelease && !handoff && !nativeHidden && !stopped) {
       if (previous) {
         const pending = {};
         retiring = pending;
@@ -807,7 +824,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
             });
             if (retiring !== pending) return;
             retiring = undefined;
-            if (cached || active) return;
+            if (cached || handoff) return;
             // Another session can already own the same host; retire only our own DOM markers.
             for (const target of rendered) {
               if (target.getAttribute(imageMarker) !== preparedKeys.get(target)) {
@@ -823,7 +840,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
       if (retiring) return;
     }
     dispose(previous);
-    if (active) abandon(active, false);
+    if (handoff) abandon(handoff.image, false);
     else {
       detach();
       preparedKeys.clear();
@@ -837,13 +854,13 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
   };
   const end = () => {
     locallyRequested = false;
-    if (!projectionRequest.isPaused()) restore();
+    if (!imageRequested()) restore();
   };
   const projectionChanged = () =>
     queueMicrotask(() => {
       if (stopped) return;
-      if (projectionRequest.isPaused()) present();
-      else if (!locallyRequested) restore();
+      if (imageRequested()) present();
+      else restore();
       callbacks.wake();
     });
   let eventListener: Awaited<ReturnType<typeof bindProjectionEvents>> | undefined;
@@ -876,10 +893,10 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
   const stopPause = projectionRequest.subscribe(projectionChanged);
   return {
     get owners(): readonly HTMLElement[] {
-      return [...owners];
+      return handoff && handoff.phase !== 'restoring' ? [...handoff.image.sources] : [];
     },
     get visibleOwners(): readonly HTMLElement[] {
-      return [...visibleOwners];
+      return handoff && (handoff.phase === 'image' || (handoff.phase === 'restoring' && handoff.visible)) ? [...handoff.image.sources] : [];
     },
     get preparedOwners(): readonly HTMLElement[] {
       return [...preparedOwners];
@@ -888,11 +905,11 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     changed,
     moved: updateOffsets,
     get token() {
-      return ending ? undefined : active?.data.token;
+      return restoring() ? undefined : handoff?.image.data.token;
     },
     begin,
     get restoring() {
-      return ending;
+      return restoring();
     },
     get handoffPending() {
       return handoffPending;
@@ -945,6 +962,7 @@ export const createWebProjectionBatch = async (
   let latest: { revision: number; sources: Candidate[] } | undefined;
   let stopped = false;
   let batchDocument: Document | undefined;
+  let pendingRequest = false;
   return {
     get owners() {
       return engine?.owners ?? [];
@@ -990,6 +1008,8 @@ export const createWebProjectionBatch = async (
             return;
           }
           engine = created;
+          if (pendingRequest) engine.begin();
+          pendingRequest = false;
           if (latest) engine.consider(latest.revision, latest.sources);
         })
         .catch(() => {
@@ -999,8 +1019,14 @@ export const createWebProjectionBatch = async (
     },
     changed: (owner) => engine?.changed(owner),
     moved: () => engine?.moved(),
-    begin: () => engine?.begin(),
-    end: () => engine?.end(),
+    begin() {
+      if (engine) engine.begin();
+      else pendingRequest = true;
+    },
+    end() {
+      pendingRequest = false;
+      engine?.end();
+    },
     updated: (token, ids, revision) => engine?.updated(token, ids, revision),
     retireRestoration: () => engine?.retireRestoration(),
     invalidate: (nativeHidden?: boolean) => engine?.invalidate(nativeHidden),

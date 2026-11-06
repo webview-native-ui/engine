@@ -21,6 +21,7 @@ export interface ScrollPlacement {
 /** A source and its native rendering. Kind/placement are opaque layout identity keys. */
 export interface WebProjectionSource {
   element: HTMLElement;
+  /** Exact DOM sources represented by this control. Replaces the default [element] when supplied. */
   sources?: HTMLElement[];
   scrollElement?: HTMLElement;
   control: Frame & { id: string; kind?: string; placement?: string; dark?: boolean; rtl?: boolean; scroll?: ScrollPlacement };

@@ -143,7 +143,6 @@ class NativeUISnapshots(private val directory: File) : AutoCloseable {
                     if (request.has("parts")) projectionFrames(request, webView) else null
                 val shown =
                     selected != null &&
-                        selected.isNotEmpty() &&
                         (!request.has("parts") || destination != null) &&
                         cover(
                             token,

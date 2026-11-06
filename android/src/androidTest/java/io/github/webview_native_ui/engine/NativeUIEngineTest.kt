@@ -95,6 +95,8 @@ class NativeUIEngineTest {
         val activity = activity()
         lateinit var snapshots: NativeUISnapshots
         lateinit var native: View
+        var rendererRetired = false
+        var selectionRejected = false
         fun send(request: JSONObject): JSONObject {
             val done = CountDownLatch(1)
             var result: Result<JSONObject>? = null
@@ -108,7 +110,13 @@ class NativeUIEngineTest {
                             mapOf("button" to RectF(20f, 120f, 180f, 184f))
                         else emptyMap()
                     },
-                    views = { ids -> if (ids == setOf("button")) listOf(native) else null },
+                    views = { ids ->
+                        when {
+                            ids != setOf("button") || selectionRejected -> null
+                            rendererRetired -> emptyList()
+                            else -> listOf(native)
+                        }
+                    },
                 ) {
                     result = it
                     done.countDown()
@@ -188,6 +196,12 @@ class NativeUIEngineTest {
                 assertEquals(View.VISIBLE, native.visibility)
             }
             send(JSONObject().put("action", "restored").put("token", token))
+            // Pixel handoff can retire views without releasing the prepared source.
+            main { rendererRetired = true }
+            assertTrue(send(request).getBoolean("shown"))
+            send(JSONObject().put("action", "painted").put("token", token))
+            main { selectionRejected = true }
+            assertFalse(send(request).getBoolean("shown"))
             send(JSONObject().put("action", "release").put("token", token))
             assertFalse(send(request).getBoolean("shown"))
             main { assertEquals(View.VISIBLE, native.visibility) }
