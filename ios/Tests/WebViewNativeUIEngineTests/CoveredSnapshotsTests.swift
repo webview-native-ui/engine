@@ -5,6 +5,60 @@ import UIKit
 @testable import WebViewNativeUIEngine
 
 final class NativeUICoveredSnapshotsTests: XCTestCase {
+    @MainActor func testPixelVisibilityLeasesPreserveLayoutAndReleaseInEitherOrder() {
+        for reverse in [false, true] {
+            let view = UIView(frame: CGRect(x: 20, y: 80, width: 48, height: 48))
+            let mask = CALayer()
+            view.layer.mask = mask
+            let first = NativeUICoveredSnapshots.concealPixels(in: view)
+            let second = NativeUICoveredSnapshots.concealPixels(in: view)
+            XCTAssertFalse(view.isHidden)
+            XCTAssertEqual(view.frame, CGRect(x: 20, y: 80, width: 48, height: 48))
+            (reverse ? second : first)()
+            XCTAssertFalse(view.layer.mask === mask)
+            XCTAssertFalse(view.isUserInteractionEnabled)
+            (reverse ? first : second)()
+            XCTAssertTrue(view.layer.mask === mask)
+            XCTAssertTrue(view.isUserInteractionEnabled)
+            XCTAssertFalse(view.accessibilityElementsHidden)
+            first(); second()
+            XCTAssertTrue(view.layer.mask === mask)
+        }
+    }
+
+    @MainActor func testWebSurfaceHandoffUsesDOMPixelsWithoutFixedNativeCopies() async throws {
+        let window = SnapshotTestWindow(frame: UIScreen.main.bounds)
+        window.rootViewController = UIViewController()
+        window.makeKeyAndVisible()
+        let web = window.rootViewController!.view!
+        web.frame = window.bounds
+        window.layoutIfNeeded()
+        let snapshots = NativeUICoveredSnapshots()
+        defer { snapshots.reset(); window.isHidden = true }
+        let control = UIView()
+        let result: [String: Any] = await withCheckedContinuation { continuation in
+            snapshots.handle(["action": "prepare", "ids": ["button"], "revision": 1,
+                              "viewportWidth": Double(web.bounds.width), "imageSurface": "web"], in: web,
+                             frames: { _, _ in ["button": CGRect(x: 20, y: 80, width: 48, height: 48)] },
+                             views: { _ in [control] }, complete: { continuation.resume(returning: $0) })
+        }
+        let token = try XCTUnwrap(result["token"] as? String)
+        XCTAssertTrue(snapshots.cover(token, in: web, views: [control], transient: true))
+        XCTAssertFalse(control.isHidden)
+        XCTAssertNotNil(control.layer.mask)
+        XCTAssertFalse(control.isUserInteractionEnabled)
+        XCTAssertTrue(control.accessibilityElementsHidden)
+        XCTAssertTrue(window.subviews.compactMap { $0 as? UIImageView }.isEmpty)
+        XCTAssertTrue(snapshots.restore(in: web, token: token))
+        XCTAssertTrue(window.subviews.compactMap { $0 as? UIImageView }.isEmpty)
+        snapshots.restoreControls()
+        XCTAssertFalse(control.isHidden)
+        XCTAssertNil(control.layer.mask)
+        XCTAssertTrue(control.isUserInteractionEnabled)
+        XCTAssertFalse(control.accessibilityElementsHidden)
+        XCTAssertTrue(window.subviews.compactMap { $0 as? UIImageView }.isEmpty)
+    }
+
     @MainActor func testRequestHandoffValidatesDestinationsAndRetainsRendererVisibility() async throws {
         let window = SnapshotTestWindow(frame: UIScreen.main.bounds)
         window.rootViewController = UIViewController()
@@ -136,6 +190,48 @@ final class NativeUICoveredSnapshotsTests: XCTestCase {
         XCTAssertTrue(drawn)
         XCTAssertTrue(pixel.prefix(3).allSatisfy { $0 > 240 },
                       "A successful preparation must contain the white window pixels, not a black display replica")
+    }
+
+    @MainActor func testViewCapturePreservesAlphaWithoutWindowBackgroundOrDuplicateViews() async throws {
+        let window = SnapshotTestWindow(frame: UIScreen.main.bounds)
+        window.rootViewController = UIViewController()
+        window.makeKeyAndVisible()
+        let web = window.rootViewController!.view!
+        web.frame = window.bounds
+        let control = TransparentSnapshotTestView(frame: CGRect(x: 20, y: 80, width: 60, height: 44))
+        web.addSubview(control)
+        window.layoutIfNeeded()
+        let snapshots = NativeUICoveredSnapshots()
+        defer { snapshots.reset(); window.isHidden = true }
+        let result: [String: Any] = await withCheckedContinuation { continuation in
+            snapshots.handle(["action": "prepare", "ids": ["button"], "revision": 1,
+                              "viewportWidth": Double(web.bounds.width), "captureMode": "view"], in: web,
+                             frames: { _, _ in ["button": control.frame] },
+                             views: { _ in [control, control] }, complete: { continuation.resume(returning: $0) })
+        }
+        let parts = try XCTUnwrap(result["parts"] as? [[String: Any]])
+        let url = try XCTUnwrap(URL(string: try XCTUnwrap(parts.first?["url"] as? String)))
+        let image = try XCTUnwrap(UIImage(contentsOfFile: url.path)?.cgImage)
+        XCTAssertEqual(image.bitsPerComponent, 16)
+        for (fraction, expectedAlpha) in [(0.01, 0), (0.5, 128)] {
+            let sample = try XCTUnwrap(image.cropping(to: CGRect(x: Int(Double(image.width) * fraction), y: image.height / 2, width: 1, height: 1)))
+            var pixel = [UInt8](repeating: 0, count: 4)
+            pixel.withUnsafeMutableBytes { bytes in
+                let context = CGContext(data: bytes.baseAddress, width: 1, height: 1, bitsPerComponent: 8,
+                                        bytesPerRow: 4, space: CGColorSpaceCreateDeviceRGB(),
+                                        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+                context.draw(sample, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+            }
+            XCTAssertEqual(Double(pixel[3]), Double(expectedAlpha), accuracy: 1, "Capture must preserve renderer alpha instead of including the white window or drawing the renderer twice")
+        }
+        control.removeFromSuperview()
+        let rejected: [String: Any] = await withCheckedContinuation { continuation in
+            snapshots.handle(["action": "prepare", "ids": ["button"], "revision": 1,
+                              "viewportWidth": Double(web.bounds.width), "captureMode": "view"], in: web,
+                             frames: { _, _ in ["button": control.frame] },
+                             views: { _ in [control] }, complete: { continuation.resume(returning: $0) })
+        }
+        XCTAssertTrue(rejected.isEmpty, "A detached renderer must not produce a valid empty image")
     }
 
     @MainActor func testCapturePreservesCropPositionAndOrientation() async throws {
@@ -342,3 +438,11 @@ final class SnapshotTestWindow: UIWindow {
 }
 
 // swiftlint:enable force_unwrapping force_cast
+
+private final class TransparentSnapshotTestView: UIView {
+    override func drawHierarchy(in rect: CGRect, afterScreenUpdates: Bool) -> Bool {
+        UIColor.red.withAlphaComponent(0.5).setFill()
+        UIRectFillUsingBlendMode(rect, .normal)
+        return true
+    }
+}

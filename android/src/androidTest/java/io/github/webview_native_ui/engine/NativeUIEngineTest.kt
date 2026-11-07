@@ -205,6 +205,60 @@ class NativeUIEngineTest {
             send(JSONObject().put("action", "release").put("token", token))
             assertFalse(send(request).getBoolean("shown"))
             main { assertEquals(View.VISIBLE, native.visibility) }
+            main {
+                rendererRetired = false
+                selectionRejected = false
+            }
+            val webCapture =
+                send(
+                    JSONObject()
+                        .put("action", "prepare")
+                        .put("ids", org.json.JSONArray().put("button"))
+                        .put("revision", 7)
+                        .put("viewportWidth", activity.web.width / 2.0)
+                        .put("imageSurface", "web")
+                )
+            val webToken = webCapture.getString("token")
+            val root = activity.window.decorView as android.view.ViewGroup
+            var before = 0
+            main { before = root.childCount }
+            assertTrue(
+                send(
+                        JSONObject()
+                            .put("action", "cover")
+                            .put("token", webToken)
+                            .put("transient", true)
+                    )
+                    .getBoolean("shown")
+            )
+            main {
+                assertEquals(View.INVISIBLE, native.visibility)
+                assertEquals(
+                    "Web surface must not install a fixed native entry image",
+                    before,
+                    root.childCount,
+                )
+            }
+            assertTrue(
+                send(
+                        JSONObject()
+                            .put("action", "restore")
+                            .put("token", webToken)
+                            .put("viewportWidth", activity.web.width / 2.0)
+                            .put("parts", webCapture.getJSONArray("parts"))
+                    )
+                    .getBoolean("shown")
+            )
+            main {
+                assertEquals(
+                    "Web surface must not install a fixed native return image",
+                    before,
+                    root.childCount,
+                )
+                snapshots.restoreViews()
+                assertEquals(View.VISIBLE, native.visibility)
+            }
+            send(JSONObject().put("action", "release").put("token", webToken))
         } finally {
             main {
                 snapshots.close()

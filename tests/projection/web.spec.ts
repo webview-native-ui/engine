@@ -34,6 +34,7 @@ const prepare = async (
   events = false,
   captureDelayMs?: number,
   transient = false,
+  webSurface = false,
 ) => {
   await boot(page);
   if (shadow)
@@ -44,7 +45,7 @@ const prepare = async (
       (window as any).sourceRoot = host.shadowRoot;
     });
   await page.evaluate(
-    async ({ proxy, shared, events, captureDelayMs, transient }) => {
+    async ({ proxy, shared, events, captureDelayMs, transient, webSurface }) => {
       const w = window as any,
         source = (w.sourceRoot ?? document).querySelector('#source') as HTMLElement,
         owner = (w.sourceRoot ?? document).querySelector('#scroll') as HTMLElement;
@@ -118,6 +119,7 @@ const prepare = async (
         {
           captureDelayMs,
           transient,
+          imageSurface: webSurface ? document.body : undefined,
           wake() {
             w.onWake?.();
           },
@@ -138,7 +140,7 @@ const prepare = async (
       );
       w.manager.consider(1, [w.source]);
     },
-    { proxy, shared, events, captureDelayMs, transient },
+    { proxy, shared, events, captureDelayMs, transient, webSurface },
   );
   await expect(page.locator(shared ? '#projection-host' : proxy ? '#proxy' : '#source')).toHaveAttribute('data-native-ui-snapshot', /.+/);
 };
@@ -1584,3 +1586,87 @@ for (const localFirst of [true, false]) {
     expect(await page.evaluate(() => (window as any).manager.visibleOwners.length)).toBe(0);
   });
 }
+
+test('moving DOM handoff retains pixels through layout staging and retires after the accepted reveal', async ({ page }) => {
+  await prepare(page, false, false, false, false, 50, true, true);
+  await page.evaluate(() => {
+    const w = window as any;
+    w.interact({ active: true });
+    w.manager.begin();
+  });
+  await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
+  await page.evaluate(() => (window as any).manager.end());
+  await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
+  await page.evaluate(() => {
+    const w = window as any;
+    w.manager.prepareNativeReturn(new Map(), 2);
+    w.manager.updated(undefined, ['counter'], 2);
+  });
+  await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
+  await page.evaluate(() =>
+    (window as any).manager.prepareNativeReturn(new Map([['counter', { x: 8, y: 108, width: 120, height: 40 }]]), 2),
+  );
+  await expect.poll(() => page.evaluate(() => (window as any).manager.nativeReady)).toBe(true);
+  await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
+  expect(await page.evaluate(() => (window as any).manager.restoring)).toBe(true);
+  await page.evaluate(() => (window as any).manager.updated(undefined, ['counter'], 2));
+  expect(await page.evaluate(() => (window as any).manager.restoring)).toBe(true);
+  await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
+  await page.evaluate(() => (window as any).manager.updated(undefined, ['counter'], 3));
+  expect(await page.evaluate(() => (window as any).manager.restoring)).toBe(false);
+  expect(await page.evaluate(() => (window as any).calls.filter((c: any) => ['restore', 'painted'].includes(c.action)))).toEqual([]);
+  await destroyProjection(page);
+});
+
+test('moving DOM handoff ignores an old native acknowledgement after immediate reversal', async ({ page }) => {
+  await prepare(page, false, false, false, false, 50, true, true);
+  await page.evaluate(() => {
+    const w = window as any;
+    w.interact({ active: true });
+    w.manager.begin();
+  });
+  await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
+  await page.evaluate(() => {
+    const w = window as any;
+    w.manager.end();
+    w.manager.prepareNativeReturn(new Map([['counter', { x: 8, y: 108, width: 120, height: 40 }]]), 2);
+    w.manager.begin();
+  });
+  await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
+  await page.evaluate(() => (window as any).manager.updated(undefined, ['counter'], 2));
+  await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
+  expect(await page.evaluate(() => (window as any).manager.restoring)).toBe(false);
+  await destroyProjection(page);
+});
+
+test('a delayed Native layout measurement cannot fail or complete a later return', async ({ page }) => {
+  await prepare(page, false, false, false, false, 50, true, true);
+  await page.evaluate(() => {
+    const w = window as any;
+    w.interact({ active: true });
+    w.manager.begin();
+  });
+  await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
+  await page.evaluate(() => {
+    const w = window as any;
+    w.manager.end();
+    w.revision = 3;
+    w.manager.begin();
+  });
+  await expect.poll(() => page.evaluate(() => (window as any).manager.restoring)).toBe(false);
+  await page.evaluate(() => (window as any).manager.end());
+  expect(await page.evaluate(() => (window as any).manager.prepareNativeReturn(new Map(), 2))).toBe(true);
+  expect(await page.evaluate(() => (window as any).manager.nativeReady)).toBe(false);
+  expect(await page.evaluate(() => (window as any).manager.restoring)).toBe(true);
+  await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
+  expect(await page.evaluate(() => (window as any).manager.prepareNativeReturn(new Map(), 4))).toBe(false);
+  await page.evaluate(() =>
+    (window as any).manager.prepareNativeReturn(new Map([['counter', { x: 8, y: 108, width: 120, height: 40 }]]), 4),
+  );
+  await expect.poll(() => page.evaluate(() => (window as any).manager.nativeReady)).toBe(true);
+  await page.evaluate(() => (window as any).manager.updated(undefined, ['counter'], 4));
+  expect(await page.evaluate(() => (window as any).manager.restoring)).toBe(true);
+  await page.evaluate(() => (window as any).manager.updated(undefined, ['counter'], 5));
+  expect(await page.evaluate(() => (window as any).manager.restoring)).toBe(false);
+  await destroyProjection(page);
+});
