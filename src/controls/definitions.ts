@@ -280,7 +280,7 @@ export interface NativeUIConnectionState {
 /** @internal Prepared native pixels, served through Capacitor's local resource handler. */
 export interface CoveredSnapshot {
   token: string;
-  parts: (Frame & { ids: string[]; url: string })[];
+  parts: (Frame & { ids: string[]; url: string; anchorBounds?: Frame })[];
 }
 
 export interface NativeUIPlugin {

@@ -1597,11 +1597,6 @@ test('moving DOM handoff retains pixels through layout staging and retires after
   await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
   await page.evaluate(() => (window as any).manager.end());
   await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
-  await page.evaluate(() => {
-    const w = window as any;
-    w.manager.updated(undefined, ['counter'], 2);
-  });
-  await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
   await page.evaluate(() =>
     (window as any).manager.prepareNativeReturn(new Map([['counter', { x: 8, y: 108, width: 120, height: 40 }]]), 2),
   );
@@ -1613,7 +1608,7 @@ test('moving DOM handoff retains pixels through layout staging and retires after
   await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
   await page.evaluate(() => (window as any).manager.updated(undefined, ['counter'], 3));
   expect(await page.evaluate(() => (window as any).manager.restoring)).toBe(false);
-  expect(await page.evaluate(() => (window as any).calls.filter((c: any) => ['restore', 'painted'].includes(c.action)))).toEqual([]);
+  expect(await page.evaluate(() => (window as any).calls.filter((c: any) => c.action === 'restore').length)).toBe(1);
   await destroyProjection(page);
 });
 
@@ -1755,9 +1750,7 @@ for (const geometry of ['missing', 'incomplete'] as const)
     expect(await page.evaluate(() => (window as any).manager.owners.length)).toBe(0);
     expect(await page.evaluate(() => (window as any).manager.restoring)).toBe(false);
     await expect(page.locator('#source')).not.toHaveAttribute('data-native-ui-snapshot-visible', '');
-    expect(await page.evaluate(() => (window as any).calls.filter((call: any) => ['restore', 'painted'].includes(call.action)))).toEqual(
-      [],
-    );
+    expect(await page.evaluate(() => (window as any).calls.filter((call: any) => call.action === 'restore').length)).toBe(1);
     await destroyProjection(page);
   });
 
@@ -1813,3 +1806,133 @@ for (const change of ['translation', 'subpixel-noise'] as const) {
     await destroyProjection(page);
   });
 }
+
+for (const moving of [false, true]) {
+  test(`prepared pixels share the same entry handshake (moving surface: ${moving})`, async ({ page }) => {
+    await prepare(page, false, false, false, false, 50, true, moving);
+    const covers = await page.evaluate(() => {
+      const w = window as any;
+      w.interact({ active: true });
+      w.holdCover = true;
+      w.manager.begin();
+      return w.calls.filter((call: any) => call.action === 'cover').length;
+    });
+    expect(covers).toBe(1);
+    await expect(page.locator('#source')).not.toHaveAttribute('data-native-ui-snapshot-visible');
+    await page.evaluate(() => (window as any).coverReplies.shift()({ shown: true }));
+    await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
+    await expect.poll(() => page.evaluate(() => (window as any).calls.filter((call: any) => call.action === 'painted').length)).toBe(1);
+    expect(await page.evaluate(() => (window as any).calls.filter((call: any) => call.action === 'prepare').length)).toBe(1);
+    await destroyProjection(page);
+  });
+}
+
+for (const height of [40, 0]) {
+  test(`capture padding stays relative to the moving target (target height: ${height})`, async ({ page }) => {
+    await prepare(page);
+    await page.evaluate(async (height) => {
+      const w = window as any;
+      await w.manager.destroy();
+      const source = document.querySelector<HTMLElement>('#source')!;
+      source.style.height = `${height}px`;
+      w.manager = await w.createProjection(
+        source,
+        'padding',
+        async (request: any) => {
+          if (request.action === 'prepare')
+            return {
+              token: 'padding',
+              parts: [
+                {
+                  ids: ['counter'],
+                  url: 'file:///image.png',
+                  x: 330,
+                  y: 345,
+                  width: 72,
+                  height: 72,
+                  anchorBounds: { x: 12, y: 12, width: 48, height: 48 },
+                },
+              ],
+            };
+          return { shown: true };
+        },
+        { transient: true, imageSurface: document.body },
+      );
+      w.manager.consider(2, [w.source]);
+    }, height);
+    await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot', /.+/);
+    const offset = await page.evaluate(() => {
+      const source = document.querySelector('#source')!;
+      const image = source.querySelector('img')!;
+      return {
+        x: image.getBoundingClientRect().x - source.getBoundingClientRect().x,
+        y: image.getBoundingClientRect().y - source.getBoundingClientRect().y,
+      };
+    });
+    expect(offset).toEqual({ x: -12, y: -12 });
+    await destroyProjection(page);
+  });
+}
+
+test('layout placement freezes both return copies before the Native acknowledgement', async ({ page }) => {
+  await prepare(page);
+  await page.evaluate(async () => {
+    const w = window as any;
+    await w.manager.destroy();
+    w.requests = [];
+    const source = document.querySelector<HTMLElement>('#source')!;
+    w.manager = await w.createProjection(
+      source,
+      'layout',
+      async (request: any) => {
+        w.requests.push(request);
+        if (request.action === 'prepare')
+          return {
+            token: 'layout',
+            parts: [
+              {
+                ids: ['counter'],
+                url: 'file:///image.png',
+                x: 330,
+                y: 345,
+                width: 72,
+                height: 72,
+                anchorBounds: { x: 12, y: 12, width: 48, height: 48 },
+              },
+            ],
+          };
+        return { shown: true };
+      },
+      {
+        transient: true,
+        imageSurface: document.body,
+        layoutFrame: (_target: HTMLElement, part: any, parts: any[]) => ({
+          x: 50,
+          y: 174 + part.y - parts[0].y,
+          width: 48,
+          height: 48,
+        }),
+      },
+    );
+    w.manager.consider(2, [w.source]);
+  });
+  await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot', /.+/);
+  await page.evaluate(() => (window as any).manager.begin());
+  await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
+  const transfer = await page.evaluate(() => {
+    const w = window as any;
+    w.manager.end();
+    document.querySelector<HTMLElement>('#source')!.style.transform = 'translateY(-100px)';
+    const rect = document.querySelector('img[data-native-ui-projection-image]')!.getBoundingClientRect();
+    const part = w.requests.find((request: any) => request.action === 'restore').parts[0];
+    return {
+      image: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+      native: { x: part.x, y: part.y, width: part.width, height: part.height },
+    };
+  });
+  expect(transfer.image).toEqual({ x: 38, y: 162, width: 72, height: 72 });
+  expect(transfer.native).toEqual(transfer.image);
+  await page.evaluate(() => (window as any).manager.updated(undefined, ['counter'], 3));
+  await expect(page.locator('#source')).not.toHaveAttribute('data-native-ui-snapshot-visible');
+  await destroyProjection(page);
+});

@@ -26,7 +26,7 @@ final class NativeUICoveredSnapshotsTests: XCTestCase {
         }
     }
 
-    @MainActor func testWebSurfaceHandoffUsesDOMPixelsWithoutFixedNativeCopies() async throws {
+    @MainActor func testMovingSurfaceSharesEntryAndReturnCovers() async throws {
         let window = SnapshotTestWindow(frame: UIScreen.main.bounds)
         window.rootViewController = UIViewController()
         window.makeKeyAndVisible()
@@ -39,23 +39,30 @@ final class NativeUICoveredSnapshotsTests: XCTestCase {
         let result: [String: Any] = await withCheckedContinuation { continuation in
             snapshots.handle(["action": "prepare", "ids": ["button"], "revision": 1,
                               "viewportWidth": Double(web.bounds.width), "imageSurface": "web"], in: web,
-                             frames: { _, _ in ["button": CGRect(x: 20, y: 80, width: 48, height: 48)] },
+                             frames: { _, _ in ["button": CGRect(x: 20, y: 80, width: 60, height: 108)] },
+                             anchorFrames: { ["button": CGRect(x: 20, y: 80, width: 60, height: 40)] },
                              views: { _ in [control] }, complete: { continuation.resume(returning: $0) })
         }
+        let packet = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONSerialization.data(withJSONObject: result)) as? [String: Any])
+        let anchor = (packet["parts"] as? [[String: Any]])?.first?["anchorBounds"] as? [String: Double]
+        XCTAssertEqual(anchor, ["x": 12, "y": 12, "width": 60, "height": 40])
         let token = try XCTUnwrap(result["token"] as? String)
         XCTAssertTrue(snapshots.cover(token, in: web, views: [control], transient: true))
         XCTAssertFalse(control.isHidden)
         XCTAssertNotNil(control.layer.mask)
         XCTAssertFalse(control.isUserInteractionEnabled)
         XCTAssertTrue(control.accessibilityElementsHidden)
+        XCTAssertEqual(window.subviews.compactMap { $0 as? UIImageView }.count, 1)
+        snapshots.retireCopy(token, entry: true)
         XCTAssertTrue(window.subviews.compactMap { $0 as? UIImageView }.isEmpty)
         XCTAssertTrue(snapshots.restore(in: web, token: token))
-        XCTAssertTrue(window.subviews.compactMap { $0 as? UIImageView }.isEmpty)
+        XCTAssertEqual(window.subviews.compactMap { $0 as? UIImageView }.count, 1)
         snapshots.restoreControls()
         XCTAssertFalse(control.isHidden)
         XCTAssertNil(control.layer.mask)
         XCTAssertTrue(control.isUserInteractionEnabled)
         XCTAssertFalse(control.accessibilityElementsHidden)
+        snapshots.retireCopy(token, entry: false)
         XCTAssertTrue(window.subviews.compactMap { $0 as? UIImageView }.isEmpty)
     }
 
@@ -85,6 +92,7 @@ final class NativeUICoveredSnapshotsTests: XCTestCase {
         let token = try XCTUnwrap(capture["token"] as? String)
         let wire = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONSerialization.data(withJSONObject: capture)) as? [String: Any])
         var part = try XCTUnwrap((wire["parts"] as? [[String: Any]])?.first)
+        XCTAssertEqual(part["anchorBounds"] as? [String: Double], ["x": 6, "y": 6, "width": 30, "height": 22])
         part["y"] = (part["y"] as! Double) + 30
         let request: [String: Any] = ["action": "cover", "token": token, "viewportWidth": Double(web.bounds.width / 2), "parts": [part]]
         var invalid = request
