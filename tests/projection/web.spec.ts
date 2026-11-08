@@ -250,31 +250,34 @@ test('returning images follow host motion until native acknowledges restoration'
   ).toBe(0);
 });
 
-test('prepared pixels appear without a new capture; only matching restore ACK retires them', async ({ page }) => {
-  await prepare(page);
-  const ownership = () =>
-    page.evaluate(() => {
-      const manager = (window as any).manager;
-      return [manager.owners.length, manager.visibleOwners.length, manager.preparedOwners.length];
+for (const moving of [false, true]) {
+  test(`prepared pixels persist until matching restore ACK (moving surface: ${moving})`, async ({ page }) => {
+    await prepare(page, false, false, false, false, 50, moving, moving);
+    const ownership = () =>
+      page.evaluate(() => {
+        const manager = (window as any).manager;
+        return [manager.owners.length, manager.visibleOwners.length, manager.preparedOwners.length];
+      });
+    expect(await ownership()).toEqual([0, 0, 1]);
+    await page.evaluate(() => (window as any).manager.begin());
+    await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
+    expect(await ownership()).toEqual([1, 1, 1]);
+    expect(await page.evaluate(() => getComputedStyle(document.querySelector('img[data-native-ui-projection-image]')!).opacity)).toBe('1');
+    expect(await page.evaluate(() => (window as any).calls.filter((c: any) => c.action === 'prepare').length)).toBe(1);
+    await page.evaluate(() => {
+      const w = window as any;
+      w.manager.end();
+      w.manager.updated(undefined, ['counter'], 1);
     });
-  expect(await ownership()).toEqual([0, 0, 1]);
-  await page.evaluate(() => (window as any).manager.begin());
-  await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
-  expect(await ownership()).toEqual([1, 1, 1]);
-  expect(await page.evaluate(() => getComputedStyle(document.querySelector('#source > img')!).opacity)).toBe('1');
-  expect(await page.evaluate(() => (window as any).calls.filter((c: any) => c.action === 'prepare').length)).toBe(1);
-  await page.evaluate(() => {
-    const w = window as any;
-    w.manager.end();
-    w.manager.updated(undefined, ['counter'], 1);
+    await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
+    expect(await ownership()).toEqual([0, 1, 1]);
+    await page.evaluate(() => (window as any).manager.updated(undefined, ['counter'], 2));
+    await expect(page.locator('#source')).not.toHaveAttribute('data-native-ui-snapshot-visible');
+    await expect(page.locator('button')).toBeVisible();
+    expect(await ownership()).toEqual([0, 0, 1]);
+    if (moving) expect(await page.evaluate(() => (window as any).calls.filter((c: any) => c.action === 'restore').length)).toBe(1);
   });
-  await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
-  expect(await ownership()).toEqual([0, 1, 1]);
-  await page.evaluate(() => (window as any).manager.updated(undefined, ['counter'], 2));
-  await expect(page.locator('#source')).not.toHaveAttribute('data-native-ui-snapshot-visible');
-  await expect(page.locator('button')).toBeVisible();
-  expect(await ownership()).toEqual([0, 0, 1]);
-});
+}
 for (const related of [true, false])
   test(`image geometry invalidation is owner-scoped (${related})`, async ({ page }) => {
     await prepare(page);
@@ -439,15 +442,17 @@ test('identical native tokens stay isolated across plugin scopes and teardown', 
   expect(await page.evaluate(() => document.querySelectorAll('style[data-native-ui-snapshot-base]').length)).toBe(0);
 });
 
-for (const shared of [false, true])
-  test(`delayed cover never exposes pixels before Native is hidden (${shared})`, async ({ page }) => {
-    await prepare(page, false, false, shared);
+for (const surface of ['element', 'shared', 'moving'] as const)
+  test(`delayed cover never exposes pixels before Native is hidden (${surface})`, async ({ page }) => {
+    const shared = surface === 'shared';
+    await prepare(page, false, false, shared, false, 50, surface === 'moving', surface === 'moving');
     const host = page.locator(shared ? '#projection-host' : '#source');
     await page.evaluate(() => {
       const w = window as any;
       w.holdCover = true;
       w.manager.begin();
     });
+    expect(await page.evaluate(() => (window as any).calls.filter((call: any) => call.action === 'cover').length)).toBe(1);
     await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
     await expect(host).not.toHaveAttribute('data-native-ui-snapshot-visible');
     expect(
@@ -1587,27 +1592,6 @@ for (const localFirst of [true, false]) {
   });
 }
 
-test('moving DOM handoff retains pixels until the accepted Native update', async ({ page }) => {
-  await prepare(page, false, false, false, false, 50, true, true);
-  await page.evaluate(() => {
-    const w = window as any;
-    w.interact({ active: true });
-    w.manager.begin();
-  });
-  await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
-  await page.evaluate(() => (window as any).manager.end());
-  await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
-  await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
-  expect(await page.evaluate(() => (window as any).manager.restoring)).toBe(true);
-  await page.evaluate(() => (window as any).manager.updated(undefined, ['counter'], 1));
-  expect(await page.evaluate(() => (window as any).manager.restoring)).toBe(true);
-  await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
-  await page.evaluate(() => (window as any).manager.updated(undefined, ['counter'], 3));
-  expect(await page.evaluate(() => (window as any).manager.restoring)).toBe(false);
-  expect(await page.evaluate(() => (window as any).calls.filter((c: any) => c.action === 'restore').length)).toBe(1);
-  await destroyProjection(page);
-});
-
 test('moving DOM handoff ignores an old native acknowledgement after immediate reversal', async ({ page }) => {
   await prepare(page, false, false, false, false, 50, true, true);
   await page.evaluate(() => {
@@ -1763,26 +1747,6 @@ for (const change of ['translation', 'subpixel-noise'] as const) {
     });
     expect(await page.evaluate(() => (window as any).manager.owners.length)).toBe(0);
     await expect(page.locator('#source')).not.toHaveAttribute('data-native-ui-snapshot-visible', '');
-    await destroyProjection(page);
-  });
-}
-
-for (const moving of [false, true]) {
-  test(`prepared pixels share the same entry handshake (moving surface: ${moving})`, async ({ page }) => {
-    await prepare(page, false, false, false, false, 50, true, moving);
-    const covers = await page.evaluate(() => {
-      const w = window as any;
-      w.interact({ active: true });
-      w.holdCover = true;
-      w.manager.begin();
-      return w.calls.filter((call: any) => call.action === 'cover').length;
-    });
-    expect(covers).toBe(1);
-    await expect(page.locator('#source')).not.toHaveAttribute('data-native-ui-snapshot-visible');
-    await page.evaluate(() => (window as any).coverReplies.shift()({ shown: true }));
-    await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
-    await expect.poll(() => page.evaluate(() => (window as any).calls.filter((call: any) => call.action === 'painted').length)).toBe(1);
-    expect(await page.evaluate(() => (window as any).calls.filter((call: any) => call.action === 'prepare').length)).toBe(1);
     await destroyProjection(page);
   });
 }
