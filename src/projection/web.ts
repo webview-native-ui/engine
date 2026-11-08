@@ -697,13 +697,10 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     });
 
   const present = (force = false) => {
-    if (callbacks.imageSurface && restoring()) {
-      presentation++;
-      win.cancelAnimationFrame(paintFrame);
-      win.clearTimeout(restoreTimeout);
-      handoff = undefined;
-    } else retireRestoration();
-    if (stopped || destination === 'none' || (handoff && !force)) return;
+    const returning = !!callbacks.imageSurface && restoring();
+    if (!returning) retireRestoration();
+    if (stopped || destination === 'none' || (handoff && !force && !returning)) return;
+    // The active pixel lease outlives cache reuse eligibility.
     const image = handoff?.image ?? cached;
     if (
       !image ||
@@ -713,8 +710,14 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
       image.targets.some((source) => !preparedKeys.has(source)) ||
       targetsFor(image).some((target) => !target?.isConnected) ||
       [...rendered].some((target) => !target.isConnected)
-    )
+    ) {
+      if (returning) abandon(handoff?.image, false);
       return;
+    }
+    if (returning) {
+      win.cancelAnimationFrame(paintFrame);
+      win.clearTimeout(restoreTimeout);
+    }
     // Reparenting is renderer-owned. Only that case needs a fresh coordinate conversion;
     // ordinary presentation keeps the prepared layout off the critical path.
     if (image.scopes.some((scope, index) => scope.element.parentNode !== image.parents[index])) render();
@@ -852,11 +855,9 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     );
     callbacks.wake();
   };
-  const prepareNativeReturn = (frames: Map<string, Frame>, revision: number) => {
-    // A delayed measurement belongs to its submitted layout, never a later return.
-    // Obsolete work is a successful no-op; false means the current layout is unusable.
-    if (!callbacks.imageSurface || handoff?.phase !== 'restoring' || handoff.nativeReady || revision <= handoff.revision) return true;
-    const image = handoff.image;
+  // Alignment improves the visual transfer; it is not proof of Native ownership.
+  const returnParts = (image: Prepared, frames: Map<string, Frame> | undefined): Frame[] | undefined => {
+    if (!frames) return;
     const parts: Frame[] = [];
     for (const part of image.data.parts) {
       const rects = part.ids.map((id) => frames.get(id));
@@ -865,7 +866,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
           (rect) => !rect || ![rect.x, rect.y, rect.width, rect.height].every(Number.isFinite) || rect.width <= 0 || rect.height <= 0,
         )
       )
-        return false;
+        return;
       const values = rects as Frame[];
       const x = Math.min(...values.map((rect) => rect.x));
       const y = Math.min(...values.map((rect) => rect.y));
@@ -873,10 +874,19 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
       const height = Math.max(...values.map((rect) => rect.y + rect.height)) - y;
       parts.push({ x: x - (part.width - width) / 2, y: y - (part.height - height) / 2, width: part.width, height: part.height });
     }
+    return parts;
+  };
+  const prepareNativeReturn = (frames: Map<string, Frame> | undefined, revision: number) => {
+    // A delayed measurement belongs to its submitted layout, never a later return.
+    if (!callbacks.imageSurface || handoff?.phase !== 'restoring' || handoff.nativeReady || revision <= handoff.revision) return;
+    const image = handoff.image;
     const returning = handoff;
     returning.layoutRevision = revision;
-    parkImages(image, parts);
-    image.data = { ...image.data, parts: image.data.parts.map((part, index) => ({ ...part, ...parts[index] })) };
+    const parts = returnParts(image, frames);
+    if (parts) {
+      parkImages(image, parts);
+      image.data = { ...image.data, parts: image.data.parts.map((part, index) => ({ ...part, ...parts[index] })) };
+    }
     win.cancelAnimationFrame(paintFrame);
     paintFrame = win.requestAnimationFrame(() => {
       paintFrame = win.requestAnimationFrame(() => {
@@ -886,7 +896,6 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
         callbacks.wake();
       });
     });
-    return true;
   };
   const updated = (token: string | undefined, restoredIDs?: string[], revision?: number) => {
     if (handoff?.phase !== 'restoring' || revision === undefined || revision <= handoff.revision) return;
@@ -1127,7 +1136,7 @@ export const createWebProjectionBatch = async (
       pendingRequest = false;
       engine?.end();
     },
-    prepareNativeReturn: (frames, revision) => engine?.prepareNativeReturn(frames, revision) ?? false,
+    prepareNativeReturn: (frames, revision) => engine?.prepareNativeReturn(frames, revision),
     updated: (token, ids, revision) => engine?.updated(token, ids, revision),
     retireRestoration: () => engine?.retireRestoration(),
     invalidate: (nativeHidden?: boolean) => engine?.invalidate(nativeHidden),
