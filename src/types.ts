@@ -36,8 +36,14 @@ export interface PreparedWebProjection {
 }
 /** Each action carries only the fields required by that phase of handoff. */
 export type WebProjectionRequest =
-  | { action: 'prepare'; revision: number; viewportWidth: number; ids: string[] }
-  | { action: 'cover'; token: string; transient?: boolean; viewportWidth?: number; parts?: (Frame & { ids: string[] })[] }
+  | { action: 'prepare'; revision: number; viewportWidth: number; ids: string[]; captureMode?: 'view'; imageSurface?: 'web' }
+  | {
+      action: 'cover';
+      token: string;
+      transient?: boolean;
+      viewportWidth?: number;
+      parts?: (Frame & { ids: string[] })[];
+    }
   | { action: 'restore'; token: string; viewportWidth: number; parts: (Frame & { ids: string[] })[] }
   | { action: 'prepared' | 'painted' | 'restored' | 'release'; token: string }
   | { action: 'reset' };

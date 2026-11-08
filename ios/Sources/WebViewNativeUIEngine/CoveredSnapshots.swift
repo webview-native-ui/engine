@@ -15,7 +15,21 @@ public final class NativeUICoveredSnapshots {
         let size: CGSize
         let webFrame: CGRect
         let parts: [Part]
+        var webSurface = false
     }
+    private final class PixelVisibility {
+        let originalMask: CALayer?
+        let interaction: Bool
+        let accessibility: Bool
+        let concealedMask = CALayer()
+        var owners = 0
+        init(_ view: UIView) {
+            originalMask = view.layer.mask
+            interaction = view.isUserInteractionEnabled
+            accessibility = view.accessibilityElementsHidden
+        }
+    }
+    private static let pixelVisibility = NSMapTable<UIView, PixelVisibility>(keyOptions: .weakMemory, valueOptions: .strongMemory)
     public init() {}
     private let imageContext = CIContext()
     private var captures: [String: Capture] = [:]
@@ -42,12 +56,18 @@ public final class NativeUICoveredSnapshots {
             let expected = Set(ids)
             let firstFrames = frames(expected, revision)
             guard Set(firstFrames.keys) == expected else { complete([:]); return }
+            let viewCapture = request["captureMode"] as? String == "view"
+            let selected = viewCapture ? views(expected) : nil
+            guard !viewCapture || selected?.isEmpty == false else { complete([:]); return }
             var initial: [String: CGRect]? = firstFrames
             prepare(frames: {
                 let measured = initial ?? frames(expected, revision)
                 initial = nil
                 return Set(measured.keys) == expected ? measured : [:]
-            }, in: webView, viewportWidth: width, complete: complete)
+            }, in: webView, viewportWidth: width, views: selected, complete: { result in
+                if let token = result["token"] as? String { self.captures[token]?.webSurface = request["imageSurface"] as? String == "web" }
+                complete(result)
+            })
         case "cover":
             let ids = identifiers(for: token)
             let destination = request["parts"] == nil ? nil : projectionFrames(request, in: webView)
@@ -107,7 +127,7 @@ public final class NativeUICoveredSnapshots {
     // Gesture release can keep changing SwiftUI button bounds after touchesEnded.
     // Wait off the presentation path for unchanged rendered geometry, not a guessed delay.
     public func prepare(frames: @escaping () -> [String: CGRect], in webView: UIView, viewportWidth: CGFloat,
-                        complete: @escaping ([String: Any]) -> Void) {
+                        views: [UIView]? = nil, complete: @escaping ([String: Any]) -> Void) {
         let stamp = generation
         let start = CACurrentMediaTime()
         func sample(_ previous: [String: CGRect], _ stable: Int) {
@@ -115,7 +135,7 @@ public final class NativeUICoveredSnapshots {
             let current = frames()
             let count = !current.isEmpty && current == previous ? stable + 1 : 0
             if count >= 3 {
-                capture(frames: current, in: webView, viewportWidth: viewportWidth, complete: complete)
+                capture(frames: current, in: webView, viewportWidth: viewportWidth, views: views, complete: complete)
             } else {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.0 / 60.0) { sample(current, count) }
             }
@@ -124,7 +144,7 @@ public final class NativeUICoveredSnapshots {
     }
 
     private func capture(frames: [String: CGRect], in webView: UIView, viewportWidth: CGFloat,
-                         complete: @escaping ([String: Any]) -> Void) {
+                         views: [UIView]?, complete: @escaping ([String: Any]) -> Void) {
         guard !touching, let window = webView.window, !frames.isEmpty,
               viewportWidth > 0, webView.bounds.width > 0 else { complete([:]); return }
         let stamp = generation
@@ -156,9 +176,25 @@ public final class NativeUICoveredSnapshots {
         context.translateBy(x: 0, y: bounds.height * scale)
         context.scaleBy(x: scale, y: -scale)
         context.translateBy(x: -bounds.minX, y: -bounds.minY)
-        // Capture the window itself: display-replica views can rasterize as black on devices.
+        // View capture preserves transparent pixels outside the renderer's own material.
+        // The default window capture retains composited backdrop effects.
+        var roots: [UIView]?
+        if let views {
+            guard !views.isEmpty, views.allSatisfy({ $0.window === window && !$0.isHidden && $0.alpha > 0 }) else { complete([:]); return }
+            var seen = Set<ObjectIdentifier>()
+            roots = views.filter { view in
+                seen.insert(ObjectIdentifier(view)).inserted && !views.contains { $0 !== view && view.isDescendant(of: $0) }
+            }
+        }
         UIGraphicsPushContext(context)
-        let drawn = window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+        var drawn = true
+        if let roots {
+            for root in roots {
+                drawn = root.drawHierarchy(in: root.convert(root.bounds, to: window), afterScreenUpdates: true) && drawn
+            }
+        } else {
+            drawn = window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+        }
         UIGraphicsPopContext()
         guard drawn, let pixels = context.makeImage() else { complete([:]); return }
         let token = UUID().uuidString
@@ -213,7 +249,12 @@ public final class NativeUICoveredSnapshots {
     /// Install prepared pixels before hiding live views, within the same main-thread turn.
     /// A transient (moving) surface does not replace background covering ownership.
     @discardableResult public func cover(_ token: String, in webView: UIView, views: [UIView], transient: Bool = false, frames: [String: CGRect]? = nil) -> Bool {
-        guard restore(in: webView, token: token, frames: frames, entry: true) else { return false }
+        if captures[token]?.webSurface == true {
+            guard let capture = captures[token], let window = webView.window,
+                  window.bounds.size == capture.size, webView.convert(webView.bounds, to: window) == capture.webFrame,
+                  frames == nil || capture.parts.allSatisfy({ part in part.ids.allSatisfy { frames?[$0] != nil } }) else { return false }
+            clearRestoration()
+        } else if !restore(in: webView, token: token, frames: frames, entry: true) { return false }
         if !transient { coveringToken = token }
         hide(views, for: token)
         return true
@@ -221,10 +262,33 @@ public final class NativeUICoveredSnapshots {
 
     public var hidesNativeControls: Bool { hiddenControls != nil }
 
+    /// Conceal only presentation pixels; keep layout and hosted renderer lifetimes intact.
+    /// The owner restores this lease before applying its next presentation policy.
+    public static func concealPixels(in view: UIView) -> () -> Void {
+        let state = pixelVisibility.object(forKey: view) ?? PixelVisibility(view)
+        pixelVisibility.setObject(state, forKey: view)
+        state.owners += 1
+        view.layer.mask = state.concealedMask
+        view.isUserInteractionEnabled = false
+        view.accessibilityElementsHidden = true
+        var restored = false
+        return { [weak view] in
+            guard !restored else { return }
+            restored = true
+            state.owners -= 1
+            guard state.owners == 0, let view else { return }
+            view.layer.mask = state.originalMask
+            view.isUserInteractionEnabled = state.interaction
+            view.accessibilityElementsHidden = state.accessibility
+            pixelVisibility.removeObject(forKey: view)
+        }
+    }
+
     private func hide(_ views: [UIView], for token: String) {
         generation += 1
         restoreControls()
         hiddenControls = (token, views.map { view in
+            if captures[token]?.webSurface == true { return Self.concealPixels(in: view) }
             let hidden = view.isHidden
             view.isHidden = true
             return { [weak view] in view?.isHidden = hidden }
@@ -246,6 +310,7 @@ public final class NativeUICoveredSnapshots {
               window.bounds.size == capture.size, webView.convert(webView.bounds, to: window) == capture.webFrame else { return false }
         if let frames, capture.parts.contains(where: { part in !part.ids.allSatisfy { frames[$0] != nil } }) { return false }
         clearRestoration()
+        if capture.webSurface { return true }
         let views = capture.parts.map { part in
             let view = UIImageView(image: part.image)
             view.frame = webView.convert(frames?[part.ids[0]] ?? part.frame, to: window)

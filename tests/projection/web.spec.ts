@@ -34,6 +34,7 @@ const prepare = async (
   events = false,
   captureDelayMs?: number,
   transient = false,
+  webSurface = false,
 ) => {
   await boot(page);
   if (shadow)
@@ -44,7 +45,7 @@ const prepare = async (
       (window as any).sourceRoot = host.shadowRoot;
     });
   await page.evaluate(
-    async ({ proxy, shared, events, captureDelayMs, transient }) => {
+    async ({ proxy, shared, events, captureDelayMs, transient, webSurface }) => {
       const w = window as any,
         source = (w.sourceRoot ?? document).querySelector('#source') as HTMLElement,
         owner = (w.sourceRoot ?? document).querySelector('#scroll') as HTMLElement;
@@ -118,6 +119,7 @@ const prepare = async (
         {
           captureDelayMs,
           transient,
+          imageSurface: webSurface ? document.body : undefined,
           wake() {
             w.onWake?.();
           },
@@ -138,7 +140,7 @@ const prepare = async (
       );
       w.manager.consider(1, [w.source]);
     },
-    { proxy, shared, events, captureDelayMs, transient },
+    { proxy, shared, events, captureDelayMs, transient, webSurface },
   );
   await expect(page.locator(shared ? '#projection-host' : proxy ? '#proxy' : '#source')).toHaveAttribute('data-native-ui-snapshot', /.+/);
 };
@@ -1582,5 +1584,232 @@ for (const localFirst of [true, false]) {
     await expect.poll(() => page.evaluate(() => (window as any).manager.restoring)).toBe(true);
     await page.evaluate(() => (window as any).manager.updated(undefined, ['counter'], 2));
     expect(await page.evaluate(() => (window as any).manager.visibleOwners.length)).toBe(0);
+  });
+}
+
+test('moving DOM handoff retains pixels through layout staging and retires after the accepted reveal', async ({ page }) => {
+  await prepare(page, false, false, false, false, 50, true, true);
+  await page.evaluate(() => {
+    const w = window as any;
+    w.interact({ active: true });
+    w.manager.begin();
+  });
+  await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
+  await page.evaluate(() => (window as any).manager.end());
+  await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
+  await page.evaluate(() => {
+    const w = window as any;
+    w.manager.updated(undefined, ['counter'], 2);
+  });
+  await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
+  await page.evaluate(() =>
+    (window as any).manager.prepareNativeReturn(new Map([['counter', { x: 8, y: 108, width: 120, height: 40 }]]), 2),
+  );
+  await expect.poll(() => page.evaluate(() => (window as any).manager.nativeReady)).toBe(true);
+  await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
+  expect(await page.evaluate(() => (window as any).manager.restoring)).toBe(true);
+  await page.evaluate(() => (window as any).manager.updated(undefined, ['counter'], 2));
+  expect(await page.evaluate(() => (window as any).manager.restoring)).toBe(true);
+  await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
+  await page.evaluate(() => (window as any).manager.updated(undefined, ['counter'], 3));
+  expect(await page.evaluate(() => (window as any).manager.restoring)).toBe(false);
+  expect(await page.evaluate(() => (window as any).calls.filter((c: any) => ['restore', 'painted'].includes(c.action)))).toEqual([]);
+  await destroyProjection(page);
+});
+
+test('moving DOM handoff ignores an old native acknowledgement after immediate reversal', async ({ page }) => {
+  await prepare(page, false, false, false, false, 50, true, true);
+  await page.evaluate(() => {
+    const w = window as any;
+    w.interact({ active: true });
+    w.manager.begin();
+  });
+  await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
+  await page.evaluate(() => {
+    const w = window as any;
+    w.manager.end();
+    w.manager.prepareNativeReturn(new Map([['counter', { x: 8, y: 108, width: 120, height: 40 }]]), 2);
+    w.manager.begin();
+  });
+  await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
+  await page.evaluate(() => (window as any).manager.updated(undefined, ['counter'], 2));
+  await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
+  expect(await page.evaluate(() => (window as any).manager.restoring)).toBe(false);
+  await destroyProjection(page);
+});
+
+test('a delayed Native layout measurement cannot fail or complete a later return', async ({ page }) => {
+  await prepare(page, false, false, false, false, 50, true, true);
+  await page.evaluate(() => {
+    const w = window as any;
+    w.interact({ active: true });
+    w.manager.begin();
+  });
+  await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
+  await page.evaluate(() => {
+    const w = window as any;
+    w.manager.end();
+    w.revision = 3;
+    w.manager.begin();
+  });
+  await expect.poll(() => page.evaluate(() => (window as any).manager.restoring)).toBe(false);
+  await page.evaluate(() => (window as any).manager.end());
+  await page.evaluate(() => (window as any).manager.prepareNativeReturn(new Map(), 2));
+  expect(await page.evaluate(() => (window as any).manager.nativeReady)).toBe(false);
+  expect(await page.evaluate(() => (window as any).manager.restoring)).toBe(true);
+  await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
+  await page.evaluate(() =>
+    (window as any).manager.prepareNativeReturn(new Map([['counter', { x: 8, y: 108, width: 120, height: 40 }]]), 4),
+  );
+  await expect.poll(() => page.evaluate(() => (window as any).manager.nativeReady)).toBe(true);
+  await page.evaluate(() => (window as any).manager.updated(undefined, ['counter'], 4));
+  expect(await page.evaluate(() => (window as any).manager.restoring)).toBe(true);
+  await page.evaluate(() => (window as any).manager.updated(undefined, ['counter'], 5));
+  expect(await page.evaluate(() => (window as any).manager.restoring)).toBe(false);
+  await destroyProjection(page);
+});
+
+test('a resized active image survives immediate reversal after its reusable cache is invalidated', async ({ page }) => {
+  await prepare(page, false, false, false, false, 50, true, true);
+  await page.evaluate(() => {
+    const w = window as any;
+    w.interact({ active: true });
+    w.manager.begin();
+  });
+  await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
+  await expect.poll(() => page.evaluate(() => (window as any).calls.filter((call: any) => call.action === 'cover').length)).toBe(1);
+  await page.evaluate(() => {
+    const w = window as any;
+    document.getElementById('source')!.style.transform = 'scale(2)';
+    w.activeImage = document.querySelector('[data-native-ui-projection-image]');
+    w.manager.end();
+    w.manager.begin();
+  });
+  await expect.poll(() => page.evaluate(() => (window as any).calls.filter((call: any) => call.action === 'cover').length)).toBe(2);
+  expect(await page.evaluate(() => (window as any).manager.owners.length)).toBe(1);
+  expect(await page.evaluate(() => (window as any).manager.restoring)).toBe(false);
+  expect(await page.evaluate(() => document.querySelector('[data-native-ui-projection-image]') === (window as any).activeImage)).toBe(true);
+  await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
+  await page.evaluate(() => {
+    const w = window as any;
+    w.manager.end();
+    w.manager.prepareNativeReturn(undefined, 2);
+  });
+  await expect.poll(() => page.evaluate(() => (window as any).manager.nativeReady)).toBe(true);
+  await page.evaluate(() => (window as any).manager.updated(undefined, ['counter'], 3));
+  expect(await page.evaluate(() => (window as any).manager.owners.length)).toBe(0);
+  await expect(page.locator('#source')).not.toHaveAttribute('data-native-ui-snapshot-visible', '');
+  await expect.poll(() => page.evaluate(() => (window as any).calls.filter((call: any) => call.action === 'release').length)).toBe(1);
+  await destroyProjection(page);
+});
+
+test('an invalid source ends both its visible image and pixel lease on immediate reversal', async ({ page }) => {
+  await prepare(page, false, false, false, false, 50, true, true);
+  await page.evaluate(() => {
+    const w = window as any;
+    w.interact({ active: true });
+    w.manager.begin();
+  });
+  await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
+  await expect.poll(() => page.evaluate(() => (window as any).calls.filter((call: any) => call.action === 'cover').length)).toBe(1);
+  const result = await page.evaluate(() => {
+    const w = window as any;
+    const source = document.getElementById('source')!;
+    const image = document.querySelector('[data-native-ui-projection-image]')!;
+    w.manager.end();
+    source.remove();
+    w.manager.begin();
+    return {
+      owners: w.manager.owners.length,
+      restoring: w.manager.restoring,
+      visible: source.hasAttribute('data-native-ui-snapshot-visible'),
+      opacity: (image as HTMLElement).style.opacity,
+      covers: w.calls.filter((call: any) => call.action === 'cover').length,
+      releases: w.calls.filter((call: any) => call.action === 'release').length,
+    };
+  });
+  expect(result).toEqual({ owners: 0, restoring: false, visible: false, opacity: '0', covers: 1, releases: 1 });
+  await destroyProjection(page);
+});
+
+for (const geometry of ['missing', 'incomplete'] as const)
+  test(`a ${geometry} alignment measurement cannot strand the accepted Native return`, async ({ page }) => {
+    await prepare(page, false, false, false, false, 50, true, true);
+    await page.evaluate(() => {
+      const w = window as any;
+      w.interact({ active: true });
+      w.manager.begin();
+    });
+    await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
+    await page.evaluate((geometry) => {
+      const w = window as any;
+      w.manager.end();
+      w.manager.prepareNativeReturn(geometry === 'missing' ? undefined : new Map(), 2);
+      w.manager.updated(undefined, ['counter'], 3);
+    }, geometry);
+    expect(await page.evaluate(() => (window as any).manager.restoring)).toBe(true);
+    await expect.poll(() => page.evaluate(() => (window as any).manager.nativeReady)).toBe(true);
+    await page.evaluate(() => (window as any).manager.updated(undefined, ['counter'], 2));
+    expect(await page.evaluate(() => (window as any).manager.restoring)).toBe(true);
+    await page.evaluate(() => (window as any).manager.updated(undefined, ['counter'], 3));
+    expect(await page.evaluate(() => (window as any).manager.owners.length)).toBe(0);
+    expect(await page.evaluate(() => (window as any).manager.restoring)).toBe(false);
+    await expect(page.locator('#source')).not.toHaveAttribute('data-native-ui-snapshot-visible', '');
+    expect(await page.evaluate(() => (window as any).calls.filter((call: any) => ['restore', 'painted'].includes(call.action)))).toEqual(
+      [],
+    );
+    await destroyProjection(page);
+  });
+
+for (const change of ['translation', 'subpixel-noise'] as const) {
+  test(`a completed moving-surface return retains its cache through ${change} during the same gesture`, async ({ page }) => {
+    await prepare(page, false, false, false, false, 50, true, true);
+    await page.evaluate(() => {
+      const w = window as any;
+      w.interact({ active: true });
+      w.cachedImage = document.querySelector('[data-native-ui-projection-image]');
+      w.manager.begin();
+    });
+    await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
+    await page.evaluate(() => {
+      const w = window as any;
+      w.manager.end();
+      w.manager.prepareNativeReturn(new Map([['counter', { x: 8, y: 108, width: 120, height: 40 }]]), 2);
+    });
+    await expect.poll(() => page.evaluate(() => (window as any).manager.nativeReady)).toBe(true);
+    await page.evaluate((change) => {
+      const w = window as any;
+      w.manager.updated(undefined, ['counter'], 3);
+      w.source.control = {
+        ...w.source.control,
+        ...(change === 'translation' ? { y: w.source.control.y + 2.3431243896484375 } : { height: 40.00000762939453 }),
+      };
+      w.manager.consider(4, [w.source]);
+      w.manager.begin();
+    }, change);
+    await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
+    expect(await page.evaluate(() => (window as any).manager.owners.length)).toBe(1);
+    expect(await page.evaluate(() => document.querySelector('[data-native-ui-projection-image]') === (window as any).cachedImage)).toBe(
+      true,
+    );
+    expect(await page.evaluate(() => (window as any).calls.filter((call: any) => call.action === 'prepare').length)).toBe(1);
+    expect(await page.evaluate(() => (window as any).calls.some((call: any) => call.action === 'release'))).toBe(false);
+    // A real raster size change still invalidates the idle cache.
+    await page.evaluate(() => {
+      const w = window as any;
+      w.manager.end();
+      w.manager.prepareNativeReturn(undefined, 5);
+    });
+    await expect.poll(() => page.evaluate(() => (window as any).manager.nativeReady)).toBe(true);
+    await page.evaluate(() => {
+      const w = window as any;
+      w.manager.updated(undefined, ['counter'], 6);
+      w.source.control.width += 8;
+      w.manager.consider(7, [w.source]);
+      w.manager.begin();
+    });
+    expect(await page.evaluate(() => (window as any).manager.owners.length)).toBe(0);
+    await expect(page.locator('#source')).not.toHaveAttribute('data-native-ui-snapshot-visible', '');
+    await destroyProjection(page);
   });
 }
