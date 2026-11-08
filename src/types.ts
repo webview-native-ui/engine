@@ -32,7 +32,8 @@ export interface ScopedWebProjectionSource extends WebProjectionSource {
 }
 export interface PreparedWebProjection {
   token: string;
-  parts: (Frame & { ids: string[]; url: string })[];
+  /** anchorBounds locates the renderer’s layout anchor within the image crop, in viewport units. */
+  parts: (Frame & { ids: string[]; url: string; anchorBounds?: Frame })[];
 }
 /** Each action carries only the fields required by that phase of handoff. */
 export type WebProjectionRequest =

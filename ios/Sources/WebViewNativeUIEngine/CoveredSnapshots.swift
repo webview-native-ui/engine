@@ -8,6 +8,7 @@ public final class NativeUICoveredSnapshots {
     private struct Part {
         let ids: [String]
         let frame: CGRect
+        let anchorFrame: CGRect
         let image: UIImage
         let file: URL
     }
@@ -15,7 +16,7 @@ public final class NativeUICoveredSnapshots {
         let size: CGSize
         let webFrame: CGRect
         let parts: [Part]
-        var webSurface = false
+        var preservesLayout = false
     }
     private final class PixelVisibility {
         let originalMask: CALayer?
@@ -46,6 +47,7 @@ public final class NativeUICoveredSnapshots {
     /// A nil view selection rejects the handoff; an empty selection means the valid image has no live views to retire.
     public func handle(_ request: [String: Any], in webView: UIView,
                        frames: @escaping (Set<String>, Int) -> [String: CGRect],
+                       anchorFrames: (() -> [String: CGRect])? = nil,
                        views: (Set<String>) -> [UIView]?, complete: @escaping ([String: Any]) -> Void) {
         let token = request["token"] as? String ?? ""
         switch request["action"] as? String {
@@ -64,8 +66,8 @@ public final class NativeUICoveredSnapshots {
                 let measured = initial ?? frames(expected, revision)
                 initial = nil
                 return Set(measured.keys) == expected ? measured : [:]
-            }, in: webView, viewportWidth: width, views: selected, complete: { result in
-                if let token = result["token"] as? String { self.captures[token]?.webSurface = request["imageSurface"] as? String == "web" }
+            }, in: webView, viewportWidth: width, views: selected, anchorFrames: anchorFrames, complete: { result in
+                if let token = result["token"] as? String { self.captures[token]?.preservesLayout = request["imageSurface"] as? String == "web" }
                 complete(result)
             })
         case "cover":
@@ -127,7 +129,7 @@ public final class NativeUICoveredSnapshots {
     // Gesture release can keep changing SwiftUI button bounds after touchesEnded.
     // Wait off the presentation path for unchanged rendered geometry, not a guessed delay.
     public func prepare(frames: @escaping () -> [String: CGRect], in webView: UIView, viewportWidth: CGFloat,
-                        views: [UIView]? = nil, complete: @escaping ([String: Any]) -> Void) {
+                        views: [UIView]? = nil, anchorFrames: (() -> [String: CGRect])? = nil, complete: @escaping ([String: Any]) -> Void) {
         let stamp = generation
         let start = CACurrentMediaTime()
         func sample(_ previous: [String: CGRect], _ stable: Int) {
@@ -135,7 +137,7 @@ public final class NativeUICoveredSnapshots {
             let current = frames()
             let count = !current.isEmpty && current == previous ? stable + 1 : 0
             if count >= 3 {
-                capture(frames: current, in: webView, viewportWidth: viewportWidth, views: views, complete: complete)
+                capture(frames: current, anchorFrames: anchorFrames?() ?? [:], in: webView, viewportWidth: viewportWidth, views: views, complete: complete)
             } else {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.0 / 60.0) { sample(current, count) }
             }
@@ -143,7 +145,7 @@ public final class NativeUICoveredSnapshots {
         sample([:], 0)
     }
 
-    private func capture(frames: [String: CGRect], in webView: UIView, viewportWidth: CGFloat,
+    private func capture(frames: [String: CGRect], anchorFrames: [String: CGRect], in webView: UIView, viewportWidth: CGFloat,
                          views: [UIView]?, complete: @escaping ([String: Any]) -> Void) {
         guard !touching, let window = webView.window, !frames.isEmpty,
               viewportWidth > 0, webView.bounds.width > 0 else { complete([:]); return }
@@ -154,14 +156,18 @@ public final class NativeUICoveredSnapshots {
         let webFrame = webView.convert(webView.bounds, to: window)
         // Each crop belongs to one source component. Overlapping crops share
         // the same captured pixels and never combine unrelated components.
-        var regions: [(ids: [String], rect: CGRect)] = []
+        var regions: [(ids: [String], rect: CGRect, anchorFrame: CGRect)] = []
         for (id, frame) in frames.sorted(by: { $0.key < $1.key }) {
             var rect = webView.convert(frame, to: window).insetBy(dx: -12, dy: -12).intersection(window.bounds)
             guard !rect.isNull, rect.width > 0, rect.height > 0 else { complete([:]); return }
             rect = CGRect(x: floor(rect.minX * scale) / scale, y: floor(rect.minY * scale) / scale,
                           width: (ceil(rect.maxX * scale) - floor(rect.minX * scale)) / scale,
                           height: (ceil(rect.maxY * scale) - floor(rect.minY * scale)) / scale)
-            regions.append(([id], rect))
+            let anchor = anchorFrames[id] ?? frame
+            guard [anchor.minX, anchor.minY, anchor.width, anchor.height].allSatisfy(\.isFinite), anchor.width > 0, anchor.height > 0 else {
+                complete([:]); return
+            }
+            regions.append(([id], rect, anchor))
         }
         let bounds = regions.reduce(CGRect.null) { $0.union($1.rect) }
         // Preserve wide-gamut precision during capture. Encode to integer 16-bit
@@ -199,11 +205,11 @@ public final class NativeUICoveredSnapshots {
         guard drawn, let pixels = context.makeImage() else { complete([:]); return }
         let token = UUID().uuidString
         let directory = self.directory
-        let crops = regions.compactMap { region -> (ids: [String], frame: CGRect, image: UIImage)? in
+        let crops = regions.compactMap { region -> (ids: [String], frame: CGRect, anchorFrame: CGRect, image: UIImage)? in
             let crop = CGRect(x: (region.rect.minX - bounds.minX) * scale, y: (region.rect.minY - bounds.minY) * scale,
                               width: region.rect.width * scale, height: region.rect.height * scale)
             guard let part = pixels.cropping(to: crop) else { return nil }
-            return (region.ids, window.convert(region.rect, to: webView), UIImage(cgImage: part, scale: scale, orientation: .up))
+            return (region.ids, window.convert(region.rect, to: webView), region.anchorFrame, UIImage(cgImage: part, scale: scale, orientation: .up))
         }
         guard crops.count == regions.count else { complete([:]); return }
         let imageContext = self.imageContext
@@ -224,7 +230,7 @@ public final class NativeUICoveredSnapshots {
                     let image = UIImage(cgImage: decoded, scale: scale, orientation: .up)
                     let file = directory.appendingPathComponent("\(token)-\(index).png")
                     try png.write(to: file, options: .atomic)
-                    parts.append(Part(ids: crop.ids, frame: crop.frame, image: image, file: file))
+                    parts.append(Part(ids: crop.ids, frame: crop.frame, anchorFrame: crop.anchorFrame, image: image, file: file))
                 }
             } catch {
                 parts.forEach { try? FileManager.default.removeItem(at: $0.file) }
@@ -240,7 +246,10 @@ public final class NativeUICoveredSnapshots {
                 complete(["token": token, "parts": parts.map { part in
                     ["ids": part.ids, "url": part.file.absoluteString,
                      "x": part.frame.minX * ratio, "y": part.frame.minY * ratio,
-                     "width": part.frame.width * ratio, "height": part.frame.height * ratio] as [String: Any]
+                     "width": part.frame.width * ratio, "height": part.frame.height * ratio,
+                     "anchorBounds": ["x": (part.anchorFrame.minX - part.frame.minX) * ratio,
+                                       "y": (part.anchorFrame.minY - part.frame.minY) * ratio,
+                                       "width": part.anchorFrame.width * ratio, "height": part.anchorFrame.height * ratio]] as [String: Any]
                 }])
             }
         }
@@ -249,12 +258,7 @@ public final class NativeUICoveredSnapshots {
     /// Install prepared pixels before hiding live views, within the same main-thread turn.
     /// A transient (moving) surface does not replace background covering ownership.
     @discardableResult public func cover(_ token: String, in webView: UIView, views: [UIView], transient: Bool = false, frames: [String: CGRect]? = nil) -> Bool {
-        if captures[token]?.webSurface == true {
-            guard let capture = captures[token], let window = webView.window,
-                  window.bounds.size == capture.size, webView.convert(webView.bounds, to: window) == capture.webFrame,
-                  frames == nil || capture.parts.allSatisfy({ part in part.ids.allSatisfy { frames?[$0] != nil } }) else { return false }
-            clearRestoration()
-        } else if !restore(in: webView, token: token, frames: frames, entry: true) { return false }
+        if !restore(in: webView, token: token, frames: frames, entry: true) { return false }
         if !transient { coveringToken = token }
         hide(views, for: token)
         return true
@@ -288,7 +292,7 @@ public final class NativeUICoveredSnapshots {
         generation += 1
         restoreControls()
         hiddenControls = (token, views.map { view in
-            if captures[token]?.webSurface == true { return Self.concealPixels(in: view) }
+            if captures[token]?.preservesLayout == true { return Self.concealPixels(in: view) }
             let hidden = view.isHidden
             view.isHidden = true
             return { [weak view] in view?.isHidden = hidden }
@@ -310,7 +314,6 @@ public final class NativeUICoveredSnapshots {
               window.bounds.size == capture.size, webView.convert(webView.bounds, to: window) == capture.webFrame else { return false }
         if let frames, capture.parts.contains(where: { part in !part.ids.allSatisfy { frames[$0] != nil } }) { return false }
         clearRestoration()
-        if capture.webSurface { return true }
         let views = capture.parts.map { part in
             let view = UIImageView(image: part.image)
             view.frame = webView.convert(frames?[part.ids[0]] ?? part.frame, to: window)

@@ -36,7 +36,6 @@ class NativeUISnapshots(private val directory: File) : AutoCloseable {
         val referenceWidth: Int,
         val referenceHeight: Int,
         val parts: List<Part>,
-        var webSurface: Boolean = false,
     )
 
     private data class Copy(
@@ -134,11 +133,7 @@ class NativeUISnapshots(private val directory: File) : AutoCloseable {
                         initial = null
                         measured.takeIf { it.keys == expected } ?: emptyMap()
                     },
-                    complete = { result ->
-                        captures[result.optString("token")]?.webSurface =
-                            request.optString("imageSurface") == "web"
-                        respond(result)
-                    },
+                    complete = respond,
                 )
             }
             "cover" -> {
@@ -546,11 +541,7 @@ class NativeUISnapshots(private val directory: File) : AutoCloseable {
         // Composite pixels cover both the live translucent view and its Web replacement.
         // Install the entry copy before changing native visibility in the same UI turn.
         expiredEntries.remove(token)
-        if (captures[token]?.webSurface == true) {
-            val capture = valid(token, window, reference) ?: return false
-            if (frames != null && capture.parts.any { frames[it.id] == null }) return false
-            clearCopy()
-        } else if (!restore(token, window, reference, frames = frames, entry = true, clips = clips))
+        if (!restore(token, window, reference, frames = frames, entry = true, clips = clips))
             return false
         if (!transient) coveringToken = token
         hide(token, views)
@@ -612,7 +603,6 @@ class NativeUISnapshots(private val directory: File) : AutoCloseable {
         )
             return false
         clearCopy()
-        if (capture.webSurface) return true
         val root = window.decorView as? ViewGroup ?: return false
         val rootLocation = origin(root)
         val sourceLocation = origin(reference)

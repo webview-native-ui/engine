@@ -219,9 +219,28 @@ class NativeUIEngineTest {
                         .put("imageSurface", "web")
                 )
             val webToken = webCapture.getString("token")
-            val root = activity.window.decorView as android.view.ViewGroup
-            var before = 0
-            main { before = root.childCount }
+            fun assertHandoffPixels(message: String, visible: Boolean) = main {
+                assertEquals(View.INVISIBLE, native.visibility)
+                val root = activity.window.decorView
+                val pixels =
+                    android.graphics.Bitmap.createBitmap(
+                        root.width,
+                        root.height,
+                        android.graphics.Bitmap.Config.ARGB_8888,
+                    )
+                root.draw(android.graphics.Canvas(pixels))
+                val origin = IntArray(2)
+                val rootOrigin = IntArray(2)
+                activity.web.getLocationInWindow(origin)
+                root.getLocationInWindow(rootOrigin)
+                val color =
+                    pixels.getPixel(
+                        origin[0] - rootOrigin[0] + 100,
+                        origin[1] - rootOrigin[1] + 150,
+                    )
+                pixels.recycle()
+                assertEquals(message, visible, color == Color.RED)
+            }
             assertTrue(
                 send(
                         JSONObject()
@@ -231,14 +250,9 @@ class NativeUIEngineTest {
                     )
                     .getBoolean("shown")
             )
-            main {
-                assertEquals(View.INVISIBLE, native.visibility)
-                assertEquals(
-                    "Web surface must not install a fixed native entry image",
-                    before,
-                    root.childCount,
-                )
-            }
+            assertHandoffPixels("Entry image bridges the cover acknowledgement", true)
+            send(JSONObject().put("action", "painted").put("token", webToken))
+            assertHandoffPixels("Painted acknowledgement retires the entry image", false)
             assertTrue(
                 send(
                         JSONObject()
@@ -249,12 +263,10 @@ class NativeUIEngineTest {
                     )
                     .getBoolean("shown")
             )
+            assertHandoffPixels("Return image bridges the restore acknowledgement", true)
+            send(JSONObject().put("action", "restored").put("token", webToken))
+            assertHandoffPixels("Restored acknowledgement retires the return image", false)
             main {
-                assertEquals(
-                    "Web surface must not install a fixed native return image",
-                    before,
-                    root.childCount,
-                )
                 snapshots.restoreViews()
                 assertEquals(View.VISIBLE, native.visibility)
             }

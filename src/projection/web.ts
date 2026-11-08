@@ -30,8 +30,14 @@ export interface WebProjectionOptions {
   current?(sources: HTMLElement[]): boolean;
   /** Temporary movement handoff: rebase return pixels to the current display DOM. */
   transient?: boolean;
-  /** Keep moving-surface handoff pixels in their DOM, without fixed native image copies. */
+  /** Keep moving-surface images in their DOM; temporary Native covers only bridge presentation acknowledgements. */
   imageSurface?: HTMLElement;
+  /** Optional Native anchor layout; capture-cohort parts preserve component spacing without using later DOM coordinates. */
+  layoutFrame?(
+    target: HTMLElement,
+    part: CoveredSnapshot['parts'][number],
+    parts: readonly CoveredSnapshot['parts'][number][],
+  ): Frame | undefined;
   /** Opaque full-view pixels map to the host border box and may paint beneath native. */
   opaqueUnderlay?: boolean;
 }
@@ -51,8 +57,20 @@ interface Prepared {
 
 /** One pixel handoff; requests and renderer source ownership remain independent. */
 type ImageHandoff =
-  | { phase: 'covering' | 'image'; image: Prepared }
-  | { phase: 'restoring'; image: Prepared; visible: boolean; revision: number; nativeReady?: boolean; layoutRevision?: number };
+  { phase: 'covering' | 'image'; image: Prepared } | { phase: 'restoring'; image: Prepared; visible: boolean; revision: number };
+
+/** Map intrinsic crop padding to a destination anchor, independently of DOM placement. */
+const imageFrameAtAnchor = (part: CoveredSnapshot['parts'][number], anchor: Frame): Frame => {
+  const bounds = part.anchorBounds!;
+  const sx = anchor.width / bounds.width;
+  const sy = anchor.height / bounds.height;
+  return {
+    x: anchor.x - bounds.x * sx,
+    y: anchor.y - bounds.y * sy,
+    width: part.width * sx,
+    height: part.height * sy,
+  };
+};
 
 const layout = ({ control: c }: Candidate, positionIndependent = false) => [
   c.id,
@@ -287,9 +305,9 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
       let expired = false;
       const capture = call({
         action: 'prepare',
-        ...(callbacks.imageSurface ? { imageSurface: 'web' as const } : {}),
         revision: callbacks.captureRevision?.() ?? revision,
         viewportWidth: win.innerWidth,
+        ...(callbacks.imageSurface ? { imageSurface: 'web' as const } : {}),
         ids: selected.map((item) => item.control.id),
       });
       void capture
@@ -313,7 +331,12 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
             part.ids.some((id) => !ids.has(id)) ||
             ![part.x, part.y, part.width, part.height].every(Number.isFinite) ||
             part.width <= 0 ||
-            part.height <= 0,
+            part.height <= 0 ||
+            (part.anchorBounds !== undefined &&
+              (!part.anchorBounds ||
+                ![part.anchorBounds.x, part.anchorBounds.y, part.anchorBounds.width, part.anchorBounds.height].every(Number.isFinite) ||
+                part.anchorBounds.width <= 0 ||
+                part.anchorBounds.height <= 0)),
         )
       )
         return;
@@ -491,14 +514,19 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     finishVisibilityTransitions(target);
     shadowHosts.delete(target);
   };
-  const detach = () => {
-    presentation++;
+  // Every new presentation or retirement cancels the previous asynchronous work.
+  const resetPresentation = () => {
     win.cancelAnimationFrame(paintFrame);
+    win.clearTimeout(restoreTimeout);
+    paintFrame = 0;
+    handoffPending = false;
+    return ++presentation;
+  };
+  const detach = () => {
+    resetPresentation();
     for (const element of offsets.keys()) element.style.setProperty('opacity', '0', 'important');
     unparkImages();
     offsets.clear();
-    paintFrame = 0;
-    handoffPending = false;
     clearPrepared();
     handoff = undefined;
     rendered.forEach(clearTarget);
@@ -515,7 +543,6 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     const previous = new Set([handoff?.image, cached]);
     detach();
     cached = undefined;
-    win.clearTimeout(restoreTimeout);
     previous.forEach((item) => dispose(item, afterPaint));
     callbacks.wake();
   };
@@ -528,18 +555,14 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
       return;
     }
     const image = handoff.image;
-    presentation++;
-    win.cancelAnimationFrame(paintFrame);
-    paintFrame = 0;
-    handoffPending = false;
+    resetPresentation();
     rendered.forEach((target) => target.removeAttribute('data-native-ui-snapshot-source'));
     showImages(image, !!callbacks.opaqueUnderlay);
-    if (callbacks.imageSurface) {
+    if (parked.size) {
       unparkImages();
       updateOffsets();
     }
     handoff = undefined;
-    win.clearTimeout(restoreTimeout);
     // Retire only the temporary return copy. Keep the pre-interaction image
     // available until a replacement finishes, including rapid overlay reopening.
     // Native's update acknowledgement precedes WebKit's paint. Keep its return
@@ -578,7 +601,6 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
       for (const [property, value] of Object.entries({ left: frame.x, top: frame.y, width: frame.width, height: frame.height }))
         element.style.setProperty(property, `${value}px`, 'important');
     });
-    showImages(image, true);
   };
   const unparkImages = () => {
     for (const [element, saved] of parked) {
@@ -679,11 +701,20 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
       for (const index of [...indices].reverse()) {
         const element = image.images[index];
         const part = image.data.parts[index];
+        // Moving targets own placement. Capture padding is intrinsic to the
+        // artwork; never subtract a later DOM position from an earlier capture.
+        const content = callbacks.imageSurface ? part.anchorBounds : undefined;
+        const destination = content && !image.frames[index] ? layoutFrame(target, part, image.data.parts) : undefined;
+        const intrinsic = content && (destination || !callbacks.layoutFrame) ? content : undefined;
+        const anchor = destination ? target.getBoundingClientRect() : box;
+        const viewportFrame = intrinsic
+          ? imageFrameAtAnchor(part, destination ?? { x: anchor.x, y: anchor.y, width: intrinsic.width, height: intrinsic.height })
+          : part;
         const frame = image.frames[index] ?? {
-          x: callbacks.opaqueUnderlay ? 0 : part.x - box.x,
-          y: callbacks.opaqueUnderlay ? 0 : part.y - box.y,
-          width: part.width,
-          height: part.height,
+          x: callbacks.opaqueUnderlay ? 0 : viewportFrame.x - anchor.x,
+          y: callbacks.opaqueUnderlay ? 0 : viewportFrame.y - anchor.y,
+          width: viewportFrame.width,
+          height: viewportFrame.height,
         };
         image.frames[index] = frame;
         preparedKeys.set(image.targets[index], key);
@@ -706,6 +737,17 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     return true;
   };
 
+  const layoutFrame = (target: HTMLElement, part: CoveredSnapshot['parts'][number], parts: CoveredSnapshot['parts']) => {
+    try {
+      const frame = callbacks.layoutFrame?.(target, part, parts);
+      return frame && [frame.x, frame.y, frame.width, frame.height].every(Number.isFinite) && frame.width > 0 && frame.height > 0
+        ? frame
+        : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+
   const currentParts = (image: Prepared) =>
     image.images.map((element, index) => {
       const rect = element.getBoundingClientRect();
@@ -713,7 +755,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     });
 
   const present = (force = false) => {
-    const returning = !!callbacks.imageSurface && restoring();
+    const returning = restoring();
     if (!returning) retireRestoration();
     if (stopped || destination === 'none' || (handoff && !force && !returning)) return;
     // The active pixel lease outlives cache reuse eligibility.
@@ -730,16 +772,12 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
       if (returning) abandon(handoff?.image, false);
       return;
     }
-    if (returning) {
-      win.cancelAnimationFrame(paintFrame);
-      win.clearTimeout(restoreTimeout);
-    }
     // Reparenting is renderer-owned. Only that case needs a fresh coordinate conversion;
     // ordinary presentation keeps the prepared layout off the critical path.
     if (image.scopes.some((scope, index) => scope.element.parentNode !== image.parents[index])) render();
     updateOffsets();
     // A cached image may span multiple presentations; bridge replies may not.
-    const currentPresentation = ++presentation;
+    const currentPresentation = resetPresentation();
     const isCurrent = () => presentation === currentPresentation;
     handoffPending = true;
     handoff = { phase: 'covering', image };
@@ -750,70 +788,62 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     showImages(image, imageVisible());
     // Reconciliation may continue after one frame even if the optional bridge reply
     // is delayed. The ordered native transport processes cover before that update.
-    if (!callbacks.imageSurface)
-      paintFrame = win.requestAnimationFrame(() => {
-        paintFrame = 0;
+    paintFrame = win.requestAnimationFrame(() => {
+      paintFrame = 0;
+      if (!isCurrent()) return;
+      handoffPending = false;
+      callbacks.wake();
+    });
+    const entryParts = callbacks.transient ? currentParts(image) : image.data.parts;
+    void bounded(
+      call({
+        action: 'cover',
+        token: image.data.token,
+        ...(callbacks.transient ? { transient: true, viewportWidth: win.innerWidth, parts: entryParts } : {}),
+      }),
+    )
+      .then((result) => {
         if (!isCurrent()) return;
         handoffPending = false;
-        callbacks.wake();
-      });
-    const cover = () =>
-      bounded(
-        call({
-          action: 'cover',
-          token: image.data.token,
-          ...(callbacks.transient ? { transient: true, viewportWidth: win.innerWidth, parts: currentParts(image) } : {}),
-        }),
-      )
-        .then((result) => {
-          if (!isCurrent()) return;
-          handoffPending = false;
-          if (result?.shown !== true) {
-            abandon(image, false);
-            return;
-          }
-          // Live translucent Native must be hidden before its composited Web image
-          // becomes visible. Native's prepared entry copy spans this bridge interval.
-          if (!restoring()) {
-            unparkImages();
-            handoff = { phase: 'image', image };
-            render();
-            updateOffsets();
-          }
-          if (callbacks.imageSurface) {
-            callbacks.wake();
-            return;
-          }
-          win.cancelAnimationFrame(paintFrame);
-          // rAF callbacks run before paint. Cross a paint boundary before retiring
-          // Native's entry copy, keeping it over WebKit's compositing interval.
-          paintFrame = win.requestAnimationFrame(() => {
-            paintFrame = win.requestAnimationFrame(() => {
-              paintFrame = 0;
-              if (!isCurrent()) return;
-              void call({ action: 'painted', token: image.data.token })
-                .then((result) => {
-                  if (isCurrent() && result?.shown === false) abandon(image, false);
-                })
-                .catch(() => {
-                  if (isCurrent()) abandon(image, false);
-                });
-            });
-          });
-          callbacks.wake();
-        })
-        .catch(() => {
-          if (isCurrent()) abandon(image, false);
-        });
-    if (callbacks.imageSurface) {
-      parkImages(image, image.data.parts);
-      paintFrame = win.requestAnimationFrame(() => {
+        if (result?.shown !== true) {
+          abandon(image, false);
+          return;
+        }
+        // Live translucent Native must be hidden before its composited Web image
+        // becomes visible. Native's prepared entry copy spans this bridge interval.
+        if (!restoring()) {
+          unparkImages();
+          handoff = { phase: 'image', image };
+          render();
+          updateOffsets();
+          parkImages(image, entryParts);
+        }
+        win.cancelAnimationFrame(paintFrame);
+        // rAF callbacks run before paint. Cross a paint boundary before retiring
+        // Native's entry copy, keeping it over WebKit's compositing interval.
         paintFrame = win.requestAnimationFrame(() => {
-          paintFrame = 0;
-          if (isCurrent()) void cover();
+          paintFrame = win.requestAnimationFrame(() => {
+            paintFrame = 0;
+            if (!isCurrent()) return;
+            void call({ action: 'painted', token: image.data.token })
+              .then((result) => {
+                if (!isCurrent()) return;
+                if (result?.shown === false) abandon(image, false);
+                else if (!restoring()) {
+                  unparkImages();
+                  updateOffsets();
+                }
+              })
+              .catch(() => {
+                if (isCurrent()) abandon(image, false);
+              });
+          });
         });
+        callbacks.wake();
+      })
+      .catch(() => {
+        if (isCurrent()) abandon(image, false);
       });
-    } else void cover();
   };
   const restore = () => {
     if (!handoff || stopped || restoring()) return;
@@ -827,15 +857,20 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
       return;
     }
     if (callbacks.blocked()) return;
+    unparkImages();
     updateOffsets();
     if (callbacks.transient) {
       const image = handoff.image;
       const targets = targetsFor(image);
-      if (targets.some((target) => !target?.isConnected)) {
-        abandon(image, false);
-        return;
-      }
-      const parts = currentParts(image);
+      const parts = currentParts(image).map((part, index) => {
+        const content = part.anchorBounds;
+        const target = targets[index];
+        if (!content || !target) return part;
+        const frame = layoutFrame(target, image.data.parts[index], image.data.parts);
+        if (!frame) return part;
+        return { ...part, ...imageFrameAtAnchor(image.data.parts[index], frame) };
+      });
+      parkImages(image, parts);
       // Translation changes placement, not pixels. Keep the pre-interaction
       // image until its replacement is ready; resizing still invalidates it.
       if (
@@ -854,8 +889,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
         image.data = { ...image.data, parts };
       else cached = undefined;
       // Both requests use the same ordered bridge. Reprojection need not await this optional copy.
-      if (!callbacks.imageSurface)
-        void call({ action: 'restore', token: image.data.token, viewportWidth: win.innerWidth, parts }).catch(() => {});
+      void call({ action: 'restore', token: image.data.token, viewportWidth: win.innerWidth, parts }).catch(() => {});
     }
     handoff = {
       phase: 'restoring',
@@ -863,59 +897,14 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
       visible: handoff.phase === 'image',
       revision: callbacks.revision?.() ?? latest?.revision ?? 0,
     };
-    restoreTimeout = win.setTimeout(
-      () => {
-        if (handoff?.phase === 'restoring') abandon(handoff.image, false);
-      },
-      callbacks.imageSurface ? 2000 : 250,
-    );
-    callbacks.wake();
-  };
-  // Alignment improves the visual transfer; it is not proof of Native ownership.
-  const returnParts = (image: Prepared, frames: Map<string, Frame> | undefined): Frame[] | undefined => {
-    if (!frames) return;
-    const parts: Frame[] = [];
-    for (const part of image.data.parts) {
-      const rects = part.ids.map((id) => frames.get(id));
-      if (
-        rects.some(
-          (rect) => !rect || ![rect.x, rect.y, rect.width, rect.height].every(Number.isFinite) || rect.width <= 0 || rect.height <= 0,
-        )
-      )
-        return;
-      const values = rects as Frame[];
-      const x = Math.min(...values.map((rect) => rect.x));
-      const y = Math.min(...values.map((rect) => rect.y));
-      const width = Math.max(...values.map((rect) => rect.x + rect.width)) - x;
-      const height = Math.max(...values.map((rect) => rect.y + rect.height)) - y;
-      parts.push({ x: x - (part.width - width) / 2, y: y - (part.height - height) / 2, width: part.width, height: part.height });
-    }
-    return parts;
-  };
-  const prepareNativeReturn = (frames: Map<string, Frame> | undefined, revision: number) => {
-    // A delayed measurement belongs to its submitted layout, never a later return.
-    if (!callbacks.imageSurface || handoff?.phase !== 'restoring' || handoff.nativeReady || revision <= handoff.revision) return;
-    const image = handoff.image;
     const returning = handoff;
-    returning.layoutRevision = revision;
-    const parts = returnParts(image, frames);
-    if (parts) {
-      parkImages(image, parts);
-      image.data = { ...image.data, parts: image.data.parts.map((part, index) => ({ ...part, ...parts[index] })) };
-    }
-    win.cancelAnimationFrame(paintFrame);
-    paintFrame = win.requestAnimationFrame(() => {
-      paintFrame = win.requestAnimationFrame(() => {
-        paintFrame = 0;
-        if (handoff !== returning) return;
-        returning.nativeReady = true;
-        callbacks.wake();
-      });
-    });
+    restoreTimeout = win.setTimeout(() => {
+      if (handoff === returning) abandon(returning.image, false);
+    }, 250);
+    callbacks.wake();
   };
   const updated = (token: string | undefined, restoredIDs?: string[], revision?: number) => {
     if (handoff?.phase !== 'restoring' || revision === undefined || revision <= handoff.revision) return;
-    if (callbacks.imageSurface && (!handoff.nativeReady || revision <= (handoff.layoutRevision ?? Infinity))) return;
     if (!callbacks.transient && token) return;
     if (!handoff.image.data.parts.every((part) => part.ids.every((id) => restoredIDs?.includes(id)))) return;
     // Retire the Web image at the native restore acknowledgement, not after
@@ -1029,15 +1018,11 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     get restoring() {
       return restoring();
     },
-    get nativeReady() {
-      return handoff?.phase === 'restoring' && !!handoff.nativeReady;
-    },
     get handoffPending() {
       return handoffPending;
     },
     retireRestoration,
     end,
-    prepareNativeReturn,
     updated,
     invalidate,
     async destroy() {
@@ -1101,9 +1086,6 @@ export const createWebProjectionBatch = async (
     get restoring() {
       return engine?.restoring ?? false;
     },
-    get nativeReady() {
-      return engine?.nativeReady ?? false;
-    },
     get handoffPending() {
       return engine?.handoffPending ?? false;
     },
@@ -1152,7 +1134,6 @@ export const createWebProjectionBatch = async (
       pendingRequest = false;
       engine?.end();
     },
-    prepareNativeReturn: (frames, revision) => engine?.prepareNativeReturn(frames, revision),
     updated: (token, ids, revision) => engine?.updated(token, ids, revision),
     retireRestoration: () => engine?.retireRestoration(),
     invalidate: (nativeHidden?: boolean) => engine?.invalidate(nativeHidden),

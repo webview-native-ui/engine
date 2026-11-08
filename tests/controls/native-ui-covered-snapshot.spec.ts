@@ -283,7 +283,7 @@ test('invalidation during restoration does not strand the next prepared image', 
   f.manager.begin();
   expect(f.manager.token).toBe('image-2');
 });
-test.each([false, true])('another overlay retires only the return copy (acknowledged: %s)', async (acknowledged) => {
+test.each([false, true])('reopening retires only accepted returns (acknowledged: %s)', async (acknowledged) => {
   const f = await fixture();
   f.manager.consider(1, [f.candidate]);
   await drain();
@@ -295,7 +295,10 @@ test.each([false, true])('another overlay retires only the return copy (acknowle
   }
   f.manager.begin();
   expect(f.manager.token).toBe('image-1');
-  expect(f.bridge).toHaveBeenCalledWith({ action: 'restored', token: 'image-1' });
+  if (acknowledged) expect(f.bridge).toHaveBeenCalledWith({ action: 'restored', token: 'image-1' });
+  else expect(f.bridge).not.toHaveBeenCalledWith({ action: 'restored', token: 'image-1' });
+  expect(f.bridge.mock.calls.filter(([request]) => request.action === 'cover')).toHaveLength(2);
+  expect(f.bridge).not.toHaveBeenCalledWith({ action: 'release', token: 'image-1' });
 });
 
 test('a stalled native restoration releases the image and Web ownership promptly', async () => {
