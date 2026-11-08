@@ -514,14 +514,19 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     finishVisibilityTransitions(target);
     shadowHosts.delete(target);
   };
-  const detach = () => {
-    presentation++;
+  // Every new presentation or retirement cancels the previous asynchronous work.
+  const resetPresentation = () => {
     win.cancelAnimationFrame(paintFrame);
+    win.clearTimeout(restoreTimeout);
+    paintFrame = 0;
+    handoffPending = false;
+    return ++presentation;
+  };
+  const detach = () => {
+    resetPresentation();
     for (const element of offsets.keys()) element.style.setProperty('opacity', '0', 'important');
     unparkImages();
     offsets.clear();
-    paintFrame = 0;
-    handoffPending = false;
     clearPrepared();
     handoff = undefined;
     rendered.forEach(clearTarget);
@@ -538,15 +543,8 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     const previous = new Set([handoff?.image, cached]);
     detach();
     cached = undefined;
-    win.clearTimeout(restoreTimeout);
     previous.forEach((item) => dispose(item, afterPaint));
     callbacks.wake();
-  };
-  const waitForNative = (image: Prepared) => {
-    win.clearTimeout(restoreTimeout);
-    restoreTimeout = win.setTimeout(() => {
-      if (restoring() && handoff?.image === image) abandon(image, false);
-    }, 250);
   };
   const finishRestoration = () => {
     if (!handoff) return;
@@ -557,18 +555,14 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
       return;
     }
     const image = handoff.image;
-    presentation++;
-    win.cancelAnimationFrame(paintFrame);
-    paintFrame = 0;
-    handoffPending = false;
+    resetPresentation();
     rendered.forEach((target) => target.removeAttribute('data-native-ui-snapshot-source'));
     showImages(image, !!callbacks.opaqueUnderlay);
-    if (callbacks.imageSurface) {
+    if (parked.size) {
       unparkImages();
       updateOffsets();
     }
     handoff = undefined;
-    win.clearTimeout(restoreTimeout);
     // Retire only the temporary return copy. Keep the pre-interaction image
     // available until a replacement finishes, including rapid overlay reopening.
     // Native's update acknowledgement precedes WebKit's paint. Keep its return
@@ -778,16 +772,12 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
       if (returning) abandon(handoff?.image, false);
       return;
     }
-    if (returning) {
-      win.cancelAnimationFrame(paintFrame);
-      win.clearTimeout(restoreTimeout);
-    }
     // Reparenting is renderer-owned. Only that case needs a fresh coordinate conversion;
     // ordinary presentation keeps the prepared layout off the critical path.
     if (image.scopes.some((scope, index) => scope.element.parentNode !== image.parents[index])) render();
     updateOffsets();
     // A cached image may span multiple presentations; bridge replies may not.
-    const currentPresentation = ++presentation;
+    const currentPresentation = resetPresentation();
     const isCurrent = () => presentation === currentPresentation;
     handoffPending = true;
     handoff = { phase: 'covering', image };
@@ -805,57 +795,55 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
       callbacks.wake();
     });
     const entryParts = callbacks.transient ? currentParts(image) : image.data.parts;
-    const cover = () =>
-      bounded(
-        call({
-          action: 'cover',
-          token: image.data.token,
-          ...(callbacks.transient ? { transient: true, viewportWidth: win.innerWidth, parts: entryParts } : {}),
-        }),
-      )
-        .then((result) => {
-          if (!isCurrent()) return;
-          handoffPending = false;
-          if (result?.shown !== true) {
-            abandon(image, false);
-            return;
-          }
-          // Live translucent Native must be hidden before its composited Web image
-          // becomes visible. Native's prepared entry copy spans this bridge interval.
-          if (!restoring()) {
-            unparkImages();
-            handoff = { phase: 'image', image };
-            render();
-            updateOffsets();
-            parkImages(image, entryParts);
-          }
-          win.cancelAnimationFrame(paintFrame);
-          // rAF callbacks run before paint. Cross a paint boundary before retiring
-          // Native's entry copy, keeping it over WebKit's compositing interval.
+    void bounded(
+      call({
+        action: 'cover',
+        token: image.data.token,
+        ...(callbacks.transient ? { transient: true, viewportWidth: win.innerWidth, parts: entryParts } : {}),
+      }),
+    )
+      .then((result) => {
+        if (!isCurrent()) return;
+        handoffPending = false;
+        if (result?.shown !== true) {
+          abandon(image, false);
+          return;
+        }
+        // Live translucent Native must be hidden before its composited Web image
+        // becomes visible. Native's prepared entry copy spans this bridge interval.
+        if (!restoring()) {
+          unparkImages();
+          handoff = { phase: 'image', image };
+          render();
+          updateOffsets();
+          parkImages(image, entryParts);
+        }
+        win.cancelAnimationFrame(paintFrame);
+        // rAF callbacks run before paint. Cross a paint boundary before retiring
+        // Native's entry copy, keeping it over WebKit's compositing interval.
+        paintFrame = win.requestAnimationFrame(() => {
           paintFrame = win.requestAnimationFrame(() => {
-            paintFrame = win.requestAnimationFrame(() => {
-              paintFrame = 0;
-              if (!isCurrent()) return;
-              void call({ action: 'painted', token: image.data.token })
-                .then((result) => {
-                  if (!isCurrent()) return;
-                  if (result?.shown === false) abandon(image, false);
-                  else if (!restoring()) {
-                    unparkImages();
-                    updateOffsets();
-                  }
-                })
-                .catch(() => {
-                  if (isCurrent()) abandon(image, false);
-                });
-            });
+            paintFrame = 0;
+            if (!isCurrent()) return;
+            void call({ action: 'painted', token: image.data.token })
+              .then((result) => {
+                if (!isCurrent()) return;
+                if (result?.shown === false) abandon(image, false);
+                else if (!restoring()) {
+                  unparkImages();
+                  updateOffsets();
+                }
+              })
+              .catch(() => {
+                if (isCurrent()) abandon(image, false);
+              });
           });
-          callbacks.wake();
-        })
-        .catch(() => {
-          if (isCurrent()) abandon(image, false);
         });
-    void cover();
+        callbacks.wake();
+      })
+      .catch(() => {
+        if (isCurrent()) abandon(image, false);
+      });
   };
   const restore = () => {
     if (!handoff || stopped || restoring()) return;
@@ -874,10 +862,6 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     if (callbacks.transient) {
       const image = handoff.image;
       const targets = targetsFor(image);
-      if (targets.some((target) => !target?.isConnected)) {
-        abandon(image, false);
-        return;
-      }
       const parts = currentParts(image).map((part, index) => {
         const content = part.anchorBounds;
         const target = targets[index];
@@ -913,7 +897,10 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
       visible: handoff.phase === 'image',
       revision: callbacks.revision?.() ?? latest?.revision ?? 0,
     };
-    waitForNative(handoff.image);
+    const returning = handoff;
+    restoreTimeout = win.setTimeout(() => {
+      if (handoff === returning) abandon(returning.image, false);
+    }, 250);
     callbacks.wake();
   };
   const updated = (token: string | undefined, restoredIDs?: string[], revision?: number) => {
