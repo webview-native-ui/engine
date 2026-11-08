@@ -1760,3 +1760,56 @@ for (const geometry of ['missing', 'incomplete'] as const)
     );
     await destroyProjection(page);
   });
+
+for (const change of ['translation', 'subpixel-noise'] as const) {
+  test(`a completed moving-surface return retains its cache through ${change} during the same gesture`, async ({ page }) => {
+    await prepare(page, false, false, false, false, 50, true, true);
+    await page.evaluate(() => {
+      const w = window as any;
+      w.interact({ active: true });
+      w.cachedImage = document.querySelector('[data-native-ui-projection-image]');
+      w.manager.begin();
+    });
+    await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
+    await page.evaluate(() => {
+      const w = window as any;
+      w.manager.end();
+      w.manager.prepareNativeReturn(new Map([['counter', { x: 8, y: 108, width: 120, height: 40 }]]), 2);
+    });
+    await expect.poll(() => page.evaluate(() => (window as any).manager.nativeReady)).toBe(true);
+    await page.evaluate((change) => {
+      const w = window as any;
+      w.manager.updated(undefined, ['counter'], 3);
+      w.source.control = {
+        ...w.source.control,
+        ...(change === 'translation' ? { y: w.source.control.y + 2.3431243896484375 } : { height: 40.00000762939453 }),
+      };
+      w.manager.consider(4, [w.source]);
+      w.manager.begin();
+    }, change);
+    await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
+    expect(await page.evaluate(() => (window as any).manager.owners.length)).toBe(1);
+    expect(await page.evaluate(() => document.querySelector('[data-native-ui-projection-image]') === (window as any).cachedImage)).toBe(
+      true,
+    );
+    expect(await page.evaluate(() => (window as any).calls.filter((call: any) => call.action === 'prepare').length)).toBe(1);
+    expect(await page.evaluate(() => (window as any).calls.some((call: any) => call.action === 'release'))).toBe(false);
+    // A real raster size change still invalidates the idle cache.
+    await page.evaluate(() => {
+      const w = window as any;
+      w.manager.end();
+      w.manager.prepareNativeReturn(undefined, 5);
+    });
+    await expect.poll(() => page.evaluate(() => (window as any).manager.nativeReady)).toBe(true);
+    await page.evaluate(() => {
+      const w = window as any;
+      w.manager.updated(undefined, ['counter'], 6);
+      w.source.control.width += 8;
+      w.manager.consider(7, [w.source]);
+      w.manager.begin();
+    });
+    expect(await page.evaluate(() => (window as any).manager.owners.length)).toBe(0);
+    await expect(page.locator('#source')).not.toHaveAttribute('data-native-ui-snapshot-visible', '');
+    await destroyProjection(page);
+  });
+}

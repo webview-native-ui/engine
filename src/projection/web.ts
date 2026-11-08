@@ -107,13 +107,29 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     JSON.stringify(
       candidates.map((candidate) => {
         if (!scopeIDs.has(candidate.scope)) scopeIDs.set(candidate.scope, ++scopeSerial);
-        const origin = callbacks.transient && !callbacks.opaqueUnderlay ? candidate.scope.element.getBoundingClientRect() : undefined;
+        const origin =
+          callbacks.transient && !callbacks.opaqueUnderlay && !callbacks.imageSurface
+            ? candidate.scope.element.getBoundingClientRect()
+            : undefined;
         const relative = origin
           ? { ...candidate, control: { ...candidate.control, x: candidate.control.x - origin.x, y: candidate.control.y - origin.y } }
           : candidate;
+        // A moving DOM surface owns placement. Its translated coordinates and
+        // subpixel measurement noise do not change the captured artwork.
+        const scale = win.devicePixelRatio || 1;
+        const reusable = callbacks.imageSurface
+          ? {
+              ...relative,
+              control: {
+                ...relative.control,
+                width: Math.round(relative.control.width * scale) / scale,
+                height: Math.round(relative.control.height * scale) / scale,
+              },
+            }
+          : relative;
         return [
           scopeIDs.get(candidate.scope),
-          layout(relative, !!callbacks.opaqueUnderlay),
+          layout(reusable, !!callbacks.opaqueUnderlay || !!callbacks.imageSurface),
           (candidate.sources ?? [candidate.element]).map(sourceIdentity),
         ];
       }),
