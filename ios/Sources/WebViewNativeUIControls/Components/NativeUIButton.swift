@@ -1,3 +1,4 @@
+import WebViewNativeUIEngine
 import UIKit
 
 enum NativeUIButton {
@@ -31,6 +32,13 @@ enum NativeUIButton {
     }
     // These Ionic components share the same native UIButton presentation.
     static let kinds: [NativeUIComponent] = [.button, .backButton, .menuButton]
+
+    // The component declares the same material choice used by make().
+    static func captureEffect(_ node: NativeUIControl) -> NativeUICaptureReadiness.Effect {
+        guard kinds.contains(node.kind), node.placement == nil, node.scroll == nil, node.items.count == 1,
+              let item = node.items.first else { return .unknown }
+        return item.content.buttonFill == .clear ? .independent : .backdrop
+    }
 
     @available(iOS 26.0, *)
     static func make(_ node: NativeUIControl, existing: UIButton? = nil, rendering: NativeUIControlRendering, activate: @escaping (String) -> Void) -> UIButton? {

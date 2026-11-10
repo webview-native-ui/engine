@@ -1,9 +1,90 @@
 import XCTest
+import WebViewNativeUIEngine
 import WebKit
 import SwiftUI
 @testable import WebViewNativeUIControls
 
 final class NativeUISnapshotTests: XCTestCase {
+    func testCaptureInteractionMatrixKeepsOtherOwnersDirty() {
+        var state = NativeUICaptureState()
+        XCTAssertTrue(state.appearanceSettled(["b"]))
+        state.interacted(["a"])
+        XCTAssertFalse(state.appearanceSettled(["a"]))
+        XCTAssertTrue(state.appearanceSettled(["b"]))
+        state.interacted(["b"])
+        state.captured(["b"])
+        XCTAssertFalse(state.appearanceSettled(["a"]), "Capturing B cannot settle A's tap/cancel")
+        state.interacted(["a", "b"])
+        XCTAssertFalse(state.appearanceSettled(["b"]), "Shared/unknown owners remain conservative")
+        state.captured(["a"])
+        XCTAssertTrue(state.appearanceSettled(["a"]))
+        XCTAssertFalse(state.appearanceSettled(["b"]))
+        state.retain(["a"])
+        XCTAssertTrue(state.dirty.isEmpty, "Removed component IDs must not accumulate")
+    }
+
+    @MainActor func testControllerReadinessTracksActualOwnersAndCaptureAcknowledgements() async throws {
+        guard UIApplication.shared.delegate != nil else { throw XCTSkip("Requires hosted UIApplication") }
+        guard #available(iOS 26.0, *) else { throw XCTSkip("Requires native controls") }
+        let window = UIWindow(frame: UIScreen.main.bounds)
+        let owner = UIViewController(); window.rootViewController = owner; window.makeKeyAndVisible()
+        let web = WKWebView(frame: window.bounds); owner.view.addSubview(web)
+        let controller = NativeUIController(webView: web, viewController: owner, emit: { _, _ in }, hasListeners: { _ in false }, refresh: { _ in })
+        defer { window.isHidden = true }
+        let nodes = [control(["id": "a", "items": [item(["id": "a-action", "label": "A", "buttonFill": "clear"])]]),
+                     control(["id": "b", "x": 90.0, "items": [item(["id": "b-action", "label": "B", "buttonFill": "clear"])]]),
+                     control(["id": "glass", "x": 160.0, "items": [item(["id": "glass-action", "label": "Glass"]) ]])]
+        let applied: [String: Any] = await withCheckedContinuation { continuation in
+            controller.update(["revision": 1, "viewportWidth": Double(web.bounds.width), "controls": nodes],
+                              resolve: { continuation.resume(returning: $0) }, reject: { continuation.resume(returning: ["error": $0]) })
+        }
+        XCTAssertNil(applied["error"])
+        window.layoutIfNeeded()
+        func buttons(_ view: UIView) -> [UIButton] { (view as? UIButton).map { [$0] } ?? view.subviews.flatMap(buttons) }
+        let button = try XCTUnwrap(buttons(owner.view).first { $0.configuration?.title == "A" })
+        XCTAssertTrue(controller.captureReadiness(["a"], revision: 1).layoutSettled)
+        XCTAssertTrue(controller.captureReadiness(["a"], revision: 1).appearanceSettled)
+        XCTAssertEqual(controller.captureReadiness(["glass"], revision: 1).effect, .backdrop)
+        controller.recordCaptureInteraction(button.titleLabel ?? button)
+        XCTAssertFalse(controller.captureReadiness(["a"], revision: 1).appearanceSettled)
+        XCTAssertTrue(controller.captureReadiness(["b"], revision: 1).appearanceSettled)
+        func capture(_ id: String) async -> [String: Any] {
+            await withCheckedContinuation { continuation in
+                controller.coveredSnapshot(["action": "prepare", "ids": [id], "revision": 1, "captureMode": "view", "viewportWidth": Double(web.bounds.width)],
+                                           resolve: { continuation.resume(returning: $0) }, reject: { continuation.resume(returning: ["error": $0]) })
+            }
+        }
+        let bResult = await capture("b")
+        XCTAssertNotNil(bResult["token"])
+        XCTAssertFalse(controller.captureReadiness(["a"], revision: 1).appearanceSettled)
+        let aResult = await capture("a")
+        XCTAssertNotNil(aResult["token"])
+        XCTAssertTrue(controller.captureReadiness(["a"], revision: 1).appearanceSettled)
+        controller.recordCaptureInteraction(nil)
+        XCTAssertFalse(controller.captureReadiness(["a"], revision: 1).appearanceSettled)
+        XCTAssertFalse(controller.captureReadiness(["b"], revision: 1).appearanceSettled)
+        XCTAssertFalse(controller.captureReadiness(["a"], revision: 0).layoutSettled)
+        var rebound = nodes
+        rebound[0]["id"] = "renamed"
+        _ = await withCheckedContinuation { continuation in
+            controller.update(["revision": 2, "viewportWidth": Double(web.bounds.width), "controls": rebound],
+                              resolve: { continuation.resume(returning: $0) }, reject: { _ in continuation.resume(returning: [:]) })
+        }
+        window.layoutIfNeeded()
+        XCTAssertTrue(controller.captureReadiness(["renamed"], revision: 2).layoutSettled)
+        XCTAssertFalse(controller.captureReadiness(["renamed"], revision: 2).appearanceSettled, "ID reassociation must not forget an unsettled interaction")
+        _ = await withCheckedContinuation { continuation in controller.clear(["revision": 3], resolve: { continuation.resume(returning: $0) }, reject: { _ in continuation.resume(returning: [:]) }) }
+    }
+
+    @MainActor func testCaptureEffectsAreDeclaredByComponentIncludingOuterGlass() throws {
+        let plain = try XCTUnwrap(decode([control(["kind": "ion-button", "items": [item(["buttonFill": "clear"])]])]).controls.first)
+        let glass = try XCTUnwrap(decode([control(["kind": "ion-button", "items": [item() ]])]).controls.first)
+        XCTAssertEqual(NativeUIButton.captureEffect(plain), .independent)
+        XCTAssertEqual(NativeUIButton.captureEffect(glass), .backdrop)
+        XCTAssertEqual(NativeUIButtons.captureEffect, .backdrop, "Plain children do not remove outer Glass")
+        XCTAssertEqual(NativeUIFab.captureEffect, .backdrop)
+    }
+
     @MainActor func testMeasuredTabWidthTracksNativeContentWithAndWithoutSearch() async throws {
         guard #available(iOS 26.0, *) else { throw XCTSkip("Requires UISearchTab") }
         let owner = UIViewController()

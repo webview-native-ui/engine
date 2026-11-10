@@ -115,3 +115,23 @@ Native replies acknowledge reusable pixels with `reused: true`. Only then may
 Web reuse its decoded image for the same URL and destination; other replies keep
 the existing load/decode behavior. Tokens own separate leases on shared files.
 Continue releasing retired tokens and reset the manager on owner teardown.
+
+### Renderer-owned capture readiness (iOS)
+
+A native renderer may supply the optional `readiness` callback to `handle`, or to
+`prepare` with explicit source views. Return `NativeUICaptureReadiness` for the
+requested revision: the component declares whether pixels are backdrop-independent
+and whether its layout and appearance have settled. The Engine does not inspect
+component styles to infer Glass.
+
+Only independent, settled view captures use one matching geometry sample instead
+of three. Coordinates and source traits are checked again before publishing fresh
+pixels. Missing information, composited capture, Glass, and unsettled state retain
+the standard checks. Active touches still invalidate preparation. This does not
+change `captureDelayMs`, paint acknowledgements, or handoff deadlines.
+
+Controls supplies this proof for settled, standalone Plain buttons without scroll
+bindings. A tap keeps its owner conservative until that owner's successful
+capture; capturing another owner does not settle it. Shared surfaces, unknown
+input targets, active animations and unresolved interaction across a new revision
+remain conservative. Other component types retain their existing behavior.
