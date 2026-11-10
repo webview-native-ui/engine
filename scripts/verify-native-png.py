@@ -13,6 +13,11 @@ for group in ('sources', 'artifacts', 'licenses'):
         actual = hashlib.sha256((root / path).read_bytes()).hexdigest()
         if actual != expected:
             raise SystemExit(f'Stale native PNG {group}: {path}; run npm run build:native')
+# Shared Rust notices have one tracked source; Android-only notices are separate.
+shared = root / 'ios/Sources/WebViewNativeUIEngine/Resources/NativeUIPngLicenses'
+android = root / 'native/licenses'
+assert not ({p.name for p in shared.iterdir()} & {p.name for p in android.iterdir()}), 'Duplicate native notices'
+assert all(p.name.startswith('Android-NDK-') for p in android.iterdir()), 'Non-Android notice outside canonical resources'
 for abi, machine in {'arm64-v8a': 183, 'armeabi-v7a': 40, 'x86': 3, 'x86_64': 62}.items():
     path = f'native/artifacts/android/{abi}/libnative_ui_png.so'
     assert path in manifest['artifacts'], path

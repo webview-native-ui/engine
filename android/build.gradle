@@ -79,6 +79,7 @@ tasks.register('centralBundle', Zip) {
 // Keep the package license in binary and source distributions without duplicate source files.
 def licenseResources = tasks.register('prepareLicenseResources', Sync) {
     from('..') { include 'LICENSE' }
+    from('../ios/Sources/WebViewNativeUIEngine/Resources/NativeUIPngLicenses') { into 'native-ui-png' }
     from('../native/licenses') { into 'native-ui-png' }
     into(layout.buildDirectory.dir('generated/license-resources/META-INF/webview-native-ui-engine'))
 }
@@ -87,6 +88,7 @@ tasks.matching { it.name.startsWith('process') && it.name.endsWith('JavaRes') }.
 tasks.withType(Jar).configureEach {
     if (name in ['sourceReleaseJar', 'javaDocReleaseJar']) {
         from('..') { include 'LICENSE'; into 'META-INF/webview-native-ui-engine' }
+        from('../ios/Sources/WebViewNativeUIEngine/Resources/NativeUIPngLicenses') { into 'META-INF/webview-native-ui-engine/native-ui-png' }
         from('../native/licenses') { into 'META-INF/webview-native-ui-engine/native-ui-png' }
     }
 }

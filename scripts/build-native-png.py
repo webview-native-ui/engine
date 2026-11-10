@@ -29,7 +29,7 @@ def library(target):
 
 def licenses():
     meta = json.loads(subprocess.check_output([CARGO, 'metadata', '--locked', '--offline', '--format-version', '1', '--manifest-path', str(CRATE)], cwd=ROOT))
-    dest = ROOT / 'native/licenses'
+    dest = ROOT / 'ios/Sources/WebViewNativeUIEngine/Resources/NativeUIPngLicenses'
     dest.mkdir(parents=True, exist_ok=True)
     records = []
     for package in meta['packages']:
@@ -52,12 +52,9 @@ def licenses():
         shutil.copyfile(sysroot / 'share/doc/rust/licenses' / name, dest / ('Rust-' + name))
     if args.ndk:
         for name in ('NOTICE', 'NOTICE.toolchain'):
-            shutil.copyfile(Path(args.ndk) / name, dest / ('Android-NDK-' + name))
-    resources = ROOT / 'ios/Sources/WebViewNativeUIEngine/Resources/NativeUIPngLicenses'
-    resources.mkdir(exist_ok=True)
-    for file in dest.iterdir():
-        if file.is_file() and not file.name.startswith('Android-NDK-'):
-            shutil.copyfile(file, resources / file.name)
+            platform_notices = ROOT / 'native/licenses'
+            platform_notices.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(Path(args.ndk) / name, platform_notices / ('Android-NDK-' + name))
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--platform', choices=['ios', 'android', 'all'], default='all')

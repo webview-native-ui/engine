@@ -102,12 +102,14 @@ npm run test:package
 ```
 
 Commit `native/png`, `native/include`, `native/android`, `native/artifacts`,
-`native/licenses` and the generated iOS license resources together. The
+`native/licenses` and the shared iOS license resources together. The
 XCFramework contains arm64 devices and arm64/x86_64 simulators. The Android
 artifact includes arm64-v8a, armeabi-v7a, x86 and x86_64, with 16 KiB ELF alignment
-and consumer rules retaining the JNI class/method names. Dependency notices,
-Rust standard-library notices and Android NDK notices are included in native
-packages. The source/binary hash manifest rejects stale combinations before
+and consumer rules retaining the JNI class/method names. Rust dependency and standard-library notices are maintained only in
+`ios/Sources/WebViewNativeUIEngine/Resources/NativeUIPngLicenses`, which SwiftPM
+and CocoaPods bundle directly. Android copies that same directory into its
+generated resources and source archive. `native/licenses` contains only
+Android NDK notices. Do not commit a second copy of the shared notices. The source/binary hash manifest rejects stale combinations before
 packaging. `--platform ios` or `android` can aid local iteration; a release must
 finish with a full build and `all-build.json` verification.
 
