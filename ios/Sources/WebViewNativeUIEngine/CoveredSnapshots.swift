@@ -78,8 +78,7 @@ public final class NativeUICoveredSnapshots {
     public func handle(_ request: [String: Any], in webView: UIView,
                        frames: @escaping (Set<String>, Int) -> [String: CGRect],
                        anchorFrames: (() -> [String: CGRect])? = nil,
-                       views: (Set<String>) -> [UIView]?,
-                       readiness: ((Set<String>, Int) -> NativeUICaptureReadiness)? = nil, complete: @escaping ([String: Any]) -> Void) {
+                       views: (Set<String>) -> [UIView]?, complete: @escaping ([String: Any]) -> Void) {
         let token = request["token"] as? String ?? ""
         switch request["action"] as? String {
         case "prepare":
@@ -90,7 +89,6 @@ public final class NativeUICoveredSnapshots {
             let firstFrames = frames(expected, revision)
             guard Set(firstFrames.keys) == expected else { complete([:]); return }
             let viewCapture = request["captureMode"] as? String == "view"
-            let readinessProvider = readiness ?? { _, _ in NativeUICaptureReadiness() }
             let selected = viewCapture ? views(expected) : nil
             guard !viewCapture || selected?.isEmpty == false else { complete([:]); return }
             var initial: [String: CGRect]? = firstFrames
@@ -98,8 +96,7 @@ public final class NativeUICoveredSnapshots {
                 let measured = initial ?? frames(expected, revision)
                 initial = nil
                 return Set(measured.keys) == expected ? measured : [:]
-            }, in: webView, viewportWidth: width, views: selected, anchorFrames: anchorFrames, contentRevision: viewCapture ? revision : nil,
-                           readiness: { readinessProvider(expected, revision) }, complete: { result in
+            }, in: webView, viewportWidth: width, views: selected, anchorFrames: anchorFrames, contentRevision: viewCapture ? revision : nil, complete: { result in
                 if let token = result["token"] as? String { self.captures[token]?.preservesLayout = request["imageSurface"] as? String == "web" }
                 complete(result)
             })
@@ -145,11 +142,11 @@ public final class NativeUICoveredSnapshots {
 
     public var covering: Bool { coveringToken != nil }
 
-    public func observe(_ window: UIWindow, interacted: ((UIView?) -> Void)? = nil, changed: @escaping (Bool) -> Void) {
+    public func observe(_ window: UIWindow, changed: @escaping (Bool) -> Void) {
         guard self.window !== window else { return }
         if let observer { self.window?.removeGestureRecognizer(observer) }
         self.window = window
-        let observer = SnapshotTouchObserver(interacted: interacted) { [weak self] active in
+        let observer = SnapshotTouchObserver { [weak self] active in
             guard let self else { return }
             self.touching = active
             if active { self.generation += 1 }
@@ -162,29 +159,22 @@ public final class NativeUICoveredSnapshots {
     // Gesture release can keep changing SwiftUI button bounds after touchesEnded.
     // Wait off the presentation path for unchanged rendered geometry, not a guessed delay.
     public func prepare(frames: @escaping () -> [String: CGRect], in webView: UIView, viewportWidth: CGFloat,
-                        views: [UIView]? = nil, anchorFrames: (() -> [String: CGRect])? = nil, readiness: (() -> NativeUICaptureReadiness)? = nil,
-                        complete: @escaping ([String: Any]) -> Void) {
+                        views: [UIView]? = nil, anchorFrames: (() -> [String: CGRect])? = nil, complete: @escaping ([String: Any]) -> Void) {
         prepareCapture(frames: frames, in: webView, viewportWidth: viewportWidth, views: views,
-                       anchorFrames: anchorFrames, contentRevision: nil, readiness: readiness ?? { .init() }, complete: complete)
+                       anchorFrames: anchorFrames, contentRevision: nil, complete: complete)
     }
 
     private func prepareCapture(frames: @escaping () -> [String: CGRect], in webView: UIView, viewportWidth: CGFloat,
                                 views: [UIView]?, anchorFrames: (() -> [String: CGRect])?, contentRevision: Int?,
-                                readiness: @escaping () -> NativeUICaptureReadiness, complete: @escaping ([String: Any]) -> Void) {
+                                complete: @escaping ([String: Any]) -> Void) {
         let stamp = generation
         let start = CACurrentMediaTime()
-        var requiredSamples = 1
         func sample(_ previous: [String: CGRect], _ stable: Int) {
             guard generation == stamp, !touching, CACurrentMediaTime() - start < 1 else { complete([:]); return }
             let current = frames()
             let count = !current.isEmpty && current == previous ? stable + 1 : 0
-            // Recheck the renderer's proof on every sample; a revoked proof falls back.
-            let currentRequirement = views?.isEmpty == false ? readiness().stableSamples : 3
-            requiredSamples = max(requiredSamples, currentRequirement)
-            if count >= requiredSamples {
-                capture(frames: current, anchorFrames: anchorFrames?() ?? [:], in: webView, viewportWidth: viewportWidth, views: views, contentRevision: contentRevision,
-                        stillReady: requiredSamples == 1 ? { readiness().stableSamples == 1 && frames() == current } : nil,
-                        complete: complete)
+            if count >= 3 {
+                capture(frames: current, anchorFrames: anchorFrames?() ?? [:], in: webView, viewportWidth: viewportWidth, views: views, contentRevision: contentRevision, complete: complete)
             } else {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.0 / 60.0) { sample(current, count) }
             }
@@ -193,7 +183,7 @@ public final class NativeUICoveredSnapshots {
     }
 
     private func capture(frames: [String: CGRect], anchorFrames: [String: CGRect], in webView: UIView, viewportWidth: CGFloat,
-                         views: [UIView]?, contentRevision: Int?, stillReady: (() -> Bool)? = nil, complete: @escaping ([String: Any]) -> Void) {
+                         views: [UIView]?, contentRevision: Int?, complete: @escaping ([String: Any]) -> Void) {
         guard !touching, let window = webView.window, !frames.isEmpty,
               viewportWidth > 0, webView.bounds.width > 0 else { complete([:]); return }
         let stamp = generation
@@ -336,8 +326,7 @@ public final class NativeUICoveredSnapshots {
                 parts = []
             }
             DispatchQueue.main.async {
-                guard let self, self.generation == stamp, !self.touching, stillReady?() != false,
-                      stillReady == nil || zip(capturedViews ?? [], views ?? []).allSatisfy({ $0.0.matches($0.1) }),
+                guard let self, self.generation == stamp, !self.touching,
                       window.bounds.size == size, webView.convert(webView.bounds, to: window) == webFrame, parts.count == crops.count else {
                     parts.forEach { try? FileManager.default.removeItem(at: $0.file) }
                     complete([:]); return
@@ -491,12 +480,10 @@ public final class NativeUICoveredSnapshots {
 }
 
 // Observes the start of interaction without recognizing or delaying the app's gestures.
-final class SnapshotTouchObserver: UIGestureRecognizer {
+private final class SnapshotTouchObserver: UIGestureRecognizer {
     private let changed: (Bool) -> Void
-    private let interacted: ((UIView?) -> Void)?
     private var touches = Set<UITouch>()
-    init(interacted: ((UIView?) -> Void)?, changed: @escaping (Bool) -> Void) {
-        self.interacted = interacted
+    init(changed: @escaping (Bool) -> Void) {
         self.changed = changed
         super.init(target: nil, action: nil)
         cancelsTouchesInView = false
@@ -506,7 +493,6 @@ final class SnapshotTouchObserver: UIGestureRecognizer {
     override func canPrevent(_ other: UIGestureRecognizer) -> Bool { false }
     override func canBePrevented(by other: UIGestureRecognizer) -> Bool { false }
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
-        touches.forEach { interacted?($0.view) }
         let first = self.touches.isEmpty
         self.touches.formUnion(touches)
         if first { changed(true) }

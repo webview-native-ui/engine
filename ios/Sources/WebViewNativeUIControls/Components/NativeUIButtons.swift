@@ -1,9 +1,7 @@
-import WebViewNativeUIEngine
 import UIKit
 
 enum NativeUIButtons {
     static let kind = NativeUIComponent.buttons
-    static let captureEffect = NativeUICaptureEffect.backdrop
 
     @available(iOS 26.0, *)
     static func make(_ node: NativeUIControl, scale: CGFloat, rendering: NativeUIControlRendering, activate: @escaping (String) -> Void) -> UIView {

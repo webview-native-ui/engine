@@ -23,9 +23,6 @@ public final class NativeUIController: NSObject, UITabBarDelegate {
         super.init()
     }
     private let coveredSnapshots = NativeUICoveredSnapshots()
-    private let captureState = NativeUICaptureState()
-    private var captureLayoutRevision: Int?
-    private weak var captureObservationWindow: UIWindow?
     private var snapshotControls: [NativeUIControl] = []
     private var overlays: NativeUIOverlayController?
     private var toolbarTransition: NativeUIToolbarTransition?
@@ -256,69 +253,18 @@ public final class NativeUIController: NSObject, UITabBarDelegate {
         }
     }
 
-    private func observeCaptureInteractions() {
-        guard let window = webView?.window else { return }
-        if captureObservationWindow !== window {
-            captureState.interacted(Array(controls.values) + (verticalBars.map { [$0.view] } ?? []))
-            captureObservationWindow = window
-        }
-        coveredSnapshots.observe(window, interacted: { [weak self] touched in
-            guard let self else { return }
-            self.recordCaptureInteraction(touched)
-        }) { [weak self] active in
-            self?.notifyListeners("snapshotInteraction", ["active": active])
-        }
-    }
-
-    func recordCaptureInteraction(_ touched: UIView?) {
-        let all = Array(controls.values) + (verticalBars.map { [$0.view] } ?? [])
-        guard let touched else { captureState.interacted(all); return }
-        if let rail = verticalBars, touched.isDescendant(of: rail.view) {
-            captureState.interacted([rail.view]); return
-        }
-        let owners = controls.values.filter { touched.isDescendant(of: $0) }
-        captureState.interacted(owners.isEmpty ? all : Array(owners))
-    }
-
-    func captureReadiness(_ ids: Set<String>, revision: Int) -> NativeUICaptureReadiness {
-        guard revision == self.revision, captureLayoutRevision == revision,
-              captureObservationWindow === webView?.window, webView?.window != nil,
-              !keyboardVisible, toolbarTransition == nil else { return .init() }
-        let nodes = snapshotControls.filter { ids.contains($0.id) }
-        guard !ids.isEmpty, nodes.count == ids.count else { return .init() }
-        let effects = nodes.map { node -> NativeUICaptureEffect in
-            if node.kind == NativeUIButtons.kind { return NativeUIButtons.captureEffect }
-            if node.kind == NativeUIFab.kind { return NativeUIFab.captureEffect }
-            return NativeUIButton.captureEffect(node)
-        }
-        let effect: NativeUICaptureEffect = effects.allSatisfy { $0 == .independent } ? .independent :
-            effects.contains(.backdrop) ? .backdrop : .unknown
-        // update() acknowledges our explicit, nonanimated layout transaction.
-        // UIKit may dirty internal layout flags while drawing without changing
-        // that transaction; the Engine separately rechecks actual frames.
-        let settled = nodes.allSatisfy { node in
-            guard let button = controls[node.id] as? UIButton, !button.isHighlighted, !button.isTracking,
-                  button.window != nil, button.layer.mask == nil else { return false }
-            var view: UIView? = button
-            while let current = view {
-                if current.isHidden || current.alpha <= 0 || !(current.layer.animationKeys() ?? []).isEmpty { return false }
-                view = current.superview
-            }
-            return true
-        }
-        return .init(isSettled: effect == .independent && settled &&
-                     captureState.appearanceSettled(nodes.compactMap { controls[$0.id] }))
-    }
-
     private func resetCoveredSnapshots() {
         coveredSnapshots.reset()
-        captureLayoutRevision = nil
     }
 
     public func coveredSnapshot(_ options: [String: Any], resolve: @escaping ([String: Any]) -> Void, reject: @escaping (String) -> Void) {
         DispatchQueue.main.async { [weak self] in
             guard let self, let webView = self.webView else { reject("WebView unavailable"); return }
-            if (options["action"] as? String) == "prepare" { self.observeCaptureInteractions() }
+            if (options["action"] as? String) == "prepare", let window = webView.window {
+                self.coveredSnapshots.observe(window) { [weak self] active in
+                    self?.notifyListeners("snapshotInteraction", ["active": active])
+                }
+            }
             let measure: (Set<String>, Int) -> [String: CGRect] = { [weak self, weak webView] ids, revision in
                 guard let self, let webView, revision == self.revision,
                       !self.keyboardVisible, self.toolbarTransition == nil else { return [:] }
@@ -360,16 +306,11 @@ public final class NativeUIController: NSObject, UITabBarDelegate {
                 }
                 let selected = Array(self.controls.filter { ids.contains($0.key) }.values)
                 var views = selected
-                // Partial Dictionary selection must not randomize the shared
-                // raster's draw order or turn unchanged sources into cache misses.
-                if let ordered = self.host?.subviews.filter({ selected.contains($0) }), ordered.count == selected.count {
-                    views = ordered
-                }
+                if let ordered = self.host?.subviews.filter({ selected.contains($0) }), ordered.count == selected.count { views = ordered }
                 if !railIDs.isEmpty, ids.isSuperset(of: railIDs), let rail = self.verticalBars { views.append(rail.view) }
                 return views
             }
-            self.coveredSnapshots.handle(options, in: webView, frames: measure, views: views,
-                readiness: self.captureReadiness, complete: { resolve($0) })
+            self.coveredSnapshots.handle(options, in: webView, frames: measure, views: views, complete: { resolve($0) })
         }
     }
 
@@ -519,13 +460,11 @@ public final class NativeUIController: NSObject, UITabBarDelegate {
             guard let webView = self.webView, let parent = webView.superview else {
                 reject("WebView unavailable"); return
             }
-            self.observeCaptureInteractions()
             // Decode and validate the entire batch before changing visible controls.
             guard JSONSerialization.isValidJSONObject(options),
                   let snapshot = try? JSONDecoder().decode(NativeUISnapshot.self, from: JSONSerialization.data(withJSONObject: options)), snapshot.isValid else {
                 reject("Invalid control snapshot"); return
             }
-            self.captureLayoutRevision = nil
             self.coveredSnapshots.restoreControls()
             if snapshot.coveredSnapshotToken == nil && self.coveredSnapshots.covering {
                 _ = self.coveredSnapshots.restore(in: webView)
@@ -827,9 +766,6 @@ public final class NativeUIController: NSObject, UITabBarDelegate {
             }
             self.snapshotControls = snapshot.controls.filter { !rejectedControls.contains($0.id) }
             let complete = {
-                if self.revision == next {
-                    self.captureLayoutRevision = next
-                }
                 var result: [String: Any] = ["revision": next, "rejectedSearches": rejectedSearches, "rejectedControls": rejectedControls, "tabBarWidths": tabBarWidths]
                 if let transition = self.toolbarTransition { result["toolbarTransition"] = transition.id }
                 resolve(result)
@@ -860,12 +796,6 @@ public final class NativeUIController: NSObject, UITabBarDelegate {
     }
 
     private func activate(_ id: String) {
-        // Keyboard/VoiceOver activation can bypass UITouch delivery.
-        let owners = snapshotControls.filter { $0.id == id || $0.items.contains { $0.id == id } }
-        let sources = owners.compactMap { controls[$0.id] ?? ($0.placement == .verticalBars ? verticalBars?.view : nil) }
-        if sources.isEmpty { recordCaptureInteraction(nil) } else {
-            sources.forEach { recordCaptureInteraction($0) }
-        }
         sequence += 1
         notifyListeners("activate", ["id": id, "revision": revision, "sequence": sequence])
 

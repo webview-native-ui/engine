@@ -30,7 +30,7 @@ with tempfile.TemporaryDirectory(prefix='native-pipeline-') as folder:
     encoder = encoder.replace('        let bounds = image.extent', '        pipelineCounterLock.lock(); pngEncodes += 1; pipelineCounterLock.unlock()\n        let bounds = image.extent', 1)
     (folder / 'Encoder.swift').write_text(encoder)
     library = root / 'native/artifacts/NativeUIPng.xcframework/ios-arm64_x86_64-simulator/libnative_ui_png.a'
-    run('xcrun', '--sdk', 'iphonesimulator', 'swiftc', '-O', '-parse-as-library', '-target', platform.machine() + '-apple-ios15.0-simulator', '-module-cache-path', folder / 'modules', '-I', root / 'native/include', root / 'tests/integration/image-reuse/main.swift', root / 'ios/Sources/WebViewNativeUIEngine/CaptureReadiness.swift', folder / 'Capture.swift', folder / 'Encoder.swift', library, '-o', app / 'Pipeline')
+    run('xcrun', '--sdk', 'iphonesimulator', 'swiftc', '-O', '-parse-as-library', '-target', platform.machine() + '-apple-ios15.0-simulator', '-module-cache-path', folder / 'modules', '-I', root / 'native/include', root / 'tests/integration/image-reuse/main.swift', folder / 'Capture.swift', folder / 'Encoder.swift', library, '-o', app / 'Pipeline')
     plist = {'CFBundleIdentifier': 'local.native.pipeline', 'CFBundleExecutable': 'Pipeline', 'CFBundleName': 'Pipeline', 'CFBundlePackageType': 'APPL', 'MinimumOSVersion': '15.0', 'UILaunchScreen': {}, 'UIApplicationSceneManifest': {'UIApplicationSupportsMultipleScenes': False, 'UISceneConfigurations': {'UIWindowSceneSessionRoleApplication': [{'UISceneConfigurationName': 'Default', 'UISceneDelegateClassName': 'Pipeline.Scene'}]}}}
     (app / 'Info.plist').write_bytes(plistlib.dumps(plist))
     run('xcrun', 'simctl', 'install', args.device, app)

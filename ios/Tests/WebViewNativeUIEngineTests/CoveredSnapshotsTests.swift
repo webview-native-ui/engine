@@ -5,90 +5,6 @@ import UIKit
 @testable import WebViewNativeUIEngine
 
 final class NativeUICoveredSnapshotsTests: XCTestCase {
-    @MainActor func testTouchObserverReportsEveryOwnerAndWaitsForAllTouchesOnCancel() {
-        var active: [Bool] = []
-        var owners: [UIView?] = []
-        let observer = SnapshotTouchObserver(interacted: { owners.append($0) }, changed: { active.append($0) })
-        let a = ReadinessTestTouch(); a.source = UIView()
-        let b = ReadinessTestTouch(); b.source = UIView()
-        let unknown = ReadinessTestTouch()
-        let event = UIEvent()
-        observer.touchesBegan([a], with: event)
-        observer.touchesBegan([b, unknown], with: event)
-        XCTAssertEqual(active, [true])
-        XCTAssertEqual(owners.count, 3, "Additional fingers and unknown owners must also invalidate readiness")
-        XCTAssertTrue(owners.contains { $0 === a.source })
-        XCTAssertTrue(owners.contains { $0 === b.source })
-        XCTAssertTrue(owners.contains { $0 == nil })
-        observer.touchesEnded([a], with: event)
-        XCTAssertEqual(active, [true], "One released finger does not settle the interaction")
-        observer.touchesCancelled([b, unknown], with: event)
-        XCTAssertEqual(active, [true, false])
-        XCTAssertFalse(observer.cancelsTouchesInView)
-        XCTAssertFalse(observer.delaysTouchesBegan)
-        XCTAssertFalse(observer.delaysTouchesEnded)
-    }
-
-    func testReadinessUsesCallerDeclaration() {
-        XCTAssertEqual(NativeUICaptureReadiness().stableSamples, 3)
-        XCTAssertEqual(NativeUICaptureReadiness(isSettled: false).stableSamples, 3)
-        XCTAssertEqual(NativeUICaptureReadiness(isSettled: true).stableSamples, 1)
-    }
-
-    @MainActor func testReadyCaptureUsesFewerSamplesAndRechecksBeforePublication() async throws {
-        let window = SnapshotTestWindow(frame: UIScreen.main.bounds)
-        window.rootViewController = UIViewController(); window.makeKeyAndVisible()
-        let web = try XCTUnwrap(window.rootViewController?.view)
-        web.frame = window.bounds
-        let control = CountingSnapshotView(frame: CGRect(x: 40, y: 100, width: 60, height: 44))
-        web.addSubview(control); window.layoutIfNeeded()
-        defer { window.isHidden = true }
-        for mode in ["legacy", "ready", "unsettled", "revoked", "flapped", "late-revoked", "late-trait", "composited"] {
-            let snapshots = NativeUICoveredSnapshots()
-            var reads = 0
-            var proofs = 0
-            var readsAtRaster = 0
-            control.beforeDraw = { readsAtRaster = reads }
-            var request: [String: Any] = ["action": "prepare", "ids": ["control"], "revision": 1,
-                                        "viewportWidth": Double(web.bounds.width), "captureMode": "view"]
-            if mode == "composited" { request.removeValue(forKey: "captureMode") }
-            let provider: ((Set<String>, Int) -> NativeUICaptureReadiness)? = mode == "legacy" ? nil : { _, _ in
-                proofs += 1
-                if mode == "late-trait", proofs == 3 {
-                    control.testTraits = UITraitCollection(userInterfaceStyle: control.traitCollection.userInterfaceStyle == .dark ? .light : .dark)
-                }
-                return .init(isSettled: mode != "unsettled" &&
-                             !(mode == "revoked" && proofs >= 2) && !(mode == "flapped" && proofs == 2) &&
-                             !(mode == "late-revoked" && proofs >= 3))
-            }
-            let result: [String: Any] = await withCheckedContinuation { continuation in
-                snapshots.handle(request, in: web, frames: { _, _ in reads += 1; return ["control": control.frame] },
-                                 views: { _ in [control] }, readiness: provider) { continuation.resume(returning: $0) }
-            }
-            if mode != "composited" {
-                XCTAssertEqual(readsAtRaster, ["ready", "late-revoked", "late-trait"].contains(mode) ? 2 : 4,
-                               "An uncertain request cannot upgrade back to the short path: \(mode)")
-            }
-            if mode == "late-revoked" || mode == "late-trait" {
-                XCTAssertNil(result["token"], "Revoked proof must not publish or cache provisional pixels")
-                let retry: [String: Any] = await withCheckedContinuation { continuation in
-                    snapshots.handle(request, in: web, frames: { _, _ in ["control": control.frame] },
-                                     views: { _ in [control] }) { continuation.resume(returning: $0) }
-                }
-                XCTAssertNotNil(retry["token"])
-                XCTAssertNotEqual(retry["reused"] as? Bool, true)
-                let part = try XCTUnwrap((retry["parts"] as? [[String: Any]])?.first)
-                let file = try XCTUnwrap(URL(string: try XCTUnwrap(part["url"] as? String)))
-                let files = try FileManager.default.contentsOfDirectory(at: file.deletingLastPathComponent(), includingPropertiesForKeys: nil)
-                XCTAssertEqual(files.filter { $0.pathExtension == "png" }.count, 1, "Rejected provisional files must be removed")
-            } else {
-                XCTAssertNotNil(result["token"], mode)
-                XCTAssertEqual(reads, mode == "ready" ? 3 : 4, mode)
-            }
-            snapshots.reset()
-        }
-    }
-
     @MainActor func testOverlappingRootsInvalidateRelativeMovementButReuseCommonTranslation() async throws {
         let window = SnapshotTestWindow(frame: UIScreen.main.bounds)
         window.rootViewController = UIViewController()
@@ -651,21 +567,12 @@ private final class TransparentSnapshotTestView: UIView {
 }
 
 private final class CountingSnapshotView: UIView {
-    var testTraits: UITraitCollection?
-    var beforeDraw: (() -> Void)?
-    override var traitCollection: UITraitCollection { testTraits ?? super.traitCollection }
     var draws = 0
     var color = UIColor.red
     override func drawHierarchy(in rect: CGRect, afterScreenUpdates: Bool) -> Bool {
-        beforeDraw?()
         draws += 1
         color.setFill()
         UIRectFill(rect)
         return true
     }
-}
-
-private final class ReadinessTestTouch: UITouch {
-    var source: UIView?
-    override var view: UIView? { source }
 }
