@@ -69,7 +69,7 @@ jobs:
           brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
           cd ios/Tests
           xcodegen generate
-          xcodebuild -project NativeUIControlsHostedTests.xcodeproj -scheme NativeUIControlsHostedTests -destination "platform=iOS Simulator,id=$CORDOVA_SIMULATOR" CODE_SIGNING_ALLOWED=NO -only-testing:WebViewNativeUIControlsTests/NativeUISnapshotTests/testNativePopoverClosureNotifiesWebBeforeReopening -only-testing:WebViewNativeUIControlsTests/NativeUISnapshotTests/testPopoverReopensAfterPresentationIdentityKeepsReplacedSource test
+          xcodebuild -project NativeUIControlsHostedTests.xcodeproj -scheme NativeUIControlsHostedTests -destination "platform=iOS Simulator,id=$CORDOVA_SIMULATOR" CODE_SIGNING_ALLOWED=NO -only-testing:WebViewNativeUIControlsTests/NativeUISnapshotTests/testNativePopoverClosureNotifiesWebBeforeReopening -only-testing:WebViewNativeUIControlsTests/NativeUISnapshotTests/testPopoverReopensAfterPresentationIdentityKeepsReplacedSource -only-testing:WebViewNativeUIControlsTests/NativeUISnapshotTests/testViewCapturePreservesNativeSourceOrder test
       - name: Verify capture-to-Web image reuse on a real simulator screen
         run: python3 scripts/verify-image-reuse.py --device "$CORDOVA_SIMULATOR"
       - name: Verify npm-distributed CocoaPod

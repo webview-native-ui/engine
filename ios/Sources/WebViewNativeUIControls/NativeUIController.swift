@@ -304,7 +304,9 @@ public final class NativeUIController: NSObject, UITabBarDelegate {
                       ids.isDisjoint(with: railIDs) || ids.isSuperset(of: railIDs) else {
                     return nil
                 }
-                var views = Array(self.controls.filter { ids.contains($0.key) }.values)
+                let selected = Array(self.controls.filter { ids.contains($0.key) }.values)
+                var views = selected
+                if let ordered = self.host?.subviews.filter({ selected.contains($0) }), ordered.count == selected.count { views = ordered }
                 if !railIDs.isEmpty, ids.isSuperset(of: railIDs), let rail = self.verticalBars { views.append(rail.view) }
                 return views
             }

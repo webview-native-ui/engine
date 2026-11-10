@@ -4,6 +4,52 @@ import SwiftUI
 @testable import WebViewNativeUIControls
 
 final class NativeUISnapshotTests: XCTestCase {
+    @MainActor func testViewCapturePreservesNativeSourceOrder() async throws {
+        guard UIApplication.shared.delegate != nil else { throw XCTSkip("Requires hosted UIApplication") }
+        guard #available(iOS 26.0, *) else { throw XCTSkip("Requires native controls") }
+        let window = UIWindow(frame: UIScreen.main.bounds)
+        let owner = UIViewController(); window.rootViewController = owner; window.makeKeyAndVisible()
+        let web = WKWebView(frame: window.bounds); owner.view.addSubview(web)
+        let controller = NativeUIController(webView: web, viewController: owner, emit: { _, _ in }, hasListeners: { _ in false }, refresh: { _ in })
+        defer { window.isHidden = true }
+        let nodes = [control(["id": "a", "items": [item(["id": "a-action", "label": "Shared", "buttonFill": "clear", "color": "rgb(255, 0, 0)"])]]),
+                     control(["id": "b", "items": [item(["id": "b-action", "label": "Shared", "buttonFill": "clear", "color": "rgb(0, 0, 255)"])]]),
+                     control(["id": "c", "x": 160.0])]
+        let applied: [String: Any] = await withCheckedContinuation { continuation in
+            controller.update(["revision": 1, "viewportWidth": Double(web.bounds.width), "controls": nodes],
+                              resolve: { continuation.resume(returning: $0) }, reject: { continuation.resume(returning: ["error": $0]) })
+        }
+        XCTAssertNil(applied["error"])
+        window.layoutIfNeeded()
+        func buttons(_ view: UIView) -> [UIButton] { (view as? UIButton).map { [$0] } ?? view.subviews.flatMap(buttons) }
+        let button = try XCTUnwrap(buttons(owner.view).first { $0.accessibilityIdentifier == "a-action" })
+        func capture() async -> [String: Any] {
+            await withCheckedContinuation { continuation in
+                controller.coveredSnapshot(["action": "prepare", "ids": ["a", "b"], "revision": 1, "captureMode": "view", "viewportWidth": Double(web.bounds.width)],
+                                           resolve: { continuation.resume(returning: $0) }, reject: { continuation.resume(returning: ["error": $0]) })
+            }
+        }
+        func pixels(_ result: [String: Any]) throws -> Data {
+            let parts = try XCTUnwrap(result["parts"] as? [[String: Any]])
+            let path = try XCTUnwrap(parts.first?["url"] as? String)
+            let image = try XCTUnwrap(UIImage(data: Data(contentsOf: XCTUnwrap(URL(string: path))))?.cgImage)
+            return try XCTUnwrap(image.dataProvider?.data) as Data
+        }
+        func stablePixels() async throws -> Data {
+            let first = await capture()
+            let expected = try pixels(first)
+            for _ in 0..<4 {
+                let repeated = await capture()
+                XCTAssertEqual(try pixels(repeated), expected, "Repeated handoffs must keep the native drawing order")
+            }
+            return expected
+        }
+        let before = try await stablePixels()
+        button.superview?.bringSubviewToFront(button)
+        let after = try await stablePixels()
+        XCTAssertNotEqual(after, before, "Overlapping controls must use their current native drawing order")
+    }
+
     @MainActor func testMeasuredTabWidthTracksNativeContentWithAndWithoutSearch() async throws {
         guard #available(iOS 26.0, *) else { throw XCTSkip("Requires UISearchTab") }
         let owner = UIViewController()
