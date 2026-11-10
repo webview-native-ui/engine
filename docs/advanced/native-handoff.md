@@ -97,3 +97,21 @@ Moving DOM surfaces can provide a fixed viewport transfer layer through `WebProj
 Keep the Native renderer and source ownership alive while DOM images own the pixels. For entry, the common handoff installs prepared Native pixels and conceals the live renderer in the same Native turn, then displays the DOM images on their source surface. During that transfer the DOM image shares the temporary Native copy’s viewport coordinates. After Web painting, the Engine retires the Native copy and returns the DOM image to its source surface. Live translucent controls never sample their own Web image during entry. The optional `layoutFrame(target, part, parts)` adapter supplies current Native anchor placement from the captured cohort; it does not own visibility or handoff timing. Return uses that placement to freeze both prepared copies at the same destination until the accepted Native update. The renderer applies its ordinary Native layout and calls `updated(token, ids, revision)` on the accepted acknowledgement. Only a revision newer than the return request can retire the DOM images. The displayed image remains leased until the reveal acknowledgement or explicit retirement, independently of whether its cached capture is still reusable. No snapshot is captured during either transfer.
 
 On iOS, use `NativeUICoveredSnapshots.concealPixels(in:)` on the main thread when layout must remain measurable. It masks pixels and disables interaction/accessibility without changing `isHidden` or geometry. Its returned restoration closure is idempotent; overlapping leases restore the original mask and flags only after the last lease ends. Both composited and renderer-only capture use the same Native copy and drawing-completion contract.
+
+## Image encoding and reuse
+
+PNG encoding is bundled with the native packages; consumers do not need Rust or
+an NDK. iOS retains 16-bit Display P3 and ICC metadata. Android uses the Rust
+encoder for opaque sRGB images and its platform encoder for unsupported input.
+Encoding failures retain the platform fallback.
+
+Explicit renderer-view captures may reuse immutable images when the content
+revision and eligible view state are unchanged. Increment the revision whenever
+artwork changes, including animation or background changes affecting materials.
+Do not opt backdrop-dependent content into reuse without tracking those changes.
+Default iOS composited captures do not enable this renderer-view cache.
+
+Native replies acknowledge reusable pixels with `reused: true`. Only then may
+Web reuse its decoded image for the same URL and destination; other replies keep
+the existing load/decode behavior. Tokens own separate leases on shared files.
+Continue releasing retired tokens and reset the manager on owner teardown.

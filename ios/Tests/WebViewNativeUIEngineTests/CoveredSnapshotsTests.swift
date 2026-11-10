@@ -5,6 +5,117 @@ import UIKit
 @testable import WebViewNativeUIEngine
 
 final class NativeUICoveredSnapshotsTests: XCTestCase {
+    @MainActor func testOverlappingRootsInvalidateRelativeMovementButReuseCommonTranslation() async throws {
+        let window = SnapshotTestWindow(frame: UIScreen.main.bounds)
+        window.rootViewController = UIViewController()
+        window.makeKeyAndVisible()
+        let web = try XCTUnwrap(window.rootViewController?.view)
+        web.frame = window.bounds
+        let red = CountingSnapshotView(frame: CGRect(x: 40, y: 100, width: 60, height: 44))
+        let blue = CountingSnapshotView(frame: CGRect(x: 70, y: 110, width: 60, height: 44))
+        blue.color = .blue
+        web.addSubview(red); web.addSubview(blue)
+        window.layoutIfNeeded()
+        let snapshots = NativeUICoveredSnapshots()
+        let reference = NativeUICoveredSnapshots()
+        defer { snapshots.reset(); reference.reset(); window.isHidden = true }
+        func prepare(_ owner: NativeUICoveredSnapshots) async throws -> (String, [URL], Bool) {
+            let result: [String: Any] = await withCheckedContinuation { continuation in
+                owner.handle(["action": "prepare", "ids": ["red", "blue"], "revision": 1,
+                              "viewportWidth": Double(web.bounds.width), "captureMode": "view"], in: web,
+                             frames: { _, _ in ["red": red.frame, "blue": blue.frame] }, views: { _ in [red, blue] }) {
+                    continuation.resume(returning: $0)
+                }
+            }
+            let parts = try XCTUnwrap(result["parts"] as? [[String: Any]])
+            let urls = try parts.map { try XCTUnwrap(URL(string: try XCTUnwrap($0["url"] as? String))) }
+            return (try XCTUnwrap(result["token"] as? String), urls, result["reused"] as? Bool == true)
+        }
+        func pixels(_ image: UIImage) throws -> Data {
+            let cgImage = try XCTUnwrap(image.cgImage)
+            return try XCTUnwrap(cgImage.dataProvider?.data) as Data
+        }
+        let first = try await prepare(snapshots)
+        let firstPixels = try first.1.map { try pixels(XCTUnwrap(UIImage(contentsOfFile: $0.path))) }
+        blue.transform = CGAffineTransform(translationX: 10, y: 0)
+        let moved = try await prepare(snapshots)
+        XCTAssertFalse(moved.2, "Relative movement changes the shared-context overlap pixels")
+        XCTAssertEqual(red.draws, 2)
+        XCTAssertEqual(blue.draws, 2)
+        XCTAssertNotEqual(moved.1, first.1)
+        let movedPixels = try moved.1.map { try pixels(XCTUnwrap(UIImage(contentsOfFile: $0.path))) }
+        XCTAssertNotEqual(firstPixels, movedPixels, "The overlap fixture must actually change pixels")
+        let fresh = try await prepare(reference)
+        XCTAssertEqual(movedPixels, try fresh.1.map { try pixels(XCTUnwrap(UIImage(contentsOfFile: $0.path))) })
+        red.transform = CGAffineTransform(translationX: 8, y: 6)
+        blue.transform = CGAffineTransform(translationX: 18, y: 6)
+        let common = try await prepare(snapshots)
+        XCTAssertTrue(common.2)
+        XCTAssertEqual(common.1, moved.1)
+        XCTAssertEqual(red.draws, 3, "Only the independent reference capture should add a draw")
+        XCTAssertTrue(snapshots.restore(in: web, token: common.0))
+        let restored = window.subviews.compactMap { ($0 as? UIImageView)?.image }
+        XCTAssertEqual(restored.count, movedPixels.count)
+        XCTAssertEqual(try restored.map(pixels), movedPixels, "Native return must use the same PNG pixels")
+        snapshots.retireCopy(common.0, entry: false)
+    }
+
+    @MainActor func testViewCacheSkipsCaptureEncodeAndSaveUntilContentOrPixelsChange() async throws {
+        let window = SnapshotTestWindow(frame: UIScreen.main.bounds)
+        window.rootViewController = UIViewController()
+        window.makeKeyAndVisible()
+        let web = try XCTUnwrap(window.rootViewController?.view)
+        web.frame = window.bounds
+        let control = CountingSnapshotView(frame: CGRect(x: 40, y: 100, width: 60, height: 44))
+        web.addSubview(control)
+        window.layoutIfNeeded()
+        let snapshots = NativeUICoveredSnapshots()
+        defer { snapshots.reset(); window.isHidden = true }
+        func prepare(_ revision: Int) async throws -> (String, URL) {
+            let result: [String: Any] = await withCheckedContinuation { continuation in
+                snapshots.handle(["action": "prepare", "ids": ["control"], "revision": revision,
+                                  "viewportWidth": Double(web.bounds.width), "captureMode": "view"], in: web,
+                                 frames: { _, _ in ["control": control.frame] }, views: { _ in [control] }) {
+                    continuation.resume(returning: $0)
+                }
+            }
+            let parts = try XCTUnwrap(result["parts"] as? [[String: Any]])
+            let path = try XCTUnwrap(parts.first?["url"] as? String)
+            return (try XCTUnwrap(result["token"] as? String), try XCTUnwrap(URL(string: path)))
+        }
+        let first = try await prepare(1)
+        XCTAssertEqual(control.draws, 1)
+        XCTAssertTrue(snapshots.restore(in: web, token: first.0))
+        let originalImage = try XCTUnwrap(window.subviews.compactMap { ($0 as? UIImageView)?.image }.first)
+        snapshots.retireCopy(first.0, entry: false)
+        control.transform = CGAffineTransform(translationX: 10, y: 0)
+        let moved = try await prepare(1)
+        XCTAssertEqual(control.draws, 1, "Movement alone must not capture or encode again")
+        XCTAssertEqual(moved.1, first.1, "A cache hit must reuse the saved PNG")
+        XCTAssertTrue(snapshots.restore(in: web, token: moved.0))
+        let reusedImage = try XCTUnwrap(window.subviews.compactMap { ($0 as? UIImageView)?.image }.first)
+        XCTAssertTrue(reusedImage === originalImage, "Native restoration must not decode the PNG again")
+        snapshots.retireCopy(moved.0, entry: false)
+        XCTAssertNotEqual(moved.0, first.0, "Each handoff keeps independent release ownership")
+        snapshots.release(first.0)
+        snapshots.release(moved.0)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: first.1.path), "The bounded view cache owns the idle PNG")
+        let updated = try await prepare(2)
+        XCTAssertEqual(control.draws, 2)
+        XCTAssertNotEqual(updated.1, first.1)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: first.1.path), "Replaced unleased files must be deleted")
+        try FileManager.default.removeItem(at: updated.1)
+        let recovered = try await prepare(2)
+        XCTAssertEqual(control.draws, 3, "An evicted cache file must be recovered")
+        XCTAssertNotEqual(recovered.1, updated.1)
+        control.frame.size.width += 10
+        let resized = try await prepare(2)
+        XCTAssertEqual(control.draws, 4, "Resizing changes the captured pixels")
+        snapshots.reset()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: recovered.1.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: resized.1.path))
+    }
+
     @MainActor func testPixelVisibilityLeasesPreserveLayoutAndReleaseInEitherOrder() {
         for reverse in [false, true] {
             let view = UIView(frame: CGRect(x: 20, y: 80, width: 48, height: 48))
@@ -451,6 +562,17 @@ private final class TransparentSnapshotTestView: UIView {
     override func drawHierarchy(in rect: CGRect, afterScreenUpdates: Bool) -> Bool {
         UIColor.red.withAlphaComponent(0.5).setFill()
         UIRectFillUsingBlendMode(rect, .normal)
+        return true
+    }
+}
+
+private final class CountingSnapshotView: UIView {
+    var draws = 0
+    var color = UIColor.red
+    override func drawHierarchy(in rect: CGRect, afterScreenUpdates: Bool) -> Bool {
+        draws += 1
+        color.setFill()
+        UIRectFill(rect)
         return true
     }
 }

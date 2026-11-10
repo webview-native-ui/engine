@@ -1,5 +1,6 @@
 package io.github.webview_native_ui.engine
 
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Rect
@@ -15,7 +16,9 @@ import android.view.Window
 import android.webkit.WebView
 import android.widget.ImageView
 import java.io.File
+import java.lang.ref.WeakReference
 import java.util.UUID
+import java.util.concurrent.Callable
 import java.util.concurrent.Executors
 import kotlin.math.ceil
 import kotlin.math.floor
@@ -45,13 +48,38 @@ class NativeUISnapshots(private val directory: File) : AutoCloseable {
         val views: List<ImageView>,
     )
 
+    private companion object {
+        // Shared across captures/instances; large crops retain the serial path.
+        val pngWorkers = Executors.newFixedThreadPool(2)
+    }
+
     private val main = Handler(Looper.getMainLooper())
     private val encoder = Executors.newSingleThreadExecutor()
     private val captures = mutableMapOf<String, Capture>()
 
+    private data class ViewState(
+        val width: Int,
+        val height: Int,
+        val direction: Int,
+        val alpha: Float,
+        val configuration: Configuration,
+    )
+
+    private fun viewState(view: View) =
+        ViewState(
+            view.width,
+            view.height,
+            view.layoutDirection,
+            view.alpha,
+            Configuration(view.resources.configuration),
+        )
+
     private data class ViewCache(
         val revision: Long,
         val views: Map<String, View>,
+        val regions: Map<String, Rect>,
+        val window: WeakReference<Window>,
+        val states: Map<String, ViewState>,
         val parts: List<Part>,
     )
 
@@ -336,13 +364,14 @@ class NativeUISnapshots(private val directory: File) : AutoCloseable {
         val height = root.height
         val referenceWidth = reference.width
         val referenceHeight = reference.height
-        fun deliver(parts: List<Part>) {
+        fun deliver(parts: List<Part>, reused: Boolean = false) {
             val token = UUID.randomUUID().toString()
             captures[token] =
                 Capture(width, height, location, referenceWidth, referenceHeight, parts)
             complete(
                 JSONObject()
                     .put("token", token)
+                    .put("reused", reused)
                     .put(
                         "parts",
                         JSONArray(
@@ -358,22 +387,6 @@ class NativeUISnapshots(private val directory: File) : AutoCloseable {
                         ),
                     )
             )
-        }
-        val cached = viewCache
-        if (
-            sourceViews != null &&
-                cached != null &&
-                cached.revision == contentRevision &&
-                cached.views == sourceViews &&
-                cached.parts.all { part ->
-                    part.file.isFile &&
-                        frames[part.id]?.let {
-                            it.width() == part.frame.width() && it.height() == part.frame.height()
-                        } == true
-                }
-        ) {
-            deliver(cached.parts.map { it.copy(frame = RectF(frames.getValue(it.id))) })
-            return
         }
         val regions =
             frames.mapValues { (_, frame) ->
@@ -392,6 +405,37 @@ class NativeUISnapshots(private val directory: File) : AutoCloseable {
                         ceil(frame.bottom + location[1] + 12.0).toInt().coerceAtMost(height),
                     )
             }
+        val states = sourceViews?.mapValues { viewState(it.value) }
+        val cached = viewCache
+        // Compare raster crop coordinates: shared-canvas overlap must stay unchanged.
+        val sameArrangement =
+            cached != null &&
+                cached.views.keys.toList() == sourceViews?.keys?.toList() &&
+                cached.parts.size == frames.size &&
+                sameViewCaptureArrangement(cached.regions, regions)
+        if (
+            sourceViews != null &&
+                cached != null &&
+                cached.revision == contentRevision &&
+                cached.views == sourceViews &&
+                cached.window.get() === window &&
+                cached.states == states &&
+                sourceViews.keys == frames.keys &&
+                sameArrangement &&
+                sourceViews.values.none { it.isLayoutRequested } &&
+                cached.parts.all { part ->
+                    part.file.isFile &&
+                        frames[part.id]?.let {
+                            it.width() == part.frame.width() && it.height() == part.frame.height()
+                        } == true
+                }
+        ) {
+            deliver(
+                cached.parts.map { it.copy(frame = RectF(frames.getValue(it.id))) },
+                reused = true,
+            )
+            return
+        }
         if (regions.any { it.value.isEmpty }) {
             complete(JSONObject())
             return
@@ -423,40 +467,66 @@ class NativeUISnapshots(private val directory: File) : AutoCloseable {
                     val parts = mutableListOf<Part>()
                     try {
                         directory.mkdirs()
-                        for ((id, rect) in regions) {
-                            val image =
-                                Bitmap.createBitmap(
-                                    pixels,
-                                    rect.left - union.left,
-                                    rect.top - union.top,
-                                    rect.width(),
-                                    rect.height(),
-                                )
-                            val file = File(directory, "$token-${parts.size}.png")
-                            try {
-                                check(
-                                    file.outputStream().use {
-                                        image.compress(Bitmap.CompressFormat.PNG, 100, it)
+                        val tasks =
+                            regions.entries.mapIndexed { index, (id, rect) ->
+                                Callable {
+                                    val image =
+                                        Bitmap.createBitmap(
+                                            pixels,
+                                            rect.left - union.left,
+                                            rect.top - union.top,
+                                            rect.width(),
+                                            rect.height(),
+                                        )
+                                    val file = File(directory, "$token-$index.png")
+                                    try {
+                                        check(
+                                            file.outputStream().use { NativeUIPng.write(image, it) }
+                                        )
+                                        Part(
+                                            id,
+                                            RectF(
+                                                rect.left - location[0].toFloat(),
+                                                rect.top - location[1].toFloat(),
+                                                rect.right - location[0].toFloat(),
+                                                rect.bottom - location[1].toFloat(),
+                                            ),
+                                            image,
+                                            file,
+                                        )
+                                    } catch (error: Exception) {
+                                        if (image !== pixels) image.recycle()
+                                        file.delete()
+                                        throw error
                                     }
-                                )
-                            } catch (error: Exception) {
-                                if (image !== pixels) image.recycle()
-                                file.delete()
-                                throw error
+                                }
                             }
-                            parts.add(
-                                Part(
-                                    id,
-                                    RectF(
-                                        rect.left - location[0].toFloat(),
-                                        rect.top - location[1].toFloat(),
-                                        rect.right - location[0].toFloat(),
-                                        rect.bottom - location[1].toFloat(),
-                                    ),
-                                    image,
-                                    file,
-                                )
-                            )
+                        val workerLimit = 2
+                        val parallel =
+                            workerLimit > 1 &&
+                                tasks.size > 1 &&
+                                regions.values.all { it.width().toLong() * it.height() <= 500_000 }
+                        if (parallel) {
+                            // Join every task even after a failure before recycling shared pixels.
+                            val futures = tasks.map { pngWorkers.submit(it) }
+                            var interrupted = false
+                            for (future in futures) {
+                                var joined = false
+                                while (!joined) {
+                                    try {
+                                        parts.add(future.get())
+                                        joined = true
+                                    } catch (_: InterruptedException) {
+                                        interrupted = true
+                                    } catch (_: Exception) {
+                                        joined = true
+                                    }
+                                }
+                            }
+                            if (interrupted) Thread.currentThread().interrupt()
+                            check(parts.size == tasks.size)
+                        } else {
+                            for (task in tasks) parts.add(task.call())
                         }
                     } catch (_: Exception) {
                         parts.forEach {
@@ -490,7 +560,15 @@ class NativeUISnapshots(private val directory: File) : AutoCloseable {
                         if (parts.none { it.bitmap === pixels }) pixels.recycle()
                         val previous = viewCache
                         if (sourceViews != null)
-                            viewCache = ViewCache(contentRevision, sourceViews.toMap(), parts)
+                            viewCache =
+                                ViewCache(
+                                    contentRevision,
+                                    sourceViews.toMap(),
+                                    regions.mapValues { Rect(it.value) },
+                                    WeakReference(window),
+                                    states.orEmpty(),
+                                    parts,
+                                )
                         previous?.parts?.forEach(::releasePixelsIfUnused)
                         deliver(parts)
                     }

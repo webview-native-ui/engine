@@ -10,9 +10,11 @@ version = new groovy.json.JsonSlurper().parse(file('../package.json')).version
 android {
     namespace 'io.github.webview_native_ui.engine'
     compileSdk 36
+    sourceSets.main.jniLibs.srcDir('../native/artifacts/android')
     lint { warningsAsErrors = true }
     defaultConfig {
         minSdk 23
+        consumerProguardFiles 'consumer-rules.pro'
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
@@ -77,6 +79,8 @@ tasks.register('centralBundle', Zip) {
 // Keep the package license in binary and source distributions without duplicate source files.
 def licenseResources = tasks.register('prepareLicenseResources', Sync) {
     from('..') { include 'LICENSE' }
+    from('../ios/Sources/WebViewNativeUIEngine/Resources/NativeUIPngLicenses') { into 'native-ui-png' }
+    from('../native/licenses') { into 'native-ui-png' }
     into(layout.buildDirectory.dir('generated/license-resources/META-INF/webview-native-ui-engine'))
 }
 android.sourceSets.main.resources.srcDir(layout.buildDirectory.dir('generated/license-resources'))
@@ -84,6 +88,8 @@ tasks.matching { it.name.startsWith('process') && it.name.endsWith('JavaRes') }.
 tasks.withType(Jar).configureEach {
     if (name in ['sourceReleaseJar', 'javaDocReleaseJar']) {
         from('..') { include 'LICENSE'; into 'META-INF/webview-native-ui-engine' }
+        from('../ios/Sources/WebViewNativeUIEngine/Resources/NativeUIPngLicenses') { into 'META-INF/webview-native-ui-engine/native-ui-png' }
+        from('../native/licenses') { into 'META-INF/webview-native-ui-engine/native-ui-png' }
     }
 }
 

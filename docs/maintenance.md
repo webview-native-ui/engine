@@ -80,3 +80,49 @@ No build or test command publishes a package. Existing npm/Maven versions are ne
 To rerun release verification for an existing tag, select that tag as both the workflow ref and the `tag` input: `gh workflow run release.yml --ref vX.Y.Z -f tag=vX.Y.Z`. This uses the workflow saved in that release, including for older tags that predate the release-only commit layout. It checks the original tagged commit and skips npm publication only when the existing package contents match. Keep the tag unchanged. Release tooling uses the Node.js 24 bundled npm, matching CI.
 
 [Documentation overview](README.md)
+
+## Native PNG artifacts
+
+The checked-in native artifacts let consumers build
+without Rust or an NDK. Changes to the Rust codec, C header or JNI shim must
+regenerate all binaries in the same change.
+
+Use Rust 1.99.1 (CI's pinned toolchain), Xcode on macOS and Android NDK 29. Install
+Rust's `aarch64-apple-ios`, `aarch64-apple-ios-sim`, `x86_64-apple-ios`,
+`aarch64-linux-android`, `armv7-linux-androideabi`, `i686-linux-android` and
+`x86_64-linux-android` targets. Then run:
+
+```sh
+cargo test --locked --manifest-path native/png/Cargo.toml
+cargo clippy --locked --manifest-path native/png/Cargo.toml --all-targets -- -D warnings
+python3 scripts/build-native-png.py --ndk "$ANDROID_NDK_HOME"
+python3 scripts/verify-native-png.py
+npm run build
+npm run test:package
+```
+
+Commit `native/png`, `native/include`, `native/android`, `native/artifacts`,
+`native/licenses` and the shared iOS license resources together. The
+XCFramework contains arm64 devices and arm64/x86_64 simulators. The Android
+artifact includes arm64-v8a, armeabi-v7a, x86 and x86_64, with 16 KiB ELF alignment
+and consumer rules retaining the JNI class/method names. Rust dependency and standard-library notices are maintained only in
+`ios/Sources/WebViewNativeUIEngine/Resources/NativeUIPngLicenses`, which SwiftPM
+and CocoaPods bundle directly. Android copies that same directory into its
+generated resources and source archive. `native/licenses` contains only
+Android NDK notices. Do not commit a second copy of the shared notices. The source/binary hash manifest rejects stale combinations before
+packaging. `--platform ios` or `android` can aid local iteration; a release must
+finish with a full build and `all-build.json` verification.
+
+Android connected tests must explicitly select the intended emulator when
+other devices are connected:
+
+```sh
+ANDROID_SERIAL=emulator-5554 android/gradlew -p android :connectedDebugAndroidTest
+```
+
+The image-reuse integration test checks movement, content invalidation, handoff
+and file cleanup on the specified iOS simulator:
+
+```sh
+python3 scripts/verify-image-reuse.py --device <booted-simulator-UUID>
+```

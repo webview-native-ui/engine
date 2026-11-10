@@ -542,13 +542,188 @@ class NativeUIEngineTest {
             assertFalse(original.exists())
             val changedFile =
                 File(java.net.URI(changed.getJSONArray("parts").getJSONObject(0).getString("url")))
+            main { native.alpha = 0.9f }
+            instrumentation.waitForIdleSync()
+            val appearanceChanged = prepareAgain(1)
+            val appearanceFile =
+                File(
+                    java.net.URI(
+                        appearanceChanged.getJSONArray("parts").getJSONObject(0).getString("url")
+                    )
+                )
+            assertNotEquals(
+                "Native appearance changes must invalidate cached pixels even at the same content revision",
+                changedFile,
+                appearanceFile,
+            )
             main { snapshots.reset() }
             assertFalse(changedFile.exists())
+            assertFalse(appearanceFile.exists())
             val newDocument = prepareAgain(1)
             assertNotEquals(
                 changedFile.toURI().toString(),
                 newDocument.getJSONArray("parts").getJSONObject(0).getString("url"),
             )
+            main { snapshots.close() }
+        } finally {
+            main { activity.finish() }
+        }
+    }
+
+    @Test
+    fun viewCacheRejectsRelativeMovementAndDrawOrderChanges() {
+        val activity = activity()
+        lateinit var snapshots: NativeUISnapshots
+        lateinit var first: View
+        lateinit var second: View
+        try {
+            main {
+                first = View(activity).apply { setBackgroundColor(Color.RED) }
+                second = View(activity).apply { setBackgroundColor(Color.BLUE) }
+                activity.root.addView(first, FrameLayout.LayoutParams(20, 20))
+                activity.root.addView(second, FrameLayout.LayoutParams(20, 20))
+                snapshots =
+                    NativeUISnapshots(File(activity.cacheDir, "arrangement-${System.nanoTime()}"))
+            }
+            instrumentation.waitForIdleSync()
+            fun prepare(firstX: Float, secondX: Float, reverse: Boolean = false): JSONObject {
+                val done = CountDownLatch(1)
+                var result = JSONObject()
+                val views =
+                    if (reverse) linkedMapOf("b" to second, "a" to first)
+                    else linkedMapOf("a" to first, "b" to second)
+                main {
+                    snapshots.prepare(
+                        activity.window,
+                        activity.web,
+                        activity.web.width.toDouble(),
+                        {
+                            mapOf(
+                                "a" to RectF(firstX, 100f, firstX + 20f, 120f),
+                                "b" to RectF(secondX, 100f, secondX + 20f, 120f),
+                            )
+                        },
+                        sourceViews = { views },
+                        contentRevision = 1,
+                    ) {
+                        result = it
+                        done.countDown()
+                    }
+                }
+                assertTrue(done.await(10, TimeUnit.SECONDS))
+                assertTrue(result.has("token"))
+                return result
+            }
+            fun firstUrl(value: JSONObject) =
+                value.getJSONArray("parts").getJSONObject(0).getString("url")
+            val original = prepare(20f, 40f)
+            assertFalse(original.optBoolean("reused"))
+            main { snapshots.release(original.getString("token")) }
+            val translatedOne = prepare(30f, 50f)
+            assertTrue(translatedOne.optBoolean("reused"))
+            assertEquals(firstUrl(original), firstUrl(translatedOne))
+            main { snapshots.release(translatedOne.getString("token")) }
+            val relativeMove = prepare(30f, 60f)
+            assertFalse(
+                "Relative movement changes overlap pixels",
+                relativeMove.optBoolean("reused"),
+            )
+            assertNotEquals(firstUrl(original), firstUrl(relativeMove))
+            main { snapshots.release(relativeMove.getString("token")) }
+            val orderChange = prepare(30f, 60f, reverse = true)
+            assertFalse("Draw order changes the rendered cohort", orderChange.optBoolean("reused"))
+            main { snapshots.release(orderChange.getString("token")) }
+            main { snapshots.close() }
+        } finally {
+            main { activity.finish() }
+        }
+    }
+
+    @Test
+    fun overlappingViewCacheTracksRelativeMovementAndDrawOrder() {
+        val activity = activity()
+        lateinit var snapshots: NativeUISnapshots
+        lateinit var red: View
+        lateinit var blue: View
+        try {
+            main {
+                red = View(activity).apply { setBackgroundColor(Color.RED) }
+                blue = View(activity).apply { setBackgroundColor(Color.BLUE) }
+                activity.root.addView(red, FrameLayout.LayoutParams(80, 60))
+                activity.root.addView(blue, FrameLayout.LayoutParams(80, 60))
+                snapshots =
+                    NativeUISnapshots(File(activity.cacheDir, "overlap-${System.nanoTime()}"))
+            }
+            instrumentation.waitForIdleSync()
+            fun capture(secondX: Float, reverse: Boolean = false): JSONObject {
+                val done = CountDownLatch(1)
+                var value = JSONObject()
+                main {
+                    snapshots.prepare(
+                        activity.window,
+                        activity.web,
+                        activity.web.width.toDouble(),
+                        {
+                            linkedMapOf(
+                                "red" to RectF(20f, 120f, 100f, 180f),
+                                "blue" to RectF(secondX, 120f, secondX + 80f, 180f),
+                            )
+                        },
+                        sourceViews = {
+                            if (reverse) linkedMapOf("blue" to blue, "red" to red)
+                            else linkedMapOf("red" to red, "blue" to blue)
+                        },
+                        contentRevision = 7,
+                    ) {
+                        value = it
+                        done.countDown()
+                    }
+                }
+                assertTrue(done.await(10, TimeUnit.SECONDS))
+                assertTrue(value.has("token"))
+                return value
+            }
+            fun image(value: JSONObject): android.graphics.Bitmap {
+                val parts = value.getJSONArray("parts")
+                val part =
+                    (0 until parts.length())
+                        .map { parts.getJSONObject(it) }
+                        .first { it.getJSONArray("ids").getString(0) == "red" }
+                return BitmapFactory.decodeFile(File(java.net.URI(part.getString("url"))).path)
+            }
+            fun release(value: JSONObject) = main { snapshots.release(value.getString("token")) }
+            val initial = capture(60f)
+            release(initial)
+            val moved = capture(40f)
+            assertFalse(
+                "Moving only one overlapping root must recapture",
+                moved.getBoolean("reused"),
+            )
+            val movedImage = image(moved)
+            assertEquals(Color.BLUE, movedImage.getPixel(30, 20))
+            release(moved)
+            main { snapshots.reset() }
+            val fresh = capture(40f)
+            val freshImage = image(fresh)
+            assertTrue("Moved capture must equal a fresh reference", movedImage.sameAs(freshImage))
+            movedImage.recycle()
+            freshImage.recycle()
+            release(fresh)
+            val reordered = capture(40f, reverse = true)
+            assertFalse(
+                "Shared-canvas draw order changes must recapture",
+                reordered.getBoolean("reused"),
+            )
+            val reorderedImage = image(reordered)
+            assertEquals(Color.RED, reorderedImage.getPixel(30, 20))
+            release(reordered)
+            main { snapshots.reset() }
+            val reorderedFresh = capture(40f, reverse = true)
+            val reorderedFreshImage = image(reorderedFresh)
+            assertTrue(reorderedImage.sameAs(reorderedFreshImage))
+            reorderedImage.recycle()
+            reorderedFreshImage.recycle()
+            release(reorderedFresh)
             main { snapshots.close() }
         } finally {
             main { activity.finish() }
@@ -1457,18 +1632,24 @@ class NativeUIEngineTest {
     fun explicitPlacementIsNotOverwrittenByOlderImageFrame() =
         nativeInitialization(NativeUIProjection.CaptureMode.VIEW, authoritativePlacement = true)
 
+    @Test
+    fun viewImageReuseSkipsFileReadAndDecodeAcrossMovement() =
+        nativeInitialization(NativeUIProjection.CaptureMode.VIEW, auditReuse = true)
+
     private fun nativeInitialization(
         mode: NativeUIProjection.CaptureMode,
         delayCover: Boolean = false,
         releaseWhileActive: Boolean = false,
         pressOnConnect: Boolean = false,
         authoritativePlacement: Boolean = false,
+        auditReuse: Boolean = false,
     ) {
 
         val activity = activity()
         lateinit var registration: NativeUIProjection
         lateinit var native: View
         val loaded = CountDownLatch(1)
+        val fileReads = java.util.concurrent.atomic.AtomicInteger()
         val pendingDraws = mutableListOf<() -> Unit>()
         var revealCount = 0
         var pendingPlacement = false
@@ -1540,6 +1721,7 @@ class NativeUIEngineTest {
                                 )
                             )
                                 return null
+                            fileReads.incrementAndGet()
                             return runCatching {
                                     android.webkit.WebResourceResponse(
                                         "image/png",
@@ -1640,6 +1822,8 @@ class NativeUIEngineTest {
                     "https://localhost",
                     """
                     <meta name='viewport' content='width=device-width,initial-scale=1'><script>
+                    window.imageDecodes=0;const originalDecode=HTMLImageElement.prototype.decode;
+                    HTMLImageElement.prototype.decode=function(){imageDecodes++;return originalDecode.call(this)};
                     window.testEvents={};window.Capacitor={
                      addListener:(plugin,name,fn)=>{testEvents[name]=fn;return{remove:async()=>{delete testEvents[name]}}},
                      convertFileSrc:url=>'https://localhost/_capacitor_file_'+url.replace('file://','')
@@ -1761,6 +1945,8 @@ class NativeUIEngineTest {
                     """
                         .trimIndent()
                 )
+            val readsBeforeMovement = fileReads.get()
+            val decodesBeforeMovement = js("window.imageDecodes").toInt()
             repeat(2) { iteration ->
                 waitFor("document.querySelector('#slot').hasAttribute('data-native-ui-snapshot')")
                 js("testEvents.moving({})")
@@ -1819,6 +2005,18 @@ class NativeUIEngineTest {
                         )
                     }
                 }
+            }
+            if (auditReuse) {
+                assertEquals(
+                    "Position-only round trips must not read the PNG again",
+                    readsBeforeMovement,
+                    fileReads.get(),
+                )
+                assertEquals(
+                    "Position-only round trips must not decode the PNG again",
+                    decodesBeforeMovement,
+                    js("window.imageDecodes").toInt(),
+                )
             }
             waitFor("document.querySelector('#slot').hasAttribute('data-native-ui-snapshot')")
             js("testEvents.moving({})")

@@ -18,3 +18,5 @@ android/**/.kotlin/
 
 ios/Tests/*.xcodeproj/
 ios/Tests/TestHost/Info.plist
+
+native/png/target/

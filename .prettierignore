@@ -12,3 +12,7 @@ ios/Sources/WebViewNativeUIEngine/Resources/native-ui-engine.js
 runtime/native-ui-engine.js
 
 android/**/build/
+
+native/licenses/
+native/artifacts/
+ios/Sources/WebViewNativeUIEngine/Resources/NativeUIPngLicenses/

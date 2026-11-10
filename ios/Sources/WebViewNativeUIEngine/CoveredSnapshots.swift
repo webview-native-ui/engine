@@ -18,6 +18,35 @@ public final class NativeUICoveredSnapshots {
         let parts: [Part]
         var preservesLayout = false
     }
+    private final class CachedView {
+        weak var view: UIView?
+        let bounds: CGRect
+        let transform: CGAffineTransform
+        let alpha: CGFloat
+        let traits: UITraitCollection
+        init(_ view: UIView) {
+            self.view = view
+            bounds = view.bounds
+            transform = view.transform
+            alpha = view.alpha
+            traits = view.traitCollection
+        }
+        func matches(_ current: UIView) -> Bool {
+            let value = current.transform
+            return view === current && bounds == current.bounds &&
+                transform.a == value.a && transform.b == value.b && transform.c == value.c && transform.d == value.d &&
+                alpha == current.alpha && traits.isEqual(current.traitCollection) && !current.isHidden
+        }
+    }
+    private struct ViewCache {
+        let revision: Int
+        weak var window: UIWindow?
+        let scale: CGFloat
+        let views: [CachedView]
+        let geometry: [CGRect]
+        let parts: [Part]
+    }
+    private var viewCache: ViewCache?
     private final class PixelVisibility {
         let originalMask: CALayer?
         let interaction: Bool
@@ -33,6 +62,7 @@ public final class NativeUICoveredSnapshots {
     private static let pixelVisibility = NSMapTable<UIView, PixelVisibility>(keyOptions: .weakMemory, valueOptions: .strongMemory)
     public init() {}
     private let imageContext = CIContext()
+    private let pngEncoder = NativeUIPngEncoder()
     private var captures: [String: Capture] = [:]
     private var restoration: (token: String, views: [UIImageView], entry: Bool)?
     private var hiddenControls: (token: String, restore: [() -> Void])?
@@ -62,11 +92,11 @@ public final class NativeUICoveredSnapshots {
             let selected = viewCapture ? views(expected) : nil
             guard !viewCapture || selected?.isEmpty == false else { complete([:]); return }
             var initial: [String: CGRect]? = firstFrames
-            prepare(frames: {
+            prepareCapture(frames: {
                 let measured = initial ?? frames(expected, revision)
                 initial = nil
                 return Set(measured.keys) == expected ? measured : [:]
-            }, in: webView, viewportWidth: width, views: selected, anchorFrames: anchorFrames, complete: { result in
+            }, in: webView, viewportWidth: width, views: selected, anchorFrames: anchorFrames, contentRevision: viewCapture ? revision : nil, complete: { result in
                 if let token = result["token"] as? String { self.captures[token]?.preservesLayout = request["imageSurface"] as? String == "web" }
                 complete(result)
             })
@@ -130,6 +160,13 @@ public final class NativeUICoveredSnapshots {
     // Wait off the presentation path for unchanged rendered geometry, not a guessed delay.
     public func prepare(frames: @escaping () -> [String: CGRect], in webView: UIView, viewportWidth: CGFloat,
                         views: [UIView]? = nil, anchorFrames: (() -> [String: CGRect])? = nil, complete: @escaping ([String: Any]) -> Void) {
+        prepareCapture(frames: frames, in: webView, viewportWidth: viewportWidth, views: views,
+                       anchorFrames: anchorFrames, contentRevision: nil, complete: complete)
+    }
+
+    private func prepareCapture(frames: @escaping () -> [String: CGRect], in webView: UIView, viewportWidth: CGFloat,
+                                views: [UIView]?, anchorFrames: (() -> [String: CGRect])?, contentRevision: Int?,
+                                complete: @escaping ([String: Any]) -> Void) {
         let stamp = generation
         let start = CACurrentMediaTime()
         func sample(_ previous: [String: CGRect], _ stable: Int) {
@@ -137,7 +174,7 @@ public final class NativeUICoveredSnapshots {
             let current = frames()
             let count = !current.isEmpty && current == previous ? stable + 1 : 0
             if count >= 3 {
-                capture(frames: current, anchorFrames: anchorFrames?() ?? [:], in: webView, viewportWidth: viewportWidth, views: views, complete: complete)
+                capture(frames: current, anchorFrames: anchorFrames?() ?? [:], in: webView, viewportWidth: viewportWidth, views: views, contentRevision: contentRevision, complete: complete)
             } else {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.0 / 60.0) { sample(current, count) }
             }
@@ -146,7 +183,7 @@ public final class NativeUICoveredSnapshots {
     }
 
     private func capture(frames: [String: CGRect], anchorFrames: [String: CGRect], in webView: UIView, viewportWidth: CGFloat,
-                         views: [UIView]?, complete: @escaping ([String: Any]) -> Void) {
+                         views: [UIView]?, contentRevision: Int?, complete: @escaping ([String: Any]) -> Void) {
         guard !touching, let window = webView.window, !frames.isEmpty,
               viewportWidth > 0, webView.bounds.width > 0 else { complete([:]); return }
         let stamp = generation
@@ -169,6 +206,39 @@ public final class NativeUICoveredSnapshots {
             }
             regions.append(([id], rect, anchor))
         }
+        // All roots are drawn into one context: a crop can contain another root.
+        // Reuse requires one common translation of every source and crop rectangle.
+        let geometry = (views ?? []).map { $0.convert($0.bounds, to: window) } + regions.map(\.rect)
+        func sameArrangement(_ previous: [CGRect]) -> Bool {
+            guard previous.count == geometry.count, let first = previous.first, let current = geometry.first else { return false }
+            let offsetX = current.minX - first.minX
+            let offsetY = current.minY - first.minY
+            return zip(previous, geometry).allSatisfy { old, current in old.offsetBy(dx: offsetX, dy: offsetY) == current }
+        }
+        // Reuse only explicit view content, never composited window/backdrop pixels.
+        // Layout-only moves rebase the existing immutable PNG and decoded UIImage.
+        if let views, let revision = contentRevision, let cached = viewCache,
+           cached.revision == revision, cached.window === window, cached.scale == scale,
+           sameArrangement(cached.geometry),
+           views.allSatisfy({ $0.window === window && !$0.isHidden && $0.alpha > 0 }),
+           cached.views.count == views.count, zip(cached.views, views).allSatisfy({ $0.0.matches($0.1) }),
+           cached.parts.count == regions.count,
+           zip(cached.parts, regions).allSatisfy({ part, region in
+            let frame = window.convert(region.rect, to: webView)
+            return part.ids == region.ids && part.frame.size == frame.size &&
+                part.anchorFrame.size == region.anchorFrame.size &&
+                part.anchorFrame.minX - part.frame.minX == region.anchorFrame.minX - frame.minX &&
+                part.anchorFrame.minY - part.frame.minY == region.anchorFrame.minY - frame.minY &&
+                FileManager.default.fileExists(atPath: part.file.path)
+           }) {
+            let parts = zip(cached.parts, regions).map { part, region in
+                Part(ids: part.ids, frame: window.convert(region.rect, to: webView), anchorFrame: region.anchorFrame,
+                     image: part.image, file: part.file)
+            }
+            deliver(parts, size: size, webFrame: webFrame, ratio: ratio, reused: true, complete: complete)
+            return
+        }
+        let capturedViews = views?.map(CachedView.init)
         let bounds = regions.reduce(CGRect.null) { $0.union($1.rect) }
         // Preserve wide-gamut precision during capture. Encode to integer 16-bit
         // Display P3 only off the presentation path, without a Canvas conversion.
@@ -213,25 +283,44 @@ public final class NativeUICoveredSnapshots {
         }
         guard crops.count == regions.count else { complete([:]); return }
         let imageContext = self.imageContext
+        let pngEncoder = self.pngEncoder
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             var parts: [Part] = []
             do {
                 try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-                for (index, crop) in crops.enumerated() {
-                    guard let pixels = crop.image.cgImage,
-                          let png = imageContext.pngRepresentation(of: CIImage(cgImage: pixels), format: .RGBA16,
-                                                                   colorSpace: outputSpace, options: [:]) else { throw CocoaError(.fileWriteUnknown) }
-                    // Native entry/return copies must use the same encoded pixels as Web,
-                    // including gamut clipping performed by integer PNG conversion.
-                    guard let source = CGImageSourceCreateWithData(png as CFData, nil),
-                          let decoded = CGImageSourceCreateImageAtIndex(source, 0,
-                                                                        [kCGImageSourceShouldCacheImmediately: true] as CFDictionary)
-                    else { throw CocoaError(.fileWriteUnknown) }
-                    let image = UIImage(cgImage: decoded, scale: scale, orientation: .up)
-                    let file = directory.appendingPathComponent("\(token)-\(index).png")
-                    try png.write(to: file, options: .atomic)
-                    parts.append(Part(ids: crop.ids, frame: crop.frame, anchorFrame: crop.anchorFrame, image: image, file: file))
+                let workerLimit = 2
+                let smallCrops = crops.allSatisfy { ($0.image.cgImage?.width ?? 0) * ($0.image.cgImage?.height ?? 0) <= 500_000 }
+                let workerCount = smallCrops ? min(workerLimit, crops.count) : 1
+                let lock = NSLock()
+                var results = [Part?](repeating: nil, count: crops.count)
+                DispatchQueue.concurrentPerform(iterations: workerCount) { worker in
+                    for index in stride(from: worker, to: crops.count, by: workerCount) {
+                        autoreleasepool {
+                            let crop = crops[index]
+                            do {
+                                guard let pixels = crop.image.cgImage,
+                                      let png = pngEncoder.encode(CIImage(cgImage: pixels), colorSpace: outputSpace) ??
+                                        imageContext.pngRepresentation(of: CIImage(cgImage: pixels), format: .RGBA16,
+                                                                       colorSpace: outputSpace, options: [:]) else { throw CocoaError(.fileWriteUnknown) }
+                                // Native entry/return copies must use the same encoded pixels as Web,
+                                // including gamut clipping performed by integer PNG conversion.
+                                guard let source = CGImageSourceCreateWithData(png as CFData, nil),
+                                      let decoded = CGImageSourceCreateImageAtIndex(source, 0,
+                                                                                    [kCGImageSourceShouldCacheImmediately: true] as CFDictionary)
+                                else { throw CocoaError(.fileWriteUnknown) }
+                                let image = UIImage(cgImage: decoded, scale: scale, orientation: .up)
+                                let file = directory.appendingPathComponent("\(token)-\(index).png")
+                                try png.write(to: file, options: .atomic)
+                                let part = Part(ids: crop.ids, frame: crop.frame, anchorFrame: crop.anchorFrame, image: image, file: file)
+                                lock.lock()
+                                results[index] = part
+                                lock.unlock()
+                            } catch { /* A missing result rejects the entire capture below. */ }
+                        }
+                    }
                 }
+                parts = results.compactMap { $0 }
+                guard parts.count == crops.count else { throw CocoaError(.fileWriteUnknown) }
             } catch {
                 parts.forEach { try? FileManager.default.removeItem(at: $0.file) }
                 parts = []
@@ -242,17 +331,36 @@ public final class NativeUICoveredSnapshots {
                     parts.forEach { try? FileManager.default.removeItem(at: $0.file) }
                     complete([:]); return
                 }
-                self.captures[token] = Capture(size: size, webFrame: webFrame, parts: parts)
-                complete(["token": token, "parts": parts.map { part in
-                    ["ids": part.ids, "url": part.file.absoluteString,
-                     "x": part.frame.minX * ratio, "y": part.frame.minY * ratio,
-                     "width": part.frame.width * ratio, "height": part.frame.height * ratio,
-                     "anchorBounds": ["x": (part.anchorFrame.minX - part.frame.minX) * ratio,
-                                       "y": (part.anchorFrame.minY - part.frame.minY) * ratio,
-                                       "width": part.anchorFrame.width * ratio, "height": part.anchorFrame.height * ratio]] as [String: Any]
-                }])
+                if views != nil, let revision = contentRevision,
+                   parts.reduce(0, { $0 + ($1.image.cgImage?.width ?? 0) * ($1.image.cgImage?.height ?? 0) }) <= 8_000_000 {
+                    let previous = self.viewCache
+                    self.viewCache = ViewCache(revision: revision, window: window, scale: scale,
+                                               views: capturedViews ?? [], geometry: geometry, parts: parts)
+                    previous?.parts.forEach(self.removeIfUnused)
+                }
+                self.deliver(parts, size: size, webFrame: webFrame, ratio: ratio, complete: complete)
             }
         }
+    }
+
+    private func deliver(_ parts: [Part], size: CGSize, webFrame: CGRect, ratio: CGFloat, reused: Bool = false,
+                         complete: ([String: Any]) -> Void) {
+        let token = UUID().uuidString
+        captures[token] = Capture(size: size, webFrame: webFrame, parts: parts)
+        complete(["token": token, "reused": reused, "parts": parts.map { part in
+            ["ids": part.ids, "url": part.file.absoluteString,
+             "x": part.frame.minX * ratio, "y": part.frame.minY * ratio,
+             "width": part.frame.width * ratio, "height": part.frame.height * ratio,
+             "anchorBounds": ["x": (part.anchorFrame.minX - part.frame.minX) * ratio,
+                              "y": (part.anchorFrame.minY - part.frame.minY) * ratio,
+                              "width": part.anchorFrame.width * ratio, "height": part.anchorFrame.height * ratio]] as [String: Any]
+        }])
+    }
+
+    private func removeIfUnused(_ part: Part) {
+        guard viewCache?.parts.contains(where: { $0.file == part.file }) != true,
+              !captures.values.contains(where: { $0.parts.contains(where: { $0.file == part.file }) }) else { return }
+        try? FileManager.default.removeItem(at: part.file)
     }
 
     /// Install prepared pixels before hiding live views, within the same main-thread turn.
@@ -348,7 +456,7 @@ public final class NativeUICoveredSnapshots {
         if hiddenControls?.token == token { restoreControls() }
         if coveringToken == token { coveringToken = nil }
         if restoration?.token == token { clearRestoration() }
-        captures.removeValue(forKey: token)?.parts.forEach { try? FileManager.default.removeItem(at: $0.file) }
+        captures.removeValue(forKey: token)?.parts.forEach(removeIfUnused)
     }
 
     public func reset() {
@@ -359,7 +467,10 @@ public final class NativeUICoveredSnapshots {
         touching = false
         generation += 1
         coveringToken = nil
+        let previous = viewCache
+        viewCache = nil
         Array(captures.keys).forEach(release)
+        previous?.parts.forEach(removeIfUnused)
     }
 
     deinit {

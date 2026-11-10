@@ -1860,3 +1860,62 @@ test('layout placement freezes both return copies before the Native acknowledgem
   await expect(page.locator('#source')).not.toHaveAttribute('data-native-ui-snapshot-visible');
   await destroyProjection(page);
 });
+
+for (const reused of [false, true])
+  test(`same URL reuses a decoded image only with Native reuse acknowledgement (${reused})`, async ({ page }) => {
+    await boot(page);
+    await page.evaluate(async (reused) => {
+      const w = window as any;
+      const target = document.querySelector('#source') as HTMLElement;
+      const rect = target.getBoundingClientRect();
+      w.calls = [];
+      w.captures = 0;
+      w.adoptions = 0;
+      window.addEventListener('reuse-png:sources-change', () => w.adoptions++);
+      w.decodes = 0;
+      w.url = 'file:///red.png';
+      const decode = HTMLImageElement.prototype.decode;
+      HTMLImageElement.prototype.decode = function () {
+        w.decodes++;
+        return decode.call(this);
+      };
+      w.manager = await w.createProjection(target, 'reuse-png', async (request: any) => {
+        w.calls.push(request);
+        if (request.action === 'prepare')
+          return {
+            token: `token-${++w.captures}`,
+            reused,
+            parts: [{ ids: ['one'], url: w.url, ...rect.toJSON() }],
+          };
+        return { shown: true };
+      });
+      w.manager.consider(1, [{ element: target, control: { id: 'one', ...rect.toJSON() } }]);
+    }, reused);
+    await expect.poll(() => page.evaluate(() => (window as any).adoptions)).toBe(1);
+    await page.evaluate(() => {
+      const w = window as any;
+      w.firstImage = document.querySelector('img[data-native-ui-projection-image]');
+      w.manager.changed();
+    });
+    await expect.poll(() => page.evaluate(() => (window as any).adoptions)).toBe(2);
+    expect(
+      await page.evaluate(() => {
+        const w = window as any;
+        return {
+          decodes: w.decodes,
+          same: w.firstImage === document.querySelector('img[data-native-ui-projection-image]'),
+          retained: w.firstImage.hasAttribute('src'),
+          released: w.calls.some((r: any) => r.action === 'release' && r.token === 'token-1'),
+        };
+      }),
+    ).toEqual({ decodes: reused ? 1 : 2, same: reused, retained: reused, released: true });
+    await page.evaluate(() => {
+      const w = window as any;
+      w.url = 'file:///ad.png';
+      w.manager.changed();
+    });
+    await expect.poll(() => page.evaluate(() => (window as any).adoptions)).toBe(3);
+    expect(await page.evaluate(() => (window as any).decodes)).toBe(reused ? 2 : 3);
+    await expect(page.locator('img[data-native-ui-projection-image]')).toHaveAttribute('src', /blue/);
+    await destroyProjection(page);
+  });

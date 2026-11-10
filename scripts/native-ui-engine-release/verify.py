@@ -47,8 +47,14 @@ with tempfile.TemporaryDirectory(prefix='engine-central-test-') as home:
                     with zipfile.ZipFile(BytesIO(bundle.read(coordinate_base + suffix))) as artifact:
                         if suffix == '.aar':
                             if coordinate == 'engine':
+                                for abi in ['arm64-v8a', 'armeabi-v7a', 'x86', 'x86_64']:
+                                    assert artifact.read(f'jni/{abi}/libnative_ui_png.so') == (root / f'native/artifacts/android/{abi}/libnative_ui_png.so').read_bytes()
                                 assert artifact.read('assets/native-ui-engine.js') == (root / 'runtime/native-ui-engine.js').read_bytes()
                             artifact = zipfile.ZipFile(BytesIO(artifact.read('classes.jar')))
+                        if coordinate == 'engine':
+                            for notices in [root / 'ios/Sources/WebViewNativeUIEngine/Resources/NativeUIPngLicenses', root / 'native/licenses']:
+                                for notice in notices.iterdir():
+                                    assert artifact.read('META-INF/webview-native-ui-engine/native-ui-png/' + notice.name) == notice.read_bytes()
                         assert artifact.read(f'META-INF/webview-native-ui-{coordinate}/LICENSE') == (root / 'LICENSE').read_bytes()
                 assert b'<name>MIT</name>' in bundle.read(coordinate_base + '.pom')
             controls_pom = bundle.read(f'io/github/webview-native-ui/controls/{version}/controls-{version}.pom')

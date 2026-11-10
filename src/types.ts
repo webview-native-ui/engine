@@ -32,6 +32,8 @@ export interface ScopedWebProjectionSource extends WebProjectionSource {
 }
 export interface PreparedWebProjection {
   token: string;
+  /** Native guarantees that these immutable image files were reused without changing their pixels. */
+  reused?: boolean;
   /** anchorBounds locates the renderer’s layout anchor within the image crop, in viewport units. */
   parts: (Frame & { ids: string[]; url: string; anchorBounds?: Frame })[];
 }
