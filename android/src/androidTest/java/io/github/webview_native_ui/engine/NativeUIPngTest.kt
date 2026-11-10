@@ -8,6 +8,8 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.filters.SdkSuppress
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
+import java.util.concurrent.Callable
+import java.util.concurrent.Executors
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -48,6 +50,32 @@ class NativeUIPngTest {
         assertEquals(source.getPixel(0, 0), decoded.getPixel(0, 0))
         decoded.recycle()
         source.recycle()
+    }
+
+    @Test
+    fun concurrentEncodingMatchesSerialOpaqueAndAlphaBytes() {
+        val sources =
+            (0 until 12).map { index ->
+                Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888).apply {
+                    eraseColor(Color.argb(if (index % 2 == 0) 255 else 128, index * 20, 50, 180))
+                }
+            }
+        fun encode(bitmap: Bitmap): ByteArray {
+            val output = ByteArrayOutputStream()
+            assertTrue(NativeUIPng.write(bitmap, output))
+            return output.toByteArray()
+        }
+        val workers = Executors.newFixedThreadPool(2)
+        try {
+            val expected = sources.map(::encode)
+            val actual = workers.invokeAll(sources.map { bitmap -> Callable { encode(bitmap) } })
+            actual.forEachIndexed { index, future ->
+                assertArrayEquals(expected[index], future.get())
+            }
+        } finally {
+            workers.shutdown()
+            sources.forEach { it.recycle() }
+        }
     }
 
     @Test

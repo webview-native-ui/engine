@@ -1,6 +1,7 @@
 import UIKit
 import WebKit
 
+let pipelineCounterLock = NSLock()
 var rasterCaptures = 0
 var pngEncodes = 0
 var pngWrites = 0

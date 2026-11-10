@@ -1,6 +1,6 @@
 # Fresh-capture PNG comparison
 
-This fixture reproduces the **implementation comparison** behind
+This fixture preserves the **implementation comparison** behind
 `docs/validation/rust-png-ios-p3.json` and `rust-png-android.json`. It does not
 isolate the performance effect of the Rust language. Both the codec and its
 filter/compression/opaque-channel policy change. Cache reuse is deliberately
@@ -114,3 +114,34 @@ requiring proof that Rust is better than every native alternative remains open.
 
 No universal speedup, picture-heavy-screen behavior, peak memory, battery
 improvement, or physical-device performance is inferred from this fixture.
+
+## Worker-count and Web-stage follow-up
+
+Use `--modes Serial,Parallel` to compare one versus two Rust workers with the same
+codec settings. Both production capture sources contain a private worker limit;
+the temporary fixture substitutes only that limit according to the selected
+mode. Native default encoder modes (`UIKit`/`Android`) stay serial, while
+`Rust`/`Production` use the current production limit.
+
+Android also instruments `NativeUIWebReadiness` at visual-state completion and
+on-draw observation, preserving its conditions and timeouts. The local resource
+stream counts synchronous open/read time and bytes. JavaScript reports elapsed
+image/load/decode/adoption and animation-frame intervals, and native timestamps
+separate bridge/UI dispatch from readiness. These probes add instrumentation
+overhead, so compare worker modes within a run rather than subtracting historical
+uninstrumented timings. See [stage definitions, limitations and results](../../../docs/validation/parallel-png.md).
+
+`peak_workers` records actual concurrent encoder calls. Memory fields record
+native-heap (Android) or resident-memory (iOS) deltas sampled at encoder boundaries,
+not full process peaks. Warmup rounds include PNG SHA-256 arrays; measured rounds
+skip that hashing. Dedicated same-input tests establish deterministic serial/
+parallel byte equivalence, including alpha and iOS P3 precision.
+
+`--android-720p` temporarily configures the benchmark display and restores its
+previous overrides on exit. Never run platform benchmarks concurrently.
+
+The historical Rust measurements predate the two-worker follow-up. To select the
+same serial policy explicitly, use `--modes UIKit,Serial` on iOS or
+`--modes Android,Serial` on Android. Default `Rust`/`Production` modes now measure
+the current bounded-parallel production path, so historical medians should not
+be treated as its latest result.

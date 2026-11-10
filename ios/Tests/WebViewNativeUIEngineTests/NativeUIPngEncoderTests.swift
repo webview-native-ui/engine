@@ -28,6 +28,28 @@ final class NativeUIPngEncoderTests: XCTestCase {
         }
     }
 
+    func testConcurrentEncodingMatchesSerialP3AndAlphaBytes() throws {
+        let space = try XCTUnwrap(CGColorSpace(name: CGColorSpace.displayP3))
+        let encoder = NativeUIPngEncoder()
+        let sources = (0..<12).map { index in
+            CIImage(color: CIColor(red: CGFloat(index) / 12, green: 0.3, blue: 0.7,
+                                   alpha: index.isMultiple(of: 2) ? 1 : 0.5))
+                .cropped(to: CGRect(x: 0, y: 0, width: 64, height: 64))
+        }
+        let expected = try sources.map { try XCTUnwrap(encoder.encode($0, colorSpace: space)) }
+        let lock = NSLock()
+        var actual = [Data?](repeating: nil, count: sources.count)
+        DispatchQueue.concurrentPerform(iterations: 2) { worker in
+            for index in stride(from: worker, to: sources.count, by: 2) {
+                let png = encoder.encode(sources[index], colorSpace: space)
+                lock.lock()
+                actual[index] = png
+                lock.unlock()
+            }
+        }
+        XCTAssertEqual(try actual.map { try XCTUnwrap($0) }, expected)
+    }
+
     func testInvalidExtentRequestsFallback() throws {
         let space = try XCTUnwrap(CGColorSpace(name: CGColorSpace.displayP3))
         XCTAssertNil(NativeUIPngEncoder().encode(CIImage.empty(), colorSpace: space))

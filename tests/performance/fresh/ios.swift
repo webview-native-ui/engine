@@ -2,13 +2,28 @@ import UIKit
 import WebKit
 import Foundation
 import CoreImage
+import CryptoKit
 var backend="UIKit"
+let timingLock=NSLock()
 var encodeMS=0.0
+var benchmarkWorkers:Int { backend == "Serial" || backend == "UIKit" ? 1 : 2 }
 var convertMS=0.0
 var validatePixels=false
+var activeEncodes=0
+var peakEncodes=0
+var firstEncode=Double.infinity
+var lastEncode=0.0
+var sampledResident:UInt64=0
+var residentBase:UInt64=0
+func residentBytes()->UInt64 {
+ var info=mach_task_basic_info();var count=mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size/MemoryLayout<integer_t>.size)
+ let result=withUnsafeMutablePointer(to:&info){pointer in pointer.withMemoryRebound(to:integer_t.self,capacity:Int(count)){task_info(mach_task_self_,task_flavor_t(MACH_TASK_BASIC_INFO),$0,&count)}}
+ return result == KERN_SUCCESS ? UInt64(info.resident_size) : 0
+}
 func clockMS()->Double { ProcessInfo.processInfo.systemUptime*1000 }
 func benchmarkPNG(_ image:CIImage, colorSpace:CGColorSpace, platform:CIContext, rust:NativeUIPngEncoder)->Data? {
- let t=clockMS();defer{encodeMS += clockMS()-t}
+ let t=clockMS();timingLock.lock();firstEncode=min(firstEncode,t);activeEncodes+=1;peakEncodes=max(peakEncodes,activeEncodes);sampledResident=max(sampledResident,residentBytes());timingLock.unlock()
+ defer{let end=clockMS();timingLock.lock();lastEncode=max(lastEncode,end);encodeMS += end-t;sampledResident=max(sampledResident,residentBytes());activeEncodes-=1;timingLock.unlock()}
  if backend == "UIKit" { return platform.pngRepresentation(of:image,format:.RGBA16,colorSpace:colorSpace,options:[:]) }
  return rust.encode(image,colorSpace:colorSpace)
 }
@@ -30,8 +45,12 @@ class Files:NSObject,WKURLSchemeHandler {
 }
 class Screen:UIViewController,WKScriptMessageHandler,WKNavigationDelegate {
  var web:WKWebView!;var controls=[UIView]();let snapshots=NativeUICoveredSnapshots()
- var rows=[[String:Any]]();var step=0;var started=0.0;var prepared=0.0;var lastToken="";var lastBytes=0;var runMode="";var trial=0
- let modes=["UIKit","Rust"]
+ var rows=[[String:Any]]();var step=0;var started=0.0;var prepared=0.0;var lastToken="";var lastBytes=0;var runMode="";var trial=0;var hashes=[String]()
+ let modes:[String] = {
+  let args=CommandLine.arguments
+  if let i=args.firstIndex(of:"--modes"),i+1<args.count {return args[i+1].components(separatedBy:",")}
+  return ["UIKit","Rust"]
+ }()
  let out=FileManager.default.urls(for:.documentDirectory,in:.userDomainMask)[0]
  override func viewDidLoad() {
   super.viewDidLoad();view.backgroundColor = .systemBackground
@@ -51,9 +70,9 @@ class Screen:UIViewController,WKScriptMessageHandler,WKNavigationDelegate {
   DispatchQueue.main.asyncAfter(deadline:.now()+1) {self.next()}
  }
  func next() {
-  if step>=66 {finish();return}
+  if step>=33*modes.count {finish();return}
   // Interleave encoders per round; rotate order each round to reduce drift.
-  trial=step/2;validatePixels=trial<3;let index=(step%2+trial)%2;runMode=modes[index];backend=runMode;step+=1
+  trial=step/modes.count;validatePixels=trial<3;let index=(step%modes.count+trial)%modes.count;runMode=modes[index];backend=runMode;step+=1
   web.evaluateJavaScript("document.getElementById('copies').replaceChildren();true") {_,error in
    if error != nil {self.fail("clear");return}
    self.controls.forEach{$0.isHidden=false}
@@ -61,12 +80,13 @@ class Screen:UIViewController,WKScriptMessageHandler,WKNavigationDelegate {
   }
  }
  func capture() {
-  encodeMS=0;convertMS=0;started=clockMS()
+  encodeMS=0;convertMS=0;peakEncodes=0;firstEncode=Double.infinity;lastEncode=0;residentBase=residentBytes();sampledResident=residentBase;hashes=[];started=clockMS()
   snapshots.prepare(frames:{Dictionary(uniqueKeysWithValues:self.controls.enumerated().map{(String($0.offset),self.web.convert($0.element.bounds,from:$0.element))})},in:web,viewportWidth:web.bounds.width) {value in
    self.prepared=clockMS()
    guard let token=value["token"] as? String,let parts=value["parts"] as? [[String:Any]],parts.count==12 else {self.fail("capture");return}
    self.lastToken=token
    do {
+    if self.trial<3 {self.hashes=try parts.map {p in SHA256.hash(data:try Data(contentsOf:URL(string:p["url"] as! String)!)).map{String(format:"%02x",$0)}.joined()}}
     self.lastBytes=try parts.reduce(0) {sum,p in sum + (try Data(contentsOf:URL(string:p["url"] as! String)!)).count}
     var display=parts
     for i in display.indices {display[i]["url"]=(display[i]["url"] as! String).replacingOccurrences(of:"file://",with:"snapshot://local")}
@@ -81,7 +101,7 @@ class Screen:UIViewController,WKScriptMessageHandler,WKNavigationDelegate {
  }
  func userContentController(_ controller:WKUserContentController,didReceive message:WKScriptMessage) {
   let end=clockMS();guard let body=message.body as? [String:Any],body["ok"] as? Bool == true else {fail("web decode: \(message.body)");return}
-  rows.append(["mode":runMode,"trial":trial,"total_ms":end-started,"prepare_ms":prepared-started,"encode_ms":encodeMS,"rgba_ms":convertMS,"web_ms":end-prepared,"bytes":lastBytes])
+  rows.append(["mode":runMode,"trial":trial,"total_ms":end-started,"prepare_ms":prepared-started,"encode_ms":encodeMS,"encode_span_ms":lastEncode-firstEncode,"rgba_ms":convertMS,"web_ms":end-prepared,"bytes":lastBytes,"warmup_png_sha256":hashes,"peak_workers":peakEncodes,"sampled_resident_delta_bytes":sampledResident>=residentBase ? sampledResident-residentBase : 0])
   snapshots.release(lastToken);next()
  }
  func fail(_ error:String) {try? error.write(to:out.appendingPathComponent("error.txt"),atomically:true,encoding:.utf8);print("FAILED \(error)");exit(1)}

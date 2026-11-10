@@ -50,3 +50,12 @@ supervisor independently checked the new comparison harness, rerun aggregation
 and production-source hashes. The acceptance reviewer independently checked
 the cache correction and overlap regression. The real WebKit pipeline counter
 fixture also passed again after the correction, including reset to zero files.
+
+## Bounded-concurrency follow-up
+
+The subsequent Web-stage investigation and PNG concurrency change received
+fresh supervisor and independent acceptance reviews; both **APPROVE**. The
+[follow-up record](parallel-png.md) contains the final-code measurements,
+source hashes, regression outcomes and remaining limitations. Those results
+compare serial versus two-worker Rust paths, separately from the initial
+platform-default encoder comparison above.

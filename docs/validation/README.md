@@ -49,3 +49,11 @@ physical-device performance remain separate work, as described in the guide.
 
 Fresh-capture timing fixture, commands, measurement boundaries and alternative
 explanations: [reproduction guide](../../tests/performance/fresh/README.md).
+
+## PNG concurrency follow-up
+
+The [bounded parallelism and Android Web-stage investigation](parallel-png.md)
+records the next optimization: unchanged codec settings with one versus two
+workers, finer Web timing probes, serial/parallel byte-equivalence tests and
+sampled-memory limitations. These results are distinct from the original
+platform-default-versus-Rust comparison above.

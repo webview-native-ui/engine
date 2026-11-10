@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Reproduce fresh-capture comparisons using temporary copies of production sources."""
 import argparse
+import atexit
 import hashlib
 import json
 import os
 from pathlib import Path
 import platform
 import plistlib
+import re
 import shutil
 import statistics
 import subprocess
@@ -19,9 +21,15 @@ p = argparse.ArgumentParser(description=__doc__)
 p.add_argument('platform', choices=['ios', 'android', 'summarize'])
 p.add_argument('--device', help='Required iOS simulator UUID; Android is fixed to emulator-5554')
 p.add_argument('--output', type=Path, required=True, help='Raw output JSON, or input JSON for summarize')
+p.add_argument('--android-720p', action='store_true', help='Temporarily use 720x1440/density 280 and restore previous overrides')
+p.add_argument('--modes', default=None, help='Comma-separated backends; Serial,Parallel compares Rust worker limits')
 p.add_argument('--timeout', type=int, default=240)
 p.add_argument('--prepare-only', action='store_true', help='Generate and compile without installing or running')
 args = p.parse_args()
+if args.modes and args.platform != 'summarize':
+    allowed = {'Serial', 'Parallel'} | ({'UIKit', 'Rust'} if args.platform == 'ios' else {'Android', 'Production'})
+    if any(mode not in allowed for mode in args.modes.split(',')) or len(set(args.modes.split(','))) != len(args.modes.split(',')):
+        p.error('--modes must contain distinct backends from ' + ','.join(sorted(allowed)))
 
 def run(*cmd):
     return subprocess.check_output([str(x) for x in cmd], cwd=ROOT, text=True, timeout=args.timeout + 120).strip()
@@ -36,7 +44,8 @@ def summarize(rows):
         assert len(measured) == 30, (mode, len(measured))
         values = sorted(r['total_ms'] for r in measured)
         print(json.dumps({'mode': mode, 'samples': len(values), 'total_p50_ms': statistics.median(values),
-                          'total_p90_ms': values[26], 'bytes_p50': statistics.median(r['bytes'] for r in measured)}))
+                          'total_p90_ms': values[26], 'bytes_p50': statistics.median(r['bytes'] for r in measured),
+                          'phase_p50': {k: statistics.median(r[k] for r in measured) for k, v in measured[0].items() if isinstance(v, (int, float)) and (k.endswith('_ms') or k.endswith('_bytes') or k == 'peak_workers')}}))
 
 if args.platform == 'summarize':
     summarize(json.loads(args.output.read_text()))
@@ -58,10 +67,10 @@ with tempfile.TemporaryDirectory(prefix='native-png-bench-') as tmp:
         app = folder / 'ScreenBench.app'
         app.mkdir()
         capture = source('ios/Sources/WebViewNativeUIEngine/CoveredSnapshots.swift')
-        before = '''pngEncoder.encode(CIImage(cgImage: pixels), colorSpace: outputSpace) ??
-                            imageContext.pngRepresentation(of: CIImage(cgImage: pixels), format: .RGBA16,
-                                                                   colorSpace: outputSpace, options: [:])'''
-        capture = replace_once(capture, before, 'benchmarkPNG(CIImage(cgImage: pixels), colorSpace: outputSpace, platform: imageContext, rust: pngEncoder)')
+        pattern = r"pngEncoder\.encode\(CIImage\(cgImage: pixels\), colorSpace: outputSpace\) \?\?\s+imageContext\.pngRepresentation\(of: CIImage\(cgImage: pixels\), format: \.RGBA16,\s+colorSpace: outputSpace, options: \[:\]\)"
+        capture, count = re.subn(pattern, 'benchmarkPNG(CIImage(cgImage: pixels), colorSpace: outputSpace, platform: imageContext, rust: pngEncoder)', capture)
+        assert count == 1, 'Production PNG expression changed'
+        capture = replace_once(capture, 'let workerLimit = 2', 'let workerLimit = benchmarkWorkers')
         (folder / 'Capture.swift').write_text(capture)
         encoder = source('ios/Sources/WebViewNativeUIEngine/NativeUIPngEncoder.swift')
         (folder / 'Encoder.swift').write_text(encoder)
@@ -80,7 +89,7 @@ with tempfile.TemporaryDirectory(prefix='native-png-bench-') as tmp:
             error = container / 'Documents/error.txt'
             result.unlink(missing_ok=True)
             error.unlink(missing_ok=True)
-            run('xcrun', 'simctl', 'launch', args.device, bundle)
+            run('xcrun', 'simctl', 'launch', args.device, bundle, *(['--modes', args.modes] if args.modes else []))
             def read_result():
                 if error.exists():
                     raise RuntimeError(error.read_text())
@@ -106,18 +115,33 @@ with tempfile.TemporaryDirectory(prefix='native-png-bench-') as tmp:
             text = source('android/src/main/java/io/github/webview_native_ui/engine/' + name)
             if name == 'NativeUISnapshots.kt':
                 text = replace_once(text, 'NativeUIPng.write(image, it)', 'NativeEncoder.write(image, it)')
+                text = replace_once(text, 'val workerLimit = 2', 'val workerLimit = NativeEncoder.workers')
+            if name == 'NativeUIWebReadiness.kt':
+                text = replace_once(text, '            val observer = webView.viewTreeObserver', '            WebStages.visualReady = NativeEncoder.now()\n            val observer = webView.viewTreeObserver')
+                text = replace_once(text, 'android.view.ViewTreeObserver.OnDrawListener { webView.post { finish(true) } }', 'android.view.ViewTreeObserver.OnDrawListener { WebStages.drawObserved = NativeEncoder.now(); webView.post { finish(true) } }')
             (java / name).write_text(text)
         shutil.copytree(ROOT / 'native/artifacts/android', project / 'app/src/main/jniLibs')
         run(ROOT / 'android/gradlew', '-p', project, 'assembleRelease')
         metadata = {'device': 'emulator-5554'}
         if not args.prepare_only:
             assert device('shell', 'getprop', 'ro.kernel.qemu') == '1', 'Target must be an emulator'
+            if args.android_720p:
+                previous_size = device('shell', 'wm', 'size')
+                previous_density = device('shell', 'wm', 'density')
+                def restore_display():
+                    size = re.search(r'Override size: (\S+)', previous_size)
+                    density = re.search(r'Override density: (\S+)', previous_density)
+                    device('shell', 'wm', 'size', size.group(1) if size else 'reset')
+                    device('shell', 'wm', 'density', density.group(1) if density else 'reset')
+                atexit.register(restore_display)
+                device('shell', 'wm', 'size', '720x1440')
+                device('shell', 'wm', 'density', '280')
             metadata.update({'sdk': device('shell', 'getprop', 'ro.build.version.sdk'), 'size': device('shell', 'wm', 'size'), 'density': device('shell', 'wm', 'density')})
             bundle = 'local.snapshot.android'
             device('install', '-r', project / 'app/build/outputs/apk/release/app-release.apk')
             device('shell', 'am', 'force-stop', bundle)
             device('shell', 'run-as', bundle, 'rm', '-f', 'files/screen-results.json', 'files/error.txt')
-            device('shell', 'am', 'start', '-n', bundle + '/io.github.webview_native_ui.engine.MainActivity')
+            device('shell', 'am', 'start', '-n', bundle + '/io.github.webview_native_ui.engine.MainActivity', *(['--es', 'modes', args.modes] if args.modes else []))
             def read_result():
                 files = device('shell', 'run-as', bundle, 'ls', 'files')
                 if 'error.txt' in files:
@@ -134,6 +158,7 @@ with tempfile.TemporaryDirectory(prefix='native-png-bench-') as tmp:
             summarize(rows)
             args.output.parent.mkdir(parents=True, exist_ok=True)
             args.output.write_text(json.dumps(rows, indent=2) + '\n')
+            metadata['modes'] = args.modes or ('UIKit,Rust' if args.platform == 'ios' else 'Android,Production')
             metadata['sources'] = source_hashes
             metadata['native_manifest_sha256'] = manifest_hash
             metadata['host'] = platform.platform()

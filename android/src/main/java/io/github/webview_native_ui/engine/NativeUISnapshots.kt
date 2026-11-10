@@ -18,6 +18,7 @@ import android.widget.ImageView
 import java.io.File
 import java.lang.ref.WeakReference
 import java.util.UUID
+import java.util.concurrent.Callable
 import java.util.concurrent.Executors
 import kotlin.math.ceil
 import kotlin.math.floor
@@ -46,6 +47,11 @@ class NativeUISnapshots(private val directory: File) : AutoCloseable {
         val root: ViewGroup,
         val views: List<ImageView>,
     )
+
+    private companion object {
+        // Shared across captures/instances; large crops retain the serial path.
+        val pngWorkers = Executors.newFixedThreadPool(2)
+    }
 
     private val main = Handler(Looper.getMainLooper())
     private val encoder = Executors.newSingleThreadExecutor()
@@ -454,36 +460,66 @@ class NativeUISnapshots(private val directory: File) : AutoCloseable {
                     val parts = mutableListOf<Part>()
                     try {
                         directory.mkdirs()
-                        for ((id, rect) in regions) {
-                            val image =
-                                Bitmap.createBitmap(
-                                    pixels,
-                                    rect.left - union.left,
-                                    rect.top - union.top,
-                                    rect.width(),
-                                    rect.height(),
-                                )
-                            val file = File(directory, "$token-${parts.size}.png")
-                            try {
-                                check(file.outputStream().use { NativeUIPng.write(image, it) })
-                            } catch (error: Exception) {
-                                if (image !== pixels) image.recycle()
-                                file.delete()
-                                throw error
+                        val tasks =
+                            regions.entries.mapIndexed { index, (id, rect) ->
+                                Callable {
+                                    val image =
+                                        Bitmap.createBitmap(
+                                            pixels,
+                                            rect.left - union.left,
+                                            rect.top - union.top,
+                                            rect.width(),
+                                            rect.height(),
+                                        )
+                                    val file = File(directory, "$token-$index.png")
+                                    try {
+                                        check(
+                                            file.outputStream().use { NativeUIPng.write(image, it) }
+                                        )
+                                        Part(
+                                            id,
+                                            RectF(
+                                                rect.left - location[0].toFloat(),
+                                                rect.top - location[1].toFloat(),
+                                                rect.right - location[0].toFloat(),
+                                                rect.bottom - location[1].toFloat(),
+                                            ),
+                                            image,
+                                            file,
+                                        )
+                                    } catch (error: Exception) {
+                                        if (image !== pixels) image.recycle()
+                                        file.delete()
+                                        throw error
+                                    }
+                                }
                             }
-                            parts.add(
-                                Part(
-                                    id,
-                                    RectF(
-                                        rect.left - location[0].toFloat(),
-                                        rect.top - location[1].toFloat(),
-                                        rect.right - location[0].toFloat(),
-                                        rect.bottom - location[1].toFloat(),
-                                    ),
-                                    image,
-                                    file,
-                                )
-                            )
+                        val workerLimit = 2
+                        val parallel =
+                            workerLimit > 1 &&
+                                tasks.size > 1 &&
+                                regions.values.all { it.width().toLong() * it.height() <= 500_000 }
+                        if (parallel) {
+                            // Join every task even after a failure before recycling shared pixels.
+                            val futures = tasks.map { pngWorkers.submit(it) }
+                            var interrupted = false
+                            for (future in futures) {
+                                var joined = false
+                                while (!joined) {
+                                    try {
+                                        parts.add(future.get())
+                                        joined = true
+                                    } catch (_: InterruptedException) {
+                                        interrupted = true
+                                    } catch (_: Exception) {
+                                        joined = true
+                                    }
+                                }
+                            }
+                            if (interrupted) Thread.currentThread().interrupt()
+                            check(parts.size == tasks.size)
+                        } else {
+                            for (task in tasks) parts.add(task.call())
                         }
                     } catch (_: Exception) {
                         parts.forEach {

@@ -79,13 +79,13 @@ Native callers retain their existing fallback and capture eligibility rules.
 
 Source is based on Engine v1.0.4 (`f4ad403`), including the recent P3 and moving
 surface fixes. Earlier 8-bit measurements do not describe the current iOS path.
-The final implementation was checked in isolated real-screen fixtures using
+The initial serial Rust implementation was checked in isolated real-screen fixtures using
 production encoder wrappers, not a synthetic pixel array.
 
-| Platform                             | Existing total p50 | Rust total p50 | Existing PNG bytes | Rust PNG bytes |
-| ------------------------------------ | -----------------: | -------------: | -----------------: | -------------: |
-| iOS 27, 12 UIKit controls, 16-bit P3 |          454.07 ms |      352.21 ms |          2,629,867 |      2,690,508 |
-| Android 15, 720p, 12 native buttons  |          721.75 ms |      599.02 ms |            143,258 |        121,464 |
+| Platform                             | Existing total p50 | Serial Rust total p50 | Existing PNG bytes | Rust PNG bytes |
+| ------------------------------------ | -----------------: | --------------------: | -----------------: | -------------: |
+| iOS 27, 12 UIKit controls, 16-bit P3 |          454.07 ms |             352.21 ms |          2,629,867 |      2,690,508 |
+| Android 15, 720p, 12 native buttons  |          721.75 ms |             599.02 ms |            143,258 |        121,464 |
 
 Each row interleaves modes, warms up three rounds and measures 30 per mode.
 Total includes capture readiness, capture, copies/FFI, encoding, file transport,
@@ -139,3 +139,12 @@ resolve that timeout.
 
 Fresh-capture timing fixture, commands, measurement boundaries and alternative
 explanations: [reproduction guide](../../tests/performance/fresh/README.md).
+
+### Bounded PNG postprocessing follow-up
+
+Fresh captures now process small crops with up to two PNG workers; large crops
+(over 500,000 pixels each) stay serial. Codec settings, pixels and Web readiness
+requirements are unchanged. Android uses a shared two-thread pool, and iOS limits
+each capture to two worker lanes. Results preserve source order; failures join
+all work before cleanup. See [the worker-count comparison and Android Web-stage
+breakdown](../validation/parallel-png.md) for controlled measurements and limits.
