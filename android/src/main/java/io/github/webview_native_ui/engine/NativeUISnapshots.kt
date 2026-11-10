@@ -77,6 +77,7 @@ class NativeUISnapshots(private val directory: File) : AutoCloseable {
     private data class ViewCache(
         val revision: Long,
         val views: Map<String, View>,
+        val regions: Map<String, Rect>,
         val window: WeakReference<Window>,
         val states: Map<String, ViewState>,
         val parts: List<Part>,
@@ -387,28 +388,31 @@ class NativeUISnapshots(private val directory: File) : AutoCloseable {
                     )
             )
         }
+        val regions =
+            frames.mapValues { (_, frame) ->
+                if (sourceViews != null)
+                    Rect(
+                        floor(frame.left + location[0].toDouble()).toInt(),
+                        floor(frame.top + location[1].toDouble()).toInt(),
+                        ceil(frame.right + location[0].toDouble()).toInt(),
+                        ceil(frame.bottom + location[1].toDouble()).toInt(),
+                    )
+                else
+                    Rect(
+                        floor(frame.left + location[0] - 12.0).toInt().coerceAtLeast(0),
+                        floor(frame.top + location[1] - 12.0).toInt().coerceAtLeast(0),
+                        ceil(frame.right + location[0] + 12.0).toInt().coerceAtMost(width),
+                        ceil(frame.bottom + location[1] + 12.0).toInt().coerceAtMost(height),
+                    )
+            }
         val states = sourceViews?.mapValues { viewState(it.value) }
         val cached = viewCache
-        // A single snapshot contains every source view. Reusing its crops is safe
-        // only when their order and relative positions remain unchanged.
+        // Compare raster crop coordinates: shared-canvas overlap must stay unchanged.
         val sameArrangement =
             cached != null &&
                 cached.views.keys.toList() == sourceViews?.keys?.toList() &&
                 cached.parts.size == frames.size &&
-                cached.parts.firstOrNull()?.let { first ->
-                    frames[first.id]?.let { current ->
-                        val dx = current.left - first.frame.left
-                        val dy = current.top - first.frame.top
-                        cached.parts.all { part ->
-                            frames[part.id]?.let { frame ->
-                                frame.width() == part.frame.width() &&
-                                    frame.height() == part.frame.height() &&
-                                    frame.left - part.frame.left == dx &&
-                                    frame.top - part.frame.top == dy
-                            } == true
-                        }
-                    }
-                } == true
+                sameViewCaptureArrangement(cached.regions, regions)
         if (
             sourceViews != null &&
                 cached != null &&
@@ -432,23 +436,6 @@ class NativeUISnapshots(private val directory: File) : AutoCloseable {
             )
             return
         }
-        val regions =
-            frames.mapValues { (_, frame) ->
-                if (sourceViews != null)
-                    Rect(
-                        floor(frame.left + location[0].toDouble()).toInt(),
-                        floor(frame.top + location[1].toDouble()).toInt(),
-                        ceil(frame.right + location[0].toDouble()).toInt(),
-                        ceil(frame.bottom + location[1].toDouble()).toInt(),
-                    )
-                else
-                    Rect(
-                        floor(frame.left + location[0] - 12.0).toInt().coerceAtLeast(0),
-                        floor(frame.top + location[1] - 12.0).toInt().coerceAtLeast(0),
-                        ceil(frame.right + location[0] + 12.0).toInt().coerceAtMost(width),
-                        ceil(frame.bottom + location[1] + 12.0).toInt().coerceAtMost(height),
-                    )
-            }
         if (regions.any { it.value.isEmpty }) {
             complete(JSONObject())
             return
@@ -577,6 +564,7 @@ class NativeUISnapshots(private val directory: File) : AutoCloseable {
                                 ViewCache(
                                     contentRevision,
                                     sourceViews.toMap(),
+                                    regions.mapValues { Rect(it.value) },
                                     WeakReference(window),
                                     states.orEmpty(),
                                     parts,
