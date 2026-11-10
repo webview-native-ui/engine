@@ -5,22 +5,22 @@ import SwiftUI
 @testable import WebViewNativeUIControls
 
 final class NativeUISnapshotTests: XCTestCase {
-    func testCaptureInteractionMatrixKeepsOtherOwnersDirty() {
-        var state = NativeUICaptureState()
-        XCTAssertTrue(state.appearanceSettled(["b"]))
-        state.interacted(["a"])
-        XCTAssertFalse(state.appearanceSettled(["a"]))
-        XCTAssertTrue(state.appearanceSettled(["b"]))
-        state.interacted(["b"])
-        state.captured(["b"])
-        XCTAssertFalse(state.appearanceSettled(["a"]), "Capturing B cannot settle A's tap/cancel")
-        state.interacted(["a", "b"])
-        XCTAssertFalse(state.appearanceSettled(["b"]), "Shared/unknown owners remain conservative")
-        state.captured(["a"])
-        XCTAssertTrue(state.appearanceSettled(["a"]))
-        XCTAssertFalse(state.appearanceSettled(["b"]))
-        state.retain(["a"])
-        XCTAssertTrue(state.dirty.isEmpty, "Removed component IDs must not accumulate")
+    @MainActor func testCaptureInteractionMatrixKeepsOtherOwnersDirty() {
+        let state = NativeUICaptureState()
+        let a = UIView(); let b = UIView()
+        XCTAssertTrue(state.appearanceSettled([b]))
+        state.interacted([a])
+        XCTAssertFalse(state.appearanceSettled([a]))
+        XCTAssertTrue(state.appearanceSettled([b]))
+        state.interacted([b])
+        XCTAssertFalse(state.appearanceSettled([a]), "A different capture cannot prove A's animation finished")
+        XCTAssertFalse(state.appearanceSettled([b]))
+        XCTAssertTrue(state.appearanceSettled([UIView()]), "A genuinely new source has no old interaction")
+        weak var released: UIView?
+        autoreleasepool {
+            let temporary = UIView(); released = temporary; state.interacted([temporary])
+        }
+        XCTAssertNil(released, "Interaction history must not retain retired components")
     }
 
     @MainActor func testControllerReadinessTracksActualOwnersAndCaptureAcknowledgements() async throws {
@@ -31,7 +31,7 @@ final class NativeUISnapshotTests: XCTestCase {
         let web = WKWebView(frame: window.bounds); owner.view.addSubview(web)
         let controller = NativeUIController(webView: web, viewController: owner, emit: { _, _ in }, hasListeners: { _ in false }, refresh: { _ in })
         defer { window.isHidden = true }
-        let nodes = [control(["id": "a", "items": [item(["id": "a-action", "label": "A", "buttonFill": "clear"])]]),
+        let nodes = [control(["id": "a", "items": [item(["id": "a-action", "label": "A", "buttonFill": "clear", "transitionId": "readiness-a"])]]),
                      control(["id": "b", "x": 90.0, "items": [item(["id": "b-action", "label": "B", "buttonFill": "clear"])]]),
                      control(["id": "glass", "x": 160.0, "items": [item(["id": "glass-action", "label": "Glass"]) ]])]
         let applied: [String: Any] = await withCheckedContinuation { continuation in
@@ -45,6 +45,10 @@ final class NativeUISnapshotTests: XCTestCase {
         XCTAssertTrue(controller.captureReadiness(["a"], revision: 1).layoutSettled)
         XCTAssertTrue(controller.captureReadiness(["a"], revision: 1).appearanceSettled)
         XCTAssertEqual(controller.captureReadiness(["glass"], revision: 1).effect, .backdrop)
+        button.sendActions(for: .touchUpInside)
+        XCTAssertFalse(controller.captureReadiness(["a"], revision: 1).appearanceSettled, "UIAction without UITouch must invalidate its owner")
+        XCTAssertTrue(controller.captureReadiness(["b"], revision: 1).appearanceSettled)
+        // A real UIAction must invalidate readiness even without a UITouch.
         controller.recordCaptureInteraction(button.titleLabel ?? button)
         XCTAssertFalse(controller.captureReadiness(["a"], revision: 1).appearanceSettled)
         XCTAssertTrue(controller.captureReadiness(["b"], revision: 1).appearanceSettled)
@@ -59,7 +63,7 @@ final class NativeUISnapshotTests: XCTestCase {
         XCTAssertFalse(controller.captureReadiness(["a"], revision: 1).appearanceSettled)
         let aResult = await capture("a")
         XCTAssertNotNil(aResult["token"])
-        XCTAssertTrue(controller.captureReadiness(["a"], revision: 1).appearanceSettled)
+        XCTAssertFalse(controller.captureReadiness(["a"], revision: 1).appearanceSettled, "Snapshot completion is not animation completion")
         controller.recordCaptureInteraction(nil)
         XCTAssertFalse(controller.captureReadiness(["a"], revision: 1).appearanceSettled)
         XCTAssertFalse(controller.captureReadiness(["b"], revision: 1).appearanceSettled)
@@ -71,6 +75,7 @@ final class NativeUISnapshotTests: XCTestCase {
                               resolve: { continuation.resume(returning: $0) }, reject: { _ in continuation.resume(returning: [:]) })
         }
         window.layoutIfNeeded()
+        XCTAssertTrue(buttons(owner.view).contains { $0 === button }, "The source must actually be reassociated")
         XCTAssertTrue(controller.captureReadiness(["renamed"], revision: 2).layoutSettled)
         XCTAssertFalse(controller.captureReadiness(["renamed"], revision: 2).appearanceSettled, "ID reassociation must not forget an unsettled interaction")
         _ = await withCheckedContinuation { continuation in controller.clear(["revision": 3], resolve: { continuation.resume(returning: $0) }, reject: { _ in continuation.resume(returning: [:]) }) }

@@ -23,7 +23,7 @@ public final class NativeUIController: NSObject, UITabBarDelegate {
         super.init()
     }
     private let coveredSnapshots = NativeUICoveredSnapshots()
-    private var captureState = NativeUICaptureState()
+    private let captureState = NativeUICaptureState()
     private var captureLayoutRevision: Int?
     private weak var captureObservationWindow: UIWindow?
     private var snapshotControls: [NativeUIControl] = []
@@ -259,7 +259,7 @@ public final class NativeUIController: NSObject, UITabBarDelegate {
     private func observeCaptureInteractions() {
         guard let window = webView?.window else { return }
         if captureObservationWindow !== window {
-            captureState.interacted(Set(snapshotControls.map(\.id)))
+            captureState.interacted(Array(controls.values) + (verticalBars.map { [$0.view] } ?? []))
             captureObservationWindow = window
         }
         coveredSnapshots.observe(window, interacted: { [weak self] touched in
@@ -271,14 +271,13 @@ public final class NativeUIController: NSObject, UITabBarDelegate {
     }
 
     func recordCaptureInteraction(_ touched: UIView?) {
-        let all = Set(snapshotControls.map(\.id))
+        let all = Array(controls.values) + (verticalBars.map { [$0.view] } ?? [])
         guard let touched else { captureState.interacted(all); return }
         if let rail = verticalBars, touched.isDescendant(of: rail.view) {
-            captureState.interacted(Set(snapshotControls.filter { $0.placement == .verticalBars }.map(\.id)))
-            return
+            captureState.interacted([rail.view]); return
         }
-        let owners = Set(controls.filter { touched.isDescendant(of: $0.value) }.keys)
-        captureState.interacted(owners.isEmpty ? all : owners)
+        let owners = controls.values.filter { touched.isDescendant(of: $0) }
+        captureState.interacted(owners.isEmpty ? all : Array(owners))
     }
 
     func captureReadiness(_ ids: Set<String>, revision: Int) -> NativeUICaptureReadiness {
@@ -308,12 +307,11 @@ public final class NativeUIController: NSObject, UITabBarDelegate {
             return true
         }
         return .init(effect: effect, layoutSettled: settled,
-                     appearanceSettled: settled && captureState.appearanceSettled(ids))
+                     appearanceSettled: settled && captureState.appearanceSettled(nodes.compactMap { controls[$0.id] }))
     }
 
     private func resetCoveredSnapshots() {
         coveredSnapshots.reset()
-        captureState = NativeUICaptureState()
         captureLayoutRevision = nil
     }
 
@@ -365,11 +363,7 @@ public final class NativeUIController: NSObject, UITabBarDelegate {
                 return views
             }
             self.coveredSnapshots.handle(options, in: webView, frames: measure, views: views,
-                readiness: { [weak self] ids, revision in self?.captureReadiness(ids, revision: revision) ?? .init() }, complete: { result in
-                    if result["token"] != nil, options["revision"] as? Int == self.revision,
-                       let ids = options["ids"] as? [String] { self.captureState.captured(Set(ids)) }
-                    resolve(result)
-                })
+                readiness: { [weak self] ids, revision in self?.captureReadiness(ids, revision: revision) ?? .init() }, complete: { resolve($0) })
         }
     }
 
@@ -524,12 +518,6 @@ public final class NativeUIController: NSObject, UITabBarDelegate {
             guard JSONSerialization.isValidJSONObject(options),
                   let snapshot = try? JSONDecoder().decode(NativeUISnapshot.self, from: JSONSerialization.data(withJSONObject: options)), snapshot.isValid else {
                 reject("Invalid control snapshot"); return
-            }
-            // IDs may be reassociated with existing views during reconciliation.
-            // Carry unresolved interaction across the whole new revision rather
-            // than accidentally declaring a newly named owner settled.
-            if !self.captureState.dirty.isEmpty {
-                self.captureState.interacted(Set(snapshot.controls.map(\.id)))
             }
             self.captureLayoutRevision = nil
             self.coveredSnapshots.restoreControls()
@@ -835,7 +823,6 @@ public final class NativeUIController: NSObject, UITabBarDelegate {
             let complete = {
                 if self.revision == next {
                     self.captureLayoutRevision = next
-                    self.captureState.retain(Set(self.snapshotControls.map(\.id)))
                 }
                 var result: [String: Any] = ["revision": next, "rejectedSearches": rejectedSearches, "rejectedControls": rejectedControls, "tabBarWidths": tabBarWidths]
                 if let transition = self.toolbarTransition { result["toolbarTransition"] = transition.id }
@@ -867,6 +854,12 @@ public final class NativeUIController: NSObject, UITabBarDelegate {
     }
 
     private func activate(_ id: String) {
+        // Keyboard/VoiceOver activation can bypass UITouch delivery.
+        let owners = snapshotControls.filter { $0.id == id || $0.items.contains { $0.id == id } }
+        let sources = owners.compactMap { controls[$0.id] ?? ($0.placement == .verticalBars ? verticalBars?.view : nil) }
+        if sources.isEmpty { recordCaptureInteraction(nil) } else {
+            sources.forEach { recordCaptureInteraction($0) }
+        }
         sequence += 1
         notifyListeners("activate", ["id": id, "revision": revision, "sequence": sequence])
 

@@ -131,7 +131,9 @@ the standard checks. Active touches still invalidate preparation. This does not
 change `captureDelayMs`, paint acknowledgements, or handoff deadlines.
 
 Controls supplies this proof for settled, standalone Plain buttons without scroll
-bindings. A tap keeps its owner conservative until that owner's successful
-capture; capturing another owner does not settle it. Shared surfaces, unknown
-input targets, active animations and unresolved interaction across a new revision
+bindings. A tap or keyboard/accessibility activation keeps its source View conservative;
+a snapshot ACK alone cannot prove UIKit's press animation has completed. This
+history follows reassociated Views without retaining retired components. A new
+View starts clean; capturing another source does not clear an interaction. Shared surfaces, unknown
+input targets, active animations and unresolved interactions
 remain conservative. Other component types retain their existing behavior.
