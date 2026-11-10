@@ -389,6 +389,26 @@ class NativeUISnapshots(private val directory: File) : AutoCloseable {
         }
         val states = sourceViews?.mapValues { viewState(it.value) }
         val cached = viewCache
+        // A single snapshot contains every source view. Reusing its crops is safe
+        // only when their order and relative positions remain unchanged.
+        val sameArrangement =
+            cached != null &&
+                cached.views.keys.toList() == sourceViews?.keys?.toList() &&
+                cached.parts.size == frames.size &&
+                cached.parts.firstOrNull()?.let { first ->
+                    frames[first.id]?.let { current ->
+                        val dx = current.left - first.frame.left
+                        val dy = current.top - first.frame.top
+                        cached.parts.all { part ->
+                            frames[part.id]?.let { frame ->
+                                frame.width() == part.frame.width() &&
+                                    frame.height() == part.frame.height() &&
+                                    frame.left - part.frame.left == dx &&
+                                    frame.top - part.frame.top == dy
+                            } == true
+                        }
+                    }
+                } == true
         if (
             sourceViews != null &&
                 cached != null &&
@@ -397,7 +417,7 @@ class NativeUISnapshots(private val directory: File) : AutoCloseable {
                 cached.window.get() === window &&
                 cached.states == states &&
                 sourceViews.keys == frames.keys &&
-                cached.parts.size == frames.size &&
+                sameArrangement &&
                 sourceViews.values.none { it.isLayoutRequested } &&
                 cached.parts.all { part ->
                     part.file.isFile &&
