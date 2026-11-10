@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the actual WebProjection/native handler on a simulator and count avoided work."""
+"""Verify image reuse, content invalidation and cleanup on an iOS simulator."""
 import argparse
 import json
 from pathlib import Path
@@ -20,7 +20,7 @@ with tempfile.TemporaryDirectory(prefix='native-pipeline-') as folder:
     folder = Path(folder)
     app = folder / 'Pipeline.app'
     app.mkdir()
-    run('node_modules/.bin/esbuild', 'tests/performance/ios/pipeline.ts', '--bundle', '--format=iife', '--outfile=' + str(app / 'pipeline.js'))
+    run('node_modules/.bin/esbuild', 'tests/integration/image-reuse/pipeline.ts', '--bundle', '--format=iife', '--outfile=' + str(app / 'pipeline.js'))
     capture = (root / 'ios/Sources/WebViewNativeUIEngine/CoveredSnapshots.swift').read_text()
     capture = capture.replace('        let bounds = regions.reduce', '        rasterCaptures += 1\n        let bounds = regions.reduce', 1)
     capture = capture.replace('try png.write(to: file, options: .atomic)', 'pipelineCounterLock.lock(); pngWrites += 1; pipelineCounterLock.unlock()\n                                try png.write(to: file, options: .atomic)', 1)
@@ -30,7 +30,7 @@ with tempfile.TemporaryDirectory(prefix='native-pipeline-') as folder:
     encoder = encoder.replace('        let bounds = image.extent', '        pipelineCounterLock.lock(); pngEncodes += 1; pipelineCounterLock.unlock()\n        let bounds = image.extent', 1)
     (folder / 'Encoder.swift').write_text(encoder)
     library = root / 'native/artifacts/NativeUIPng.xcframework/ios-arm64_x86_64-simulator/libnative_ui_png.a'
-    run('xcrun', '--sdk', 'iphonesimulator', 'swiftc', '-O', '-parse-as-library', '-target', platform.machine() + '-apple-ios15.0-simulator', '-module-cache-path', folder / 'modules', '-I', root / 'native/include', root / 'tests/performance/ios/main.swift', folder / 'Capture.swift', folder / 'Encoder.swift', library, '-o', app / 'Pipeline')
+    run('xcrun', '--sdk', 'iphonesimulator', 'swiftc', '-O', '-parse-as-library', '-target', platform.machine() + '-apple-ios15.0-simulator', '-module-cache-path', folder / 'modules', '-I', root / 'native/include', root / 'tests/integration/image-reuse/main.swift', folder / 'Capture.swift', folder / 'Encoder.swift', library, '-o', app / 'Pipeline')
     plist = {'CFBundleIdentifier': 'local.native.pipeline', 'CFBundleExecutable': 'Pipeline', 'CFBundleName': 'Pipeline', 'CFBundlePackageType': 'APPL', 'MinimumOSVersion': '15.0', 'UILaunchScreen': {}, 'UIApplicationSceneManifest': {'UIApplicationSupportsMultipleScenes': False, 'UISceneConfigurations': {'UIWindowSceneSessionRoleApplication': [{'UISceneConfigurationName': 'Default', 'UISceneDelegateClassName': 'Pipeline.Scene'}]}}}
     (app / 'Info.plist').write_bytes(plistlib.dumps(plist))
     run('xcrun', 'simctl', 'install', args.device, app)
@@ -41,8 +41,6 @@ with tempfile.TemporaryDirectory(prefix='native-pipeline-') as folder:
     for _ in range(120):
         if result.exists():
             data = json.loads(result.read_text())
-            output = root / 'docs/validation/image-pipeline-ios.json'
-            output.write_text(json.dumps(data, indent=2) + '\n')
             assert data['action'] == 'done', data
             rows = {x['stage']: x for x in data['checkpoints']}
             cold = rows['cold']

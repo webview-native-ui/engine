@@ -83,8 +83,7 @@ To rerun release verification for an existing tag, select that tag as both the w
 
 ## Native PNG artifacts
 
-[Capture, PNG transport and reuse](advanced/native-png.md) describes the runtime
-behavior and validation. The checked-in native artifacts let consumers build
+The checked-in native artifacts let consumers build
 without Rust or an NDK. Changes to the Rust codec, C header or JNI shim must
 regenerate all binaries in the same change.
 
@@ -119,13 +118,9 @@ other devices are connected:
 ANDROID_SERIAL=emulator-5554 android/gradlew -p android :connectedDebugAndroidTest
 ```
 
-The simulator pipeline fixture can be run independently:
+The image-reuse integration test checks movement, content invalidation, handoff
+and file cleanup on the specified iOS simulator:
 
 ```sh
-python3 scripts/verify-image-pipeline.py --device <booted-simulator-UUID>
+python3 scripts/verify-image-reuse.py --device <booted-simulator-UUID>
 ```
-
-It installs only `local.native.pipeline` on the specified simulator and writes
-its result to `docs/validation/image-pipeline-ios.json`. It checks that moves and
-same-content preparations do not recapture, re-encode, save, read or decode,
-that content updates replace the pixels, and that reset leaves no cache files.

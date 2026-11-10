@@ -71,7 +71,7 @@ jobs:
           xcodegen generate
           xcodebuild -project NativeUIControlsHostedTests.xcodeproj -scheme NativeUIControlsHostedTests -destination "platform=iOS Simulator,id=$CORDOVA_SIMULATOR" CODE_SIGNING_ALLOWED=NO -only-testing:WebViewNativeUIControlsTests/NativeUISnapshotTests/testNativePopoverClosureNotifiesWebBeforeReopening -only-testing:WebViewNativeUIControlsTests/NativeUISnapshotTests/testPopoverReopensAfterPresentationIdentityKeepsReplacedSource test
       - name: Verify capture-to-Web image reuse on a real simulator screen
-        run: python3 scripts/verify-image-pipeline.py --device "$CORDOVA_SIMULATOR"
+        run: python3 scripts/verify-image-reuse.py --device "$CORDOVA_SIMULATOR"
       - name: Verify npm-distributed CocoaPod
         run: |
           set -euo pipefail

@@ -1,0 +1,5 @@
+
+# Generated native distribution artifacts and bundled third-party notices.
+native/artifacts/** linguist-generated=true
+native/licenses/** linguist-generated=true
+ios/Sources/WebViewNativeUIEngine/Resources/NativeUIPngLicenses/** linguist-generated=true
