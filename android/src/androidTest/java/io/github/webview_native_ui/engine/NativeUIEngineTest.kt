@@ -585,7 +585,7 @@ class NativeUIEngineTest {
                 snapshots = NativeUISnapshots(File(activity.cacheDir, "arrangement-${System.nanoTime()}"))
             }
             instrumentation.waitForIdleSync()
-            fun prepare(secondX: Float, reverse: Boolean = false): JSONObject {
+            fun prepare(firstX: Float, secondX: Float, reverse: Boolean = false): JSONObject {
                 val done = CountDownLatch(1)
                 var result = JSONObject()
                 val views = if (reverse) linkedMapOf("b" to second, "a" to first)
@@ -597,7 +597,7 @@ class NativeUIEngineTest {
                         activity.web.width.toDouble(),
                         {
                             mapOf(
-                                "a" to RectF(20f, 100f, 40f, 120f),
+                                "a" to RectF(firstX, 100f, firstX + 20f, 120f),
                                 "b" to RectF(secondX, 100f, secondX + 20f, 120f),
                             )
                         },
@@ -613,18 +613,18 @@ class NativeUIEngineTest {
                 return result
             }
             fun firstUrl(value: JSONObject) = value.getJSONArray("parts").getJSONObject(0).getString("url")
-            val original = prepare(40f)
+            val original = prepare(20f, 40f)
             assertFalse(original.optBoolean("reused"))
             main { snapshots.release(original.getString("token")) }
-            val translatedOne = prepare(40f)
+            val translatedOne = prepare(30f, 50f)
             assertTrue(translatedOne.optBoolean("reused"))
             assertEquals(firstUrl(original), firstUrl(translatedOne))
             main { snapshots.release(translatedOne.getString("token")) }
-            val relativeMove = prepare(50f)
+            val relativeMove = prepare(30f, 60f)
             assertFalse("Relative movement changes overlap pixels", relativeMove.optBoolean("reused"))
             assertNotEquals(firstUrl(original), firstUrl(relativeMove))
             main { snapshots.release(relativeMove.getString("token")) }
-            val orderChange = prepare(50f, reverse = true)
+            val orderChange = prepare(30f, 60f, reverse = true)
             assertFalse("Draw order changes the rendered cohort", orderChange.optBoolean("reused"))
             main { snapshots.release(orderChange.getString("token")) }
             main { snapshots.close() }
