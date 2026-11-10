@@ -120,11 +120,12 @@ Continue releasing retired tokens and reset the manager on owner teardown.
 
 A native renderer may supply the optional `readiness` callback to `handle`, or to
 `prepare` with explicit source views. Return `NativeUICaptureReadiness` for the
-requested revision: the component declares whether pixels are backdrop-independent
-and whether its layout and appearance have settled. The Engine does not inspect
-component styles to infer Glass.
+requested revision and source set: `NativeUICaptureReadiness(isSettled: true)`
+asserts that the caller has verified its effects, layout and interaction state.
+The Engine receives no component kind or effect classification; it does not
+decide whether a caller is a Plain button, Glass control or another renderer.
 
-Only independent, settled view captures use one matching geometry sample instead
+Only caller-declared settled view captures use one matching geometry sample instead
 of three. Coordinates and source traits are checked again before publishing fresh
 pixels. Missing information, composited capture, Glass, and unsettled state retain
 the standard checks. Active touches still invalidate preparation. This does not
@@ -140,6 +141,13 @@ remain conservative. Other component types retain their existing behavior.
 
 Controls and Engine are released at the same version and use the typed readiness
 contract directly. The optional public callback is an integration boundary for
-independent renderers; its omission is normalized to unknown readiness before
-entering the capture scheduler. Unknown appearance or layout remains a valid
-runtime state even when both modules have the same version.
+independent renderers; its omission is normalized to unsettled readiness before
+entering the capture scheduler. The caller must return `isSettled: false` while any relevant state is unknown,
+and revoke its proof if that state changes during capture. Engine still validates
+geometry, source traits and capture lifetime independently.
+
+Existing integrations do not need to add this callback. An explicit Web
+`captureDelayMs` (including a delay for Glass selection animations) remains
+unchanged: readiness neither bypasses nor overrides that scheduling delay.
+Native settling happens after it, and no animation-completion signal is inferred
+from the elapsed delay.

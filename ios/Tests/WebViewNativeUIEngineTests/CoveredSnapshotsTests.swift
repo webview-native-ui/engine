@@ -29,15 +29,10 @@ final class NativeUICoveredSnapshotsTests: XCTestCase {
         XCTAssertFalse(observer.delaysTouchesEnded)
     }
 
-    func testReadinessRequiresEveryIndependentSettledCondition() {
-        for effect in [NativeUICaptureReadiness.Effect.independent, .backdrop, .unknown] {
-            for layout in [false, true] {
-                for appearance in [false, true] {
-                    let state = NativeUICaptureReadiness(effect: effect, layoutSettled: layout, appearanceSettled: appearance)
-                    XCTAssertEqual(state.stableSamples, effect == .independent && layout && appearance ? 1 : 3)
-                }
-            }
-        }
+    func testReadinessUsesCallerDeclaration() {
+        XCTAssertEqual(NativeUICaptureReadiness().stableSamples, 3)
+        XCTAssertEqual(NativeUICaptureReadiness(isSettled: false).stableSamples, 3)
+        XCTAssertEqual(NativeUICaptureReadiness(isSettled: true).stableSamples, 1)
     }
 
     @MainActor func testReadyCaptureUsesFewerSamplesAndRechecksBeforePublication() async throws {
@@ -62,9 +57,9 @@ final class NativeUICoveredSnapshotsTests: XCTestCase {
                 if mode == "late-trait", proofs == 3 {
                     control.testTraits = UITraitCollection(userInterfaceStyle: control.traitCollection.userInterfaceStyle == .dark ? .light : .dark)
                 }
-                return .init(effect: mode == "glass" ? .backdrop : .independent,
-                             layoutSettled: mode != "layout" && !(mode == "revoked" && proofs >= 2) && !(mode == "flapped" && proofs == 2),
-                             appearanceSettled: mode != "appearance" && !(mode == "late-revoked" && proofs >= 3))
+                return .init(isSettled: mode != "glass" && mode != "layout" && mode != "appearance" &&
+                             !(mode == "revoked" && proofs >= 2) && !(mode == "flapped" && proofs == 2) &&
+                             !(mode == "late-revoked" && proofs >= 3))
             }
             let result: [String: Any] = await withCheckedContinuation { continuation in
                 snapshots.handle(request, in: web, frames: { _, _ in reads += 1; return ["control": control.frame] },

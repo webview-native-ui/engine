@@ -3,7 +3,7 @@ import UIKit
 
 final class NativeUIFab: UIView {
     static let kind = NativeUIComponent.fab
-    static let captureEffect = NativeUICaptureReadiness.Effect.backdrop
+    static let captureEffect = NativeUICaptureEffect.backdrop
     var buttons: [String: UIButton] = [:]
     var content: [String: NativeUIItemContent] = [:]
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {

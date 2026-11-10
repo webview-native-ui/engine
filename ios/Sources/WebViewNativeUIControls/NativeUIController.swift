@@ -286,12 +286,12 @@ public final class NativeUIController: NSObject, UITabBarDelegate {
               !keyboardVisible, toolbarTransition == nil else { return .init() }
         let nodes = snapshotControls.filter { ids.contains($0.id) }
         guard !ids.isEmpty, nodes.count == ids.count else { return .init() }
-        let effects = nodes.map { node -> NativeUICaptureReadiness.Effect in
+        let effects = nodes.map { node -> NativeUICaptureEffect in
             if node.kind == NativeUIButtons.kind { return NativeUIButtons.captureEffect }
             if node.kind == NativeUIFab.kind { return NativeUIFab.captureEffect }
             return NativeUIButton.captureEffect(node)
         }
-        let effect: NativeUICaptureReadiness.Effect = effects.allSatisfy { $0 == .independent } ? .independent :
+        let effect: NativeUICaptureEffect = effects.allSatisfy { $0 == .independent } ? .independent :
             effects.contains(.backdrop) ? .backdrop : .unknown
         // update() acknowledges our explicit, nonanimated layout transaction.
         // UIKit may dirty internal layout flags while drawing without changing
@@ -306,8 +306,8 @@ public final class NativeUIController: NSObject, UITabBarDelegate {
             }
             return true
         }
-        return .init(effect: effect, layoutSettled: settled,
-                     appearanceSettled: settled && captureState.appearanceSettled(nodes.compactMap { controls[$0.id] }))
+        return .init(isSettled: effect == .independent && settled &&
+                     captureState.appearanceSettled(nodes.compactMap { controls[$0.id] }))
     }
 
     private func resetCoveredSnapshots() {

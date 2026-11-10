@@ -42,21 +42,20 @@ final class NativeUISnapshotTests: XCTestCase {
         window.layoutIfNeeded()
         func buttons(_ view: UIView) -> [UIButton] { (view as? UIButton).map { [$0] } ?? view.subviews.flatMap(buttons) }
         let button = try XCTUnwrap(buttons(owner.view).first { $0.configuration?.title == "A" })
-        XCTAssertTrue(controller.captureReadiness(["a"], revision: 1).layoutSettled)
-        XCTAssertTrue(controller.captureReadiness(["a"], revision: 1).appearanceSettled)
-        XCTAssertEqual(controller.captureReadiness(["glass"], revision: 1).effect, .backdrop)
+        XCTAssertTrue(controller.captureReadiness(["a"], revision: 1).isSettled)
+        XCTAssertFalse(controller.captureReadiness(["glass"], revision: 1).isSettled)
         let other = try XCTUnwrap(buttons(owner.view).first { $0.configuration?.title == "B" })
         other.layer.mask = CALayer()
-        XCTAssertFalse(controller.captureReadiness(["b"], revision: 1).appearanceSettled, "Concealed pixels cannot declare readiness")
+        XCTAssertFalse(controller.captureReadiness(["b"], revision: 1).isSettled, "Concealed pixels cannot declare readiness")
         other.layer.mask = nil
 
         button.sendActions(for: .touchUpInside)
-        XCTAssertFalse(controller.captureReadiness(["a"], revision: 1).appearanceSettled, "UIAction without UITouch must invalidate its owner")
-        XCTAssertTrue(controller.captureReadiness(["b"], revision: 1).appearanceSettled)
+        XCTAssertFalse(controller.captureReadiness(["a"], revision: 1).isSettled, "UIAction without UITouch must invalidate its owner")
+        XCTAssertTrue(controller.captureReadiness(["b"], revision: 1).isSettled)
         // A real UIAction must invalidate readiness even without a UITouch.
         controller.recordCaptureInteraction(button.titleLabel ?? button)
-        XCTAssertFalse(controller.captureReadiness(["a"], revision: 1).appearanceSettled)
-        XCTAssertTrue(controller.captureReadiness(["b"], revision: 1).appearanceSettled)
+        XCTAssertFalse(controller.captureReadiness(["a"], revision: 1).isSettled)
+        XCTAssertTrue(controller.captureReadiness(["b"], revision: 1).isSettled)
         func capture(_ ids: [String]) async -> [String: Any] {
             await withCheckedContinuation { continuation in
                 controller.coveredSnapshot(["action": "prepare", "ids": ids, "revision": 1, "captureMode": "view", "viewportWidth": Double(web.bounds.width)],
@@ -73,14 +72,14 @@ final class NativeUISnapshotTests: XCTestCase {
         button.superview?.insertSubview(button, at: 0)
         let bResult = await capture(["b"])
         XCTAssertNotNil(bResult["token"])
-        XCTAssertFalse(controller.captureReadiness(["a"], revision: 1).appearanceSettled)
+        XCTAssertFalse(controller.captureReadiness(["a"], revision: 1).isSettled)
         let aResult = await capture(["a"])
         XCTAssertNotNil(aResult["token"])
-        XCTAssertFalse(controller.captureReadiness(["a"], revision: 1).appearanceSettled, "Snapshot completion is not animation completion")
+        XCTAssertFalse(controller.captureReadiness(["a"], revision: 1).isSettled, "Snapshot completion is not animation completion")
         controller.recordCaptureInteraction(nil)
-        XCTAssertFalse(controller.captureReadiness(["a"], revision: 1).appearanceSettled)
-        XCTAssertFalse(controller.captureReadiness(["b"], revision: 1).appearanceSettled)
-        XCTAssertFalse(controller.captureReadiness(["a"], revision: 0).layoutSettled)
+        XCTAssertFalse(controller.captureReadiness(["a"], revision: 1).isSettled)
+        XCTAssertFalse(controller.captureReadiness(["b"], revision: 1).isSettled)
+        XCTAssertFalse(controller.captureReadiness(["a"], revision: 0).isSettled)
         var rebound = nodes
         rebound[0]["id"] = "renamed"
         _ = await withCheckedContinuation { continuation in
@@ -89,8 +88,7 @@ final class NativeUISnapshotTests: XCTestCase {
         }
         window.layoutIfNeeded()
         XCTAssertTrue(buttons(owner.view).contains { $0 === button }, "The source must actually be reassociated")
-        XCTAssertTrue(controller.captureReadiness(["renamed"], revision: 2).layoutSettled)
-        XCTAssertFalse(controller.captureReadiness(["renamed"], revision: 2).appearanceSettled, "ID reassociation must not forget an unsettled interaction")
+        XCTAssertFalse(controller.captureReadiness(["renamed"], revision: 2).isSettled, "ID reassociation must not forget an unsettled interaction")
         _ = await withCheckedContinuation { continuation in controller.clear(["revision": 3], resolve: { continuation.resume(returning: $0) }, reject: { _ in continuation.resume(returning: [:]) }) }
     }
 
