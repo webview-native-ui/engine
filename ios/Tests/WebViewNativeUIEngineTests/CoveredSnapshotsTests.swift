@@ -48,10 +48,12 @@ final class NativeUICoveredSnapshotsTests: XCTestCase {
         let control = CountingSnapshotView(frame: CGRect(x: 40, y: 100, width: 60, height: 44))
         web.addSubview(control); window.layoutIfNeeded()
         defer { window.isHidden = true }
-        for mode in ["legacy", "ready", "glass", "layout", "appearance", "revoked", "late-revoked", "late-trait", "composited"] {
+        for mode in ["legacy", "ready", "glass", "layout", "appearance", "revoked", "flapped", "late-revoked", "late-trait", "composited"] {
             let snapshots = NativeUICoveredSnapshots()
             var reads = 0
             var proofs = 0
+            var readsAtRaster = 0
+            control.beforeDraw = { readsAtRaster = reads }
             var request: [String: Any] = ["action": "prepare", "ids": ["control"], "revision": 1,
                                         "viewportWidth": Double(web.bounds.width), "captureMode": "view"]
             if mode == "composited" { request.removeValue(forKey: "captureMode") }
@@ -61,12 +63,16 @@ final class NativeUICoveredSnapshotsTests: XCTestCase {
                     control.testTraits = UITraitCollection(userInterfaceStyle: control.traitCollection.userInterfaceStyle == .dark ? .light : .dark)
                 }
                 return .init(effect: mode == "glass" ? .backdrop : .independent,
-                             layoutSettled: mode != "layout" && !(mode == "revoked" && proofs >= 2),
+                             layoutSettled: mode != "layout" && !(mode == "revoked" && proofs >= 2) && !(mode == "flapped" && proofs == 2),
                              appearanceSettled: mode != "appearance" && !(mode == "late-revoked" && proofs >= 3))
             }
             let result: [String: Any] = await withCheckedContinuation { continuation in
                 snapshots.handle(request, in: web, frames: { _, _ in reads += 1; return ["control": control.frame] },
                                  views: { _ in [control] }, readiness: provider) { continuation.resume(returning: $0) }
+            }
+            if mode != "composited" {
+                XCTAssertEqual(readsAtRaster, ["ready", "late-revoked", "late-trait"].contains(mode) ? 2 : 4,
+                               "An uncertain request cannot upgrade back to the short path: \(mode)")
             }
             if mode == "late-revoked" || mode == "late-trait" {
                 XCTAssertNil(result["token"], "Revoked proof must not publish or cache provisional pixels")
@@ -651,10 +657,12 @@ private final class TransparentSnapshotTestView: UIView {
 
 private final class CountingSnapshotView: UIView {
     var testTraits: UITraitCollection?
+    var beforeDraw: (() -> Void)?
     override var traitCollection: UITraitCollection { testTraits ?? super.traitCollection }
     var draws = 0
     var color = UIColor.red
     override func drawHierarchy(in rect: CGRect, afterScreenUpdates: Bool) -> Bool {
+        beforeDraw?()
         draws += 1
         color.setFill()
         UIRectFill(rect)

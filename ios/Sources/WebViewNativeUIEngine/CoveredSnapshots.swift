@@ -172,12 +172,14 @@ public final class NativeUICoveredSnapshots {
                                 readiness: (() -> NativeUICaptureReadiness)? = nil, complete: @escaping ([String: Any]) -> Void) {
         let stamp = generation
         let start = CACurrentMediaTime()
+        var requiredSamples = 1
         func sample(_ previous: [String: CGRect], _ stable: Int) {
             guard generation == stamp, !touching, CACurrentMediaTime() - start < 1 else { complete([:]); return }
             let current = frames()
             let count = !current.isEmpty && current == previous ? stable + 1 : 0
             // Recheck the renderer's proof on every sample; a revoked proof falls back.
-            let requiredSamples = views?.isEmpty == false ? (readiness?().stableSamples ?? 3) : 3
+            let currentRequirement = views?.isEmpty == false ? (readiness?().stableSamples ?? 3) : 3
+            requiredSamples = max(requiredSamples, currentRequirement)
             if count >= requiredSamples {
                 capture(frames: current, anchorFrames: anchorFrames?() ?? [:], in: webView, viewportWidth: viewportWidth, views: views, contentRevision: contentRevision,
                         stillReady: requiredSamples == 1 ? { readiness?().stableSamples == 1 && frames() == current } : nil,
