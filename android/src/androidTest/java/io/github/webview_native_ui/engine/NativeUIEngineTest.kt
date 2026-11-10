@@ -571,6 +571,69 @@ class NativeUIEngineTest {
     }
 
     @Test
+    fun viewCacheRejectsRelativeMovementAndDrawOrderChanges() {
+        val activity = activity()
+        lateinit var snapshots: NativeUISnapshots
+        lateinit var first: View
+        lateinit var second: View
+        try {
+            main {
+                first = View(activity).apply { setBackgroundColor(Color.RED) }
+                second = View(activity).apply { setBackgroundColor(Color.BLUE) }
+                activity.root.addView(first, FrameLayout.LayoutParams(20, 20))
+                activity.root.addView(second, FrameLayout.LayoutParams(20, 20))
+                snapshots = NativeUISnapshots(File(activity.cacheDir, "arrangement-${System.nanoTime()}"))
+            }
+            instrumentation.waitForIdleSync()
+            fun prepare(secondX: Float, reverse: Boolean = false): JSONObject {
+                val done = CountDownLatch(1)
+                var result = JSONObject()
+                val views = if (reverse) linkedMapOf("b" to second, "a" to first)
+                    else linkedMapOf("a" to first, "b" to second)
+                main {
+                    snapshots.prepare(
+                        activity.window,
+                        activity.web,
+                        activity.web.width.toDouble(),
+                        {
+                            mapOf(
+                                "a" to RectF(20f, 100f, 40f, 120f),
+                                "b" to RectF(secondX, 100f, secondX + 20f, 120f),
+                            )
+                        },
+                        sourceViews = { views },
+                        contentRevision = 1,
+                    ) {
+                        result = it
+                        done.countDown()
+                    }
+                }
+                assertTrue(done.await(10, TimeUnit.SECONDS))
+                assertTrue(result.has("token"))
+                return result
+            }
+            fun firstUrl(value: JSONObject) = value.getJSONArray("parts").getJSONObject(0).getString("url")
+            val original = prepare(40f)
+            assertFalse(original.optBoolean("reused"))
+            main { snapshots.release(original.getString("token")) }
+            val translatedOne = prepare(40f)
+            assertTrue(translatedOne.optBoolean("reused"))
+            assertEquals(firstUrl(original), firstUrl(translatedOne))
+            main { snapshots.release(translatedOne.getString("token")) }
+            val relativeMove = prepare(50f)
+            assertFalse("Relative movement changes overlap pixels", relativeMove.optBoolean("reused"))
+            assertNotEquals(firstUrl(original), firstUrl(relativeMove))
+            main { snapshots.release(relativeMove.getString("token")) }
+            val orderChange = prepare(50f, reverse = true)
+            assertFalse("Draw order changes the rendered cohort", orderChange.optBoolean("reused"))
+            main { snapshots.release(orderChange.getString("token")) }
+            main { snapshots.close() }
+        } finally {
+            main { activity.finish() }
+        }
+    }
+
+    @Test
     fun expiredEntryCopyRestoresNativeAndRejectsLatePaint() {
         val activity = activity()
         lateinit var snapshots: NativeUISnapshots
