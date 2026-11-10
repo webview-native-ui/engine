@@ -298,10 +298,10 @@ public final class NativeUIController: NSObject, UITabBarDelegate {
         // that transaction; the Engine separately rechecks actual frames.
         let settled = nodes.allSatisfy { node in
             guard let button = controls[node.id] as? UIButton, !button.isHighlighted, !button.isTracking,
-                  button.window != nil else { return false }
+                  button.window != nil, button.layer.mask == nil else { return false }
             var view: UIView? = button
             while let current = view {
-                if !(current.layer.animationKeys() ?? []).isEmpty { return false }
+                if current.isHidden || current.alpha <= 0 || !(current.layer.animationKeys() ?? []).isEmpty { return false }
                 view = current.superview
             }
             return true
@@ -358,7 +358,13 @@ public final class NativeUIController: NSObject, UITabBarDelegate {
                       ids.isDisjoint(with: railIDs) || ids.isSuperset(of: railIDs) else {
                     return nil
                 }
-                var views = Array(self.controls.filter { ids.contains($0.key) }.values)
+                let selected = Array(self.controls.filter { ids.contains($0.key) }.values)
+                var views = selected
+                // Partial Dictionary selection must not randomize the shared
+                // raster's draw order or turn unchanged sources into cache misses.
+                if let ordered = self.host?.subviews.filter({ selected.contains($0) }), ordered.count == selected.count {
+                    views = ordered
+                }
                 if !railIDs.isEmpty, ids.isSuperset(of: railIDs), let rail = self.verticalBars { views.append(rail.view) }
                 return views
             }

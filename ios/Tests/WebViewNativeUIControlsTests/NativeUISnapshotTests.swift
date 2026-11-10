@@ -45,6 +45,11 @@ final class NativeUISnapshotTests: XCTestCase {
         XCTAssertTrue(controller.captureReadiness(["a"], revision: 1).layoutSettled)
         XCTAssertTrue(controller.captureReadiness(["a"], revision: 1).appearanceSettled)
         XCTAssertEqual(controller.captureReadiness(["glass"], revision: 1).effect, .backdrop)
+        let other = try XCTUnwrap(buttons(owner.view).first { $0.configuration?.title == "B" })
+        other.layer.mask = CALayer()
+        XCTAssertFalse(controller.captureReadiness(["b"], revision: 1).appearanceSettled, "Concealed pixels cannot declare readiness")
+        other.layer.mask = nil
+
         button.sendActions(for: .touchUpInside)
         XCTAssertFalse(controller.captureReadiness(["a"], revision: 1).appearanceSettled, "UIAction without UITouch must invalidate its owner")
         XCTAssertTrue(controller.captureReadiness(["b"], revision: 1).appearanceSettled)
@@ -52,16 +57,24 @@ final class NativeUISnapshotTests: XCTestCase {
         controller.recordCaptureInteraction(button.titleLabel ?? button)
         XCTAssertFalse(controller.captureReadiness(["a"], revision: 1).appearanceSettled)
         XCTAssertTrue(controller.captureReadiness(["b"], revision: 1).appearanceSettled)
-        func capture(_ id: String) async -> [String: Any] {
+        func capture(_ ids: [String]) async -> [String: Any] {
             await withCheckedContinuation { continuation in
-                controller.coveredSnapshot(["action": "prepare", "ids": [id], "revision": 1, "captureMode": "view", "viewportWidth": Double(web.bounds.width)],
+                controller.coveredSnapshot(["action": "prepare", "ids": ids, "revision": 1, "captureMode": "view", "viewportWidth": Double(web.bounds.width)],
                                            resolve: { continuation.resume(returning: $0) }, reject: { continuation.resume(returning: ["error": $0]) })
             }
         }
-        let bResult = await capture("b")
+        let pair = await capture(["a", "b"])
+        XCTAssertNotNil(pair["token"])
+        let samePair = await capture(["a", "b"])
+        XCTAssertEqual(samePair["reused"] as? Bool, true, "Partial selection must keep native drawing order")
+        button.superview?.bringSubviewToFront(button)
+        let reorderedPair = await capture(["a", "b"])
+        XCTAssertNotEqual(reorderedPair["reused"] as? Bool, true, "A real native z-order change must recapture")
+        button.superview?.insertSubview(button, at: 0)
+        let bResult = await capture(["b"])
         XCTAssertNotNil(bResult["token"])
         XCTAssertFalse(controller.captureReadiness(["a"], revision: 1).appearanceSettled)
-        let aResult = await capture("a")
+        let aResult = await capture(["a"])
         XCTAssertNotNil(aResult["token"])
         XCTAssertFalse(controller.captureReadiness(["a"], revision: 1).appearanceSettled, "Snapshot completion is not animation completion")
         controller.recordCaptureInteraction(nil)
