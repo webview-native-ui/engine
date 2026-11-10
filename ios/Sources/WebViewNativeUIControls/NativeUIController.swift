@@ -369,7 +369,7 @@ public final class NativeUIController: NSObject, UITabBarDelegate {
                 return views
             }
             self.coveredSnapshots.handle(options, in: webView, frames: measure, views: views,
-                readiness: { [weak self] ids, revision in self?.captureReadiness(ids, revision: revision) ?? .init() }, complete: { resolve($0) })
+                readiness: self.captureReadiness, complete: { resolve($0) })
         }
     }
 

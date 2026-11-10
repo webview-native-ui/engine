@@ -137,3 +137,9 @@ history follows reassociated Views without retaining retired components. A new
 View starts clean; capturing another source does not clear an interaction. Shared surfaces, unknown
 input targets, active animations and unresolved interactions
 remain conservative. Other component types retain their existing behavior.
+
+Controls and Engine are released at the same version and use the typed readiness
+contract directly. The optional public callback is an integration boundary for
+independent renderers; its omission is normalized to unknown readiness before
+entering the capture scheduler. Unknown appearance or layout remains a valid
+runtime state even when both modules have the same version.

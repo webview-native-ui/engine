@@ -90,6 +90,7 @@ public final class NativeUICoveredSnapshots {
             let firstFrames = frames(expected, revision)
             guard Set(firstFrames.keys) == expected else { complete([:]); return }
             let viewCapture = request["captureMode"] as? String == "view"
+            let readinessProvider = readiness ?? { _, _ in NativeUICaptureReadiness() }
             let selected = viewCapture ? views(expected) : nil
             guard !viewCapture || selected?.isEmpty == false else { complete([:]); return }
             var initial: [String: CGRect]? = firstFrames
@@ -98,7 +99,7 @@ public final class NativeUICoveredSnapshots {
                 initial = nil
                 return Set(measured.keys) == expected ? measured : [:]
             }, in: webView, viewportWidth: width, views: selected, anchorFrames: anchorFrames, contentRevision: viewCapture ? revision : nil,
-                           readiness: viewCapture ? readiness.map { provider in { provider(expected, revision) } } : nil, complete: { result in
+                           readiness: { readinessProvider(expected, revision) }, complete: { result in
                 if let token = result["token"] as? String { self.captures[token]?.preservesLayout = request["imageSurface"] as? String == "web" }
                 complete(result)
             })
@@ -164,12 +165,12 @@ public final class NativeUICoveredSnapshots {
                         views: [UIView]? = nil, anchorFrames: (() -> [String: CGRect])? = nil, readiness: (() -> NativeUICaptureReadiness)? = nil,
                         complete: @escaping ([String: Any]) -> Void) {
         prepareCapture(frames: frames, in: webView, viewportWidth: viewportWidth, views: views,
-                       anchorFrames: anchorFrames, contentRevision: nil, readiness: readiness, complete: complete)
+                       anchorFrames: anchorFrames, contentRevision: nil, readiness: readiness ?? { .init() }, complete: complete)
     }
 
     private func prepareCapture(frames: @escaping () -> [String: CGRect], in webView: UIView, viewportWidth: CGFloat,
                                 views: [UIView]?, anchorFrames: (() -> [String: CGRect])?, contentRevision: Int?,
-                                readiness: (() -> NativeUICaptureReadiness)? = nil, complete: @escaping ([String: Any]) -> Void) {
+                                readiness: @escaping () -> NativeUICaptureReadiness, complete: @escaping ([String: Any]) -> Void) {
         let stamp = generation
         let start = CACurrentMediaTime()
         var requiredSamples = 1
@@ -178,11 +179,11 @@ public final class NativeUICoveredSnapshots {
             let current = frames()
             let count = !current.isEmpty && current == previous ? stable + 1 : 0
             // Recheck the renderer's proof on every sample; a revoked proof falls back.
-            let currentRequirement = views?.isEmpty == false ? (readiness?().stableSamples ?? 3) : 3
+            let currentRequirement = views?.isEmpty == false ? readiness().stableSamples : 3
             requiredSamples = max(requiredSamples, currentRequirement)
             if count >= requiredSamples {
                 capture(frames: current, anchorFrames: anchorFrames?() ?? [:], in: webView, viewportWidth: viewportWidth, views: views, contentRevision: contentRevision,
-                        stillReady: requiredSamples == 1 ? { readiness?().stableSamples == 1 && frames() == current } : nil,
+                        stillReady: requiredSamples == 1 ? { readiness().stableSamples == 1 && frames() == current } : nil,
                         complete: complete)
             } else {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.0 / 60.0) { sample(current, count) }
