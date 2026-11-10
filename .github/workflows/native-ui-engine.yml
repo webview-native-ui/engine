@@ -8,6 +8,15 @@ on:
 permissions:
   contents: read
 jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: rustup toolchain install 1.99.1 --profile minimal --component rustfmt --component clippy
+      - run: cargo +1.99.1 fmt --manifest-path native/png/Cargo.toml --check
+      - run: cargo +1.99.1 test --locked --manifest-path native/png/Cargo.toml
+      - run: cargo +1.99.1 clippy --locked --manifest-path native/png/Cargo.toml --all-targets -- -D warnings
+      - run: python3 scripts/verify-native-png.py
   lint:
     runs-on: macos-15-intel
     steps:
@@ -61,6 +70,8 @@ jobs:
           cd ios/Tests
           xcodegen generate
           xcodebuild -project NativeUIControlsHostedTests.xcodeproj -scheme NativeUIControlsHostedTests -destination "platform=iOS Simulator,id=$CORDOVA_SIMULATOR" CODE_SIGNING_ALLOWED=NO -only-testing:WebViewNativeUIControlsTests/NativeUISnapshotTests/testNativePopoverClosureNotifiesWebBeforeReopening -only-testing:WebViewNativeUIControlsTests/NativeUISnapshotTests/testPopoverReopensAfterPresentationIdentityKeepsReplacedSource test
+      - name: Verify capture-to-Web image reuse on a real simulator screen
+        run: python3 scripts/verify-image-pipeline.py --device "$CORDOVA_SIMULATOR"
       - name: Verify npm-distributed CocoaPod
         run: |
           set -euo pipefail

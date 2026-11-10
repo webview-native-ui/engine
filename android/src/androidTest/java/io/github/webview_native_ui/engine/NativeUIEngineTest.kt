@@ -542,8 +542,23 @@ class NativeUIEngineTest {
             assertFalse(original.exists())
             val changedFile =
                 File(java.net.URI(changed.getJSONArray("parts").getJSONObject(0).getString("url")))
+            main { native.alpha = 0.9f }
+            instrumentation.waitForIdleSync()
+            val appearanceChanged = prepareAgain(1)
+            val appearanceFile =
+                File(
+                    java.net.URI(
+                        appearanceChanged.getJSONArray("parts").getJSONObject(0).getString("url")
+                    )
+                )
+            assertNotEquals(
+                "Native appearance changes must invalidate cached pixels even at the same content revision",
+                changedFile,
+                appearanceFile,
+            )
             main { snapshots.reset() }
             assertFalse(changedFile.exists())
+            assertFalse(appearanceFile.exists())
             val newDocument = prepareAgain(1)
             assertNotEquals(
                 changedFile.toURI().toString(),
@@ -1457,18 +1472,24 @@ class NativeUIEngineTest {
     fun explicitPlacementIsNotOverwrittenByOlderImageFrame() =
         nativeInitialization(NativeUIProjection.CaptureMode.VIEW, authoritativePlacement = true)
 
+    @Test
+    fun viewImageReuseSkipsFileReadAndDecodeAcrossMovement() =
+        nativeInitialization(NativeUIProjection.CaptureMode.VIEW, auditReuse = true)
+
     private fun nativeInitialization(
         mode: NativeUIProjection.CaptureMode,
         delayCover: Boolean = false,
         releaseWhileActive: Boolean = false,
         pressOnConnect: Boolean = false,
         authoritativePlacement: Boolean = false,
+        auditReuse: Boolean = false,
     ) {
 
         val activity = activity()
         lateinit var registration: NativeUIProjection
         lateinit var native: View
         val loaded = CountDownLatch(1)
+        val fileReads = java.util.concurrent.atomic.AtomicInteger()
         val pendingDraws = mutableListOf<() -> Unit>()
         var revealCount = 0
         var pendingPlacement = false
@@ -1540,6 +1561,7 @@ class NativeUIEngineTest {
                                 )
                             )
                                 return null
+                            fileReads.incrementAndGet()
                             return runCatching {
                                     android.webkit.WebResourceResponse(
                                         "image/png",
@@ -1640,6 +1662,8 @@ class NativeUIEngineTest {
                     "https://localhost",
                     """
                     <meta name='viewport' content='width=device-width,initial-scale=1'><script>
+                    window.imageDecodes=0;const originalDecode=HTMLImageElement.prototype.decode;
+                    HTMLImageElement.prototype.decode=function(){imageDecodes++;return originalDecode.call(this)};
                     window.testEvents={};window.Capacitor={
                      addListener:(plugin,name,fn)=>{testEvents[name]=fn;return{remove:async()=>{delete testEvents[name]}}},
                      convertFileSrc:url=>'https://localhost/_capacitor_file_'+url.replace('file://','')
@@ -1761,6 +1785,8 @@ class NativeUIEngineTest {
                     """
                         .trimIndent()
                 )
+            val readsBeforeMovement = fileReads.get()
+            val decodesBeforeMovement = js("window.imageDecodes").toInt()
             repeat(2) { iteration ->
                 waitFor("document.querySelector('#slot').hasAttribute('data-native-ui-snapshot')")
                 js("testEvents.moving({})")
@@ -1819,6 +1845,18 @@ class NativeUIEngineTest {
                         )
                     }
                 }
+            }
+            if (auditReuse) {
+                assertEquals(
+                    "Position-only round trips must not read the PNG again",
+                    readsBeforeMovement,
+                    fileReads.get(),
+                )
+                assertEquals(
+                    "Position-only round trips must not decode the PNG again",
+                    decodesBeforeMovement,
+                    js("window.imageDecodes").toInt(),
+                )
             }
             waitFor("document.querySelector('#slot').hasAttribute('data-native-ui-snapshot')")
             js("testEvents.moving({})")

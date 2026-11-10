@@ -9,7 +9,8 @@ Pod::Spec.new do |s|
  s.preserve_paths = 'LICENSE'
  s.author = { 'rdlabo' => 'sakakibara@rdlabo.jp' }
  s.source = { :git => 'https://github.com/webview-native-ui/engine.git', :tag => "v#{s.version}" }
- s.resource_bundles = { 'WebViewNativeUIEngine' => ['ios/Sources/WebViewNativeUIEngine/Resources/*.js'] }
+ s.resource_bundles = { 'WebViewNativeUIEngine' => ['ios/Sources/WebViewNativeUIEngine/Resources/*.js', 'ios/Sources/WebViewNativeUIEngine/Resources/NativeUIPngLicenses/*'] }
+ s.vendored_frameworks = 'native/artifacts/NativeUIPng.xcframework'
  s.source_files = 'ios/Sources/WebViewNativeUIEngine/**/*.swift'
  s.ios.deployment_target = '15.0'
  s.swift_version = '5.9'

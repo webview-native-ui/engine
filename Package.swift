@@ -7,6 +7,7 @@ let package = Package(
  targets: [
   .testTarget(name: "WebViewNativeUIControlsTests", dependencies: ["WebViewNativeUIControls"], path: "ios/Tests/WebViewNativeUIControlsTests"),
   .target(name: "WebViewNativeUIControls", dependencies: ["WebViewNativeUIEngine"], path: "ios/Sources/WebViewNativeUIControls"),
-  .target(name: "WebViewNativeUIEngine", path: "ios/Sources/WebViewNativeUIEngine", resources: [.process("Resources")]),
+  .binaryTarget(name: "NativeUIPng", path: "native/artifacts/NativeUIPng.xcframework"),
+  .target(name: "WebViewNativeUIEngine", dependencies: ["NativeUIPng"], path: "ios/Sources/WebViewNativeUIEngine", resources: [.process("Resources")]),
   .testTarget(name: "WebViewNativeUIEngineTests", dependencies: ["WebViewNativeUIEngine"], path: "ios/Tests/WebViewNativeUIEngineTests")
  ])

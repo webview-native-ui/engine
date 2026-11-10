@@ -1,0 +1,25 @@
+{
+  "sdk": "27.1",
+  "simulator": {
+    "runtime": "com.apple.CoreSimulator.SimRuntime.iOS-27-0",
+    "isAvailable": true,
+    "deviceTypeIdentifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro",
+    "state": "Booted",
+    "name": "iPhone 18 Pro"
+  },
+  "sources": {
+    "ios/Sources/WebViewNativeUIEngine/CoveredSnapshots.swift": "919b57841a09c4039c189516c15b2c56d63c88a1cfde830bf0df33611bd07e95",
+    "ios/Sources/WebViewNativeUIEngine/NativeUIPngEncoder.swift": "e76709ca1e43fa6fdd35b8dc48d1f861400d1a34d35f7a55b15ce22e46342d86"
+  },
+  "host": "macOS-27.0.1-arm64-arm-64bit",
+  "git_head": "f4ad403a98536fb3f35269cb74326b880145540d",
+  "fixture_sha256": {
+    "tests/performance/fresh/ios.swift": "563a9a3953b164bb3ce4dbc6977fd2716bc02928e9dcb5a50f4e1e3510447c43",
+    "tests/performance/fresh/README.md": "c23a091c07d2be69e33b1eeb518e7c8a031591a27b20507395a7e7bc04be5240",
+    "tests/performance/fresh/android/MainActivity.kt": "50f18ed64f59d5dfc945e546b3aebfc28489f1370b2d99a31b69792dcb922b02",
+    "tests/performance/fresh/android/AndroidManifest.xml": "b25d202de80e825cf2e0a35739ed767722770b593b2208d5ca2d2dbeba48e84b",
+    "tests/performance/fresh/android/build.gradle": "bbc1e915560ce09bce4ec3627c917345074f5dbec320350828622589d254e81e",
+    "tests/performance/fresh/android/settings.gradle": "2ef3f61fa04fd16afa18538e5354b1d7d9bcd51074ec36ec5a0f38d1b0218264"
+  },
+  "redaction": "Local simulator UUID and filesystem paths omitted."
+}

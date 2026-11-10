@@ -103,6 +103,8 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
   const imagePool = new Map<HTMLElement, HTMLImageElement[]>();
   const leasedImages = new Set<HTMLImageElement>();
   const retireImage = (image: HTMLImageElement) => {
+    // A replacement token may lease the same immutable native file and decoded DOM image.
+    if (cached?.images.includes(image) || handoff?.image.images.includes(image)) return;
     leasedImages.delete(image);
     image.style.setProperty('display', 'none', 'important');
     image.removeAttribute('data-native-ui-projection-image');
@@ -358,6 +360,17 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
               pool = [];
               imagePool.set(target, pool);
             }
+            const url = projectionURL(part.url);
+            const reusable =
+              result?.reused === true && cached?.data.parts[index]?.url === part.url && cached.targets[index] === target
+                ? cached.images[index]
+                : undefined;
+            // Native view-cache hits keep their immutable URL. Reuse the completed
+            // image without another file request or decode, even with a new token.
+            if (reusable?.complete && reusable.naturalWidth > 0 && reusable.src === url) {
+              images.push(reusable);
+              return reusable;
+            }
             let image = pool.find((item) => !leasedImages.has(item));
             if (!image) {
               image = doc.createElement('img');
@@ -366,7 +379,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
             }
             leasedImages.add(image);
             images.push(image);
-            image.src = projectionURL(part.url);
+            image.src = url;
             await image.decode();
             return image;
           }),

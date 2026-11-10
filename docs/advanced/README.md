@@ -17,4 +17,6 @@ These are integration choices, not additional steps to complete a normal
 `NativeUIProjection` setup. Keep business actions, SDK interaction and application
 notifications in the consuming plugin.
 
+[Capture, PNG transport and image reuse](native-png.md) describes the shared pixel path, cache eligibility and measurements.
+
 [Documentation overview](../README.md)

@@ -1,0 +1,55 @@
+{
+  "action": "done",
+  "checkpoints": [
+    {
+      "captures": 1,
+      "decodes": 12,
+      "encodes": 12,
+      "fileReads": 12,
+      "files": 12,
+      "nativeDecodes": 12,
+      "stage": "cold",
+      "writes": 12
+    },
+    {
+      "captures": 1,
+      "decodes": 12,
+      "encodes": 12,
+      "fileReads": 12,
+      "files": 12,
+      "nativeDecodes": 12,
+      "stage": "same-content-three-prepares",
+      "writes": 12
+    },
+    {
+      "captures": 1,
+      "decodes": 12,
+      "encodes": 12,
+      "fileReads": 12,
+      "files": 12,
+      "nativeDecodes": 12,
+      "stage": "entry-return",
+      "writes": 12
+    },
+    {
+      "captures": 2,
+      "decodes": 24,
+      "encodes": 24,
+      "fileReads": 24,
+      "files": 12,
+      "nativeDecodes": 24,
+      "stage": "content-changed",
+      "writes": 24
+    },
+    {
+      "captures": 2,
+      "decodes": 24,
+      "encodes": 24,
+      "fileReads": 24,
+      "files": 0,
+      "nativeDecodes": 24,
+      "stage": "destroy-reset",
+      "writes": 24
+    }
+  ]
+}

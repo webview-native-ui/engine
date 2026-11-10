@@ -1,5 +1,6 @@
 package io.github.webview_native_ui.engine
 
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Rect
@@ -15,6 +16,7 @@ import android.view.Window
 import android.webkit.WebView
 import android.widget.ImageView
 import java.io.File
+import java.lang.ref.WeakReference
 import java.util.UUID
 import java.util.concurrent.Executors
 import kotlin.math.ceil
@@ -49,9 +51,28 @@ class NativeUISnapshots(private val directory: File) : AutoCloseable {
     private val encoder = Executors.newSingleThreadExecutor()
     private val captures = mutableMapOf<String, Capture>()
 
+    private data class ViewState(
+        val width: Int,
+        val height: Int,
+        val direction: Int,
+        val alpha: Float,
+        val configuration: Configuration,
+    )
+
+    private fun viewState(view: View) =
+        ViewState(
+            view.width,
+            view.height,
+            view.layoutDirection,
+            view.alpha,
+            Configuration(view.resources.configuration),
+        )
+
     private data class ViewCache(
         val revision: Long,
         val views: Map<String, View>,
+        val window: WeakReference<Window>,
+        val states: Map<String, ViewState>,
         val parts: List<Part>,
     )
 
@@ -336,13 +357,14 @@ class NativeUISnapshots(private val directory: File) : AutoCloseable {
         val height = root.height
         val referenceWidth = reference.width
         val referenceHeight = reference.height
-        fun deliver(parts: List<Part>) {
+        fun deliver(parts: List<Part>, reused: Boolean = false) {
             val token = UUID.randomUUID().toString()
             captures[token] =
                 Capture(width, height, location, referenceWidth, referenceHeight, parts)
             complete(
                 JSONObject()
                     .put("token", token)
+                    .put("reused", reused)
                     .put(
                         "parts",
                         JSONArray(
@@ -359,12 +381,18 @@ class NativeUISnapshots(private val directory: File) : AutoCloseable {
                     )
             )
         }
+        val states = sourceViews?.mapValues { viewState(it.value) }
         val cached = viewCache
         if (
             sourceViews != null &&
                 cached != null &&
                 cached.revision == contentRevision &&
                 cached.views == sourceViews &&
+                cached.window.get() === window &&
+                cached.states == states &&
+                sourceViews.keys == frames.keys &&
+                cached.parts.size == frames.size &&
+                sourceViews.values.none { it.isLayoutRequested } &&
                 cached.parts.all { part ->
                     part.file.isFile &&
                         frames[part.id]?.let {
@@ -372,7 +400,10 @@ class NativeUISnapshots(private val directory: File) : AutoCloseable {
                         } == true
                 }
         ) {
-            deliver(cached.parts.map { it.copy(frame = RectF(frames.getValue(it.id))) })
+            deliver(
+                cached.parts.map { it.copy(frame = RectF(frames.getValue(it.id))) },
+                reused = true,
+            )
             return
         }
         val regions =
@@ -434,11 +465,7 @@ class NativeUISnapshots(private val directory: File) : AutoCloseable {
                                 )
                             val file = File(directory, "$token-${parts.size}.png")
                             try {
-                                check(
-                                    file.outputStream().use {
-                                        image.compress(Bitmap.CompressFormat.PNG, 100, it)
-                                    }
-                                )
+                                check(file.outputStream().use { NativeUIPng.write(image, it) })
                             } catch (error: Exception) {
                                 if (image !== pixels) image.recycle()
                                 file.delete()
@@ -490,7 +517,14 @@ class NativeUISnapshots(private val directory: File) : AutoCloseable {
                         if (parts.none { it.bitmap === pixels }) pixels.recycle()
                         val previous = viewCache
                         if (sourceViews != null)
-                            viewCache = ViewCache(contentRevision, sourceViews.toMap(), parts)
+                            viewCache =
+                                ViewCache(
+                                    contentRevision,
+                                    sourceViews.toMap(),
+                                    WeakReference(window),
+                                    states.orEmpty(),
+                                    parts,
+                                )
                         previous?.parts?.forEach(::releasePixelsIfUnused)
                         deliver(parts)
                     }

@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+execFileSync('python3', ['scripts/verify-native-png.py'], { stdio: 'inherit' });
 const directory = mkdtempSync(join(tmpdir(), 'engine-package-'));
 try {
   const [packed] = JSON.parse(
@@ -25,6 +26,8 @@ try {
     'README.md',
     'WebViewNativeUIEngine.podspec',
     'WebViewNativeUIControls.podspec',
+    'native/artifacts/NativeUIPng.xcframework/Info.plist',
+    'native/licenses/dependencies.json',
     'ios/Sources/WebViewNativeUIControls/NativeUIController.swift',
     'ios/Sources/WebViewNativeUIEngine/Resources/native-ui-engine.js',
   ])

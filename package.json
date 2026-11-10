@@ -38,7 +38,9 @@
     "LICENSE",
     "docs",
     "src",
-    "WebViewNativeUIControls.podspec"
+    "WebViewNativeUIControls.podspec",
+    "native/artifacts/NativeUIPng.xcframework",
+    "native/licenses"
   ],
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.json && node scripts/build-runtime.mjs",
@@ -56,7 +58,9 @@
     "format:swift": "swiftlint version && node-swiftlint --fix --format --no-cache",
     "lint:android": "android/gradlew -p android ktfmtCheck lintRelease",
     "format:kotlin": "android/gradlew -p android ktfmtFormat",
-    "test:controls": "vitest run"
+    "test:controls": "vitest run",
+    "test:rust": "cargo test --locked --manifest-path native/png/Cargo.toml",
+    "build:native": "python3 scripts/build-native-png.py"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
