@@ -43,7 +43,7 @@ final class NativeUICoveredSnapshotsTests: XCTestCase {
         let control = CountingSnapshotView(frame: CGRect(x: 40, y: 100, width: 60, height: 44))
         web.addSubview(control); window.layoutIfNeeded()
         defer { window.isHidden = true }
-        for mode in ["legacy", "ready", "glass", "layout", "appearance", "revoked", "flapped", "late-revoked", "late-trait", "composited"] {
+        for mode in ["legacy", "ready", "unsettled", "revoked", "flapped", "late-revoked", "late-trait", "composited"] {
             let snapshots = NativeUICoveredSnapshots()
             var reads = 0
             var proofs = 0
@@ -57,7 +57,7 @@ final class NativeUICoveredSnapshotsTests: XCTestCase {
                 if mode == "late-trait", proofs == 3 {
                     control.testTraits = UITraitCollection(userInterfaceStyle: control.traitCollection.userInterfaceStyle == .dark ? .light : .dark)
                 }
-                return .init(isSettled: mode != "glass" && mode != "layout" && mode != "appearance" &&
+                return .init(isSettled: mode != "unsettled" &&
                              !(mode == "revoked" && proofs >= 2) && !(mode == "flapped" && proofs == 2) &&
                              !(mode == "late-revoked" && proofs >= 3))
             }

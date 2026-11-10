@@ -127,19 +127,20 @@ decide whether a caller is a Plain button, Glass control or another renderer.
 
 Only caller-declared settled view captures use one matching geometry sample instead
 of three. Coordinates and source traits are checked again before publishing fresh
-pixels. Missing information, composited capture, Glass, and unsettled state retain
-the standard checks. Active touches still invalidate preparation. This does not
+pixels. Missing information, composited capture and caller-declared unsettled state
+retain the standard checks. Active touches still invalidate preparation. This does not
 change `captureDelayMs`, paint acknowledgements, or handoff deadlines.
 
-Controls supplies this proof for settled, standalone Plain buttons without scroll
-bindings. A tap or keyboard/accessibility activation keeps its source View conservative;
+The Controls renderer owns component classification and supplies this proof only
+for settled, standalone Plain buttons without scroll bindings. It withholds the
+proof for Glass; Engine does not inspect or classify the material. A tap or keyboard/accessibility activation keeps its source View conservative;
 a snapshot ACK alone cannot prove UIKit's press animation has completed. This
 history follows reassociated Views without retaining retired components. A new
 View starts clean; capturing another source does not clear an interaction. Shared surfaces, unknown
 input targets, active animations and unresolved interactions
 remain conservative. Other component types retain their existing behavior.
 
-Controls and Engine are released at the same version and use the typed readiness
+Controls in this package and Engine are released at the same version and use the typed readiness
 contract directly. The optional public callback is an integration boundary for
 independent renderers; its omission is normalized to unsettled readiness before
 entering the capture scheduler. The caller must return `isSettled: false` while any relevant state is unknown,
