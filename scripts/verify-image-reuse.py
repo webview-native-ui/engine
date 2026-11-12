@@ -16,21 +16,25 @@ args = parser.parse_args()
 def run(*cmd):
     return subprocess.check_output([str(x) for x in cmd], cwd=root, text=True).strip()
 
+def replace_once(source, before, after):
+    assert source.count(before) == 1, f'Instrumentation anchor changed: {before}'
+    return source.replace(before, after, 1)
+
 with tempfile.TemporaryDirectory(prefix='native-pipeline-') as folder:
     folder = Path(folder)
     app = folder / 'Pipeline.app'
     app.mkdir()
     run('node_modules/.bin/esbuild', 'tests/integration/image-reuse/pipeline.ts', '--bundle', '--format=iife', '--outfile=' + str(app / 'pipeline.js'))
     capture = (root / 'ios/Sources/WebViewNativeUIEngine/CoveredSnapshots.swift').read_text()
-    capture = capture.replace('        let bounds = regions.reduce', '        rasterCaptures += 1\n        let bounds = regions.reduce', 1)
-    capture = capture.replace('try png.write(to: file, options: .atomic)', 'pipelineCounterLock.lock(); pngWrites += 1; pipelineCounterLock.unlock()\n                                try png.write(to: file, options: .atomic)', 1)
-    capture = capture.replace('let image = UIImage(cgImage: decoded', 'pipelineCounterLock.lock(); nativeDecodes += 1; pipelineCounterLock.unlock()\n                                let image = UIImage(cgImage: decoded', 1)
+    capture = replace_once(capture, '        let groups = NativeUICapturePlanner.plan', '        rasterCaptures += 1\n        let groups = NativeUICapturePlanner.plan')
+    capture = replace_once(capture, 'try png.write(to: file, options: .atomic)', 'pipelineCounterLock.lock(); pngWrites += 1; pipelineCounterLock.unlock()\n                                try png.write(to: file, options: .atomic)')
+    capture = replace_once(capture, 'let image = UIImage(cgImage: decoded', 'pipelineCounterLock.lock(); nativeDecodes += 1; pipelineCounterLock.unlock()\n                                let image = UIImage(cgImage: decoded')
     (folder / 'Capture.swift').write_text(capture)
     encoder = (root / 'ios/Sources/WebViewNativeUIEngine/NativeUIPngEncoder.swift').read_text()
-    encoder = encoder.replace('        let bounds = image.extent', '        pipelineCounterLock.lock(); pngEncodes += 1; pipelineCounterLock.unlock()\n        let bounds = image.extent', 1)
+    encoder = replace_once(encoder, '        let bounds = image.extent', '        pipelineCounterLock.lock(); pngEncodes += 1; pipelineCounterLock.unlock()\n        let bounds = image.extent')
     (folder / 'Encoder.swift').write_text(encoder)
     library = root / 'native/artifacts/NativeUIPng.xcframework/ios-arm64_x86_64-simulator/libnative_ui_png.a'
-    run('xcrun', '--sdk', 'iphonesimulator', 'swiftc', '-O', '-parse-as-library', '-target', platform.machine() + '-apple-ios15.0-simulator', '-module-cache-path', folder / 'modules', '-I', root / 'native/include', root / 'tests/integration/image-reuse/main.swift', folder / 'Capture.swift', folder / 'Encoder.swift', library, '-o', app / 'Pipeline')
+    run('xcrun', '--sdk', 'iphonesimulator', 'swiftc', '-O', '-parse-as-library', '-target', platform.machine() + '-apple-ios15.0-simulator', '-module-cache-path', folder / 'modules', '-I', root / 'native/include', root / 'tests/integration/image-reuse/main.swift', folder / 'Capture.swift', folder / 'Encoder.swift', root / 'ios/Sources/WebViewNativeUIEngine/CapturePlanner.swift', root / 'ios/Sources/WebViewNativeUIEngine/SnapshotEventInterception.swift', library, '-o', app / 'Pipeline')
     plist = {'CFBundleIdentifier': 'local.native.pipeline', 'CFBundleExecutable': 'Pipeline', 'CFBundleName': 'Pipeline', 'CFBundlePackageType': 'APPL', 'MinimumOSVersion': '15.0', 'UILaunchScreen': {}, 'UIApplicationSceneManifest': {'UIApplicationSupportsMultipleScenes': False, 'UISceneConfigurations': {'UIWindowSceneSessionRoleApplication': [{'UISceneConfigurationName': 'Default', 'UISceneDelegateClassName': 'Pipeline.Scene'}]}}}
     (app / 'Info.plist').write_bytes(plistlib.dumps(plist))
     run('xcrun', 'simctl', 'install', args.device, app)

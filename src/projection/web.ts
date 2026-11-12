@@ -335,7 +335,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
         })
         .catch(() => {});
       try {
-        result = await bounded(capture);
+        result = await bounded(capture, preinteraction ? captureDelayMs : 0);
       } finally {
         expired = true;
       }

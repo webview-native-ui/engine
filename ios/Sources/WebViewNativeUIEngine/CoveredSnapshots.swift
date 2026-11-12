@@ -288,10 +288,10 @@ public final class NativeUICoveredSnapshots {
                          acquisition: job, complete: finish)
         }
         job?.run = acquire
-        let wait = job != nil && delay.isFinite ? min(max(delay, 0), 60_000) / 1000 : 0
+        let wait = job != nil && delay.isFinite ? min(max(delay, 0), 2_147_483_647) / 1000 : 0
         func sample(_ previous: [String: CGRect], _ stable: Int) {
             guard !finished, job?.pixels != true else { return }
-            guard generation == stamp, !touching, CACurrentMediaTime() - start < max(1, delay / 1000 + 1) else { finish([:]); return }
+            guard generation == stamp, !touching, CACurrentMediaTime() - start < max(1, wait + 1) else { finish([:]); return }
             let current = frames()
             let count = !current.isEmpty && current == previous ? stable + 1 : 0
             if count >= 3 && CACurrentMediaTime() - start >= wait { acquire() } else { DispatchQueue.main.asyncAfter(deadline: .now() + 1.0 / 60.0) { sample(current, count) } }

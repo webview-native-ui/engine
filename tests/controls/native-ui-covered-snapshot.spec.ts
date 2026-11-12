@@ -1,3 +1,4 @@
+import { createWebProjectionSurface } from '../../src/index';
 import { getProjectionState } from '../../src/controls/shared/covered-source';
 const projectionState = getProjectionState(document);
 const { isProjectionMutation } = projectionState;
@@ -24,7 +25,7 @@ afterEach(async () => {
   document.body.replaceChildren();
 });
 const drain = () => vi.advanceTimersByTimeAsync(100);
-const fixture = async (modal?: HTMLIonModalElement) => {
+const fixture = async (modal?: HTMLIonModalElement, captureDelayMs?: number) => {
   const button = document.createElement('ion-button');
   (modal ?? document.body).append(button);
   const candidate = createCandidate(button, 'button', () => 'button');
@@ -51,12 +52,24 @@ const fixture = async (modal?: HTMLIonModalElement) => {
     blocked: vi.fn(() => false),
     modal,
   };
-  const manager = await createCoveredSnapshots(
-    document,
-    { coveredSnapshot: bridge } as unknown as NativeUIPlugin,
-    listen as NativeUIPlugin['addListener'],
-    callbacks,
-  );
+  const manager =
+    captureDelayMs !== undefined
+      ? await createWebProjectionSurface(
+          {
+            send: bridge,
+            listen: async (callback) => {
+              interaction = callback;
+              return { remove: async () => {} };
+            },
+          },
+          { namespace: 'native-ui', target: ({ element }) => element, ...callbacks, captureDelayMs },
+        )
+      : await createCoveredSnapshots(
+          document,
+          { coveredSnapshot: bridge } as unknown as NativeUIPlugin,
+          listen as NativeUIPlugin['addListener'],
+          callbacks,
+        );
   managers.push(manager);
   return {
     manager,
@@ -879,4 +892,47 @@ test('projection image load does not rearm capture but a background image load d
   document.body.dispatchEvent(new Event('load', { bubbles: true }));
   await drain();
   expect(f.bridge.mock.calls.filter(([args]) => args.action === 'prepare')).toHaveLength(before + 1);
+});
+
+test.each([6000, 61000, 2147483647])('native waiting %i ms retains the full processing timeout', async (delay) => {
+  const f = await fixture(undefined, delay);
+  let finish!: (value: ReturnType<typeof f.capture>) => void;
+  f.bridge.mockImplementation(async (args) =>
+    args.action === 'prepare'
+      ? new Promise((resolve) => {
+          finish = resolve;
+        })
+      : { shown: true },
+  );
+  f.interaction({ active: false, capturePolicy: 'preinteraction' });
+  f.manager.consider(1, [f.candidate]);
+  await vi.advanceTimersByTimeAsync(1);
+  await vi.advanceTimersByTimeAsync(delay + 100);
+  finish(f.capture());
+  await drain();
+  const started = f.manager.begin();
+  await drain();
+  await started;
+  expect(f.manager.token).toBe('image-1');
+  expect(f.bridge).not.toHaveBeenCalledWith({ action: 'release', token: 'image-1' });
+});
+
+test('native waiting still releases a completion after the processing deadline', async () => {
+  const f = await fixture(undefined, 6000);
+  let finish!: (value: ReturnType<typeof f.capture>) => void;
+  f.bridge.mockImplementation(async (args) =>
+    args.action === 'prepare'
+      ? new Promise((resolve) => {
+          finish = resolve;
+        })
+      : { shown: true },
+  );
+  f.interaction({ active: false, capturePolicy: 'preinteraction' });
+  f.manager.consider(1, [f.candidate]);
+  await vi.advanceTimersByTimeAsync(11001);
+  finish(f.capture());
+  await drain();
+  f.manager.begin();
+  expect(f.manager.token).toBeUndefined();
+  expect(f.bridge).toHaveBeenCalledWith({ action: 'release', token: 'image-1' });
 });
