@@ -69,8 +69,6 @@ Listen for `${namespace}:capture-timing` on `window`. No telemetry is sent exter
 - `stage: acknowledged`: `acquisitionToReadyMs` and, when contact preceded readiness, `contactToReadyMs`. These use one native clock through the Web decode/install acknowledgement, including the return bridge. They are upper bounds on Web usability, not proof of a displayed compositor frame.
 - `notificationToReadyMs` starts when Web receives the native contact notification; it excludes the preceding synchronous acquisition. Do not use it as total contact latency.
 
-The benchmark fixture also waits for the normal `painted` handoff acknowledgement.
-
 ## Limits
 
 Acquisition still blocks the main thread. A 25–30 ms capture is not a guaranteed single frame at 60 or 120 Hz. Ready and processing cases avoid this acquisition cost at contact.
