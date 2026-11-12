@@ -562,9 +562,9 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
       if (!pressed) schedule();
     }),
   );
-  const projectionNode = (node: Node) =>
-    node instanceof Element &&
-    !!node.closest('[data-native-ui-projection-node], style[data-native-ui-snapshot], style[data-native-ui-snapshot-base]');
+  const projectionNode = (node: Node | null) =>
+    node?.nodeType === 1 &&
+    !!(node as Element).closest('[data-native-ui-projection-node], style[data-native-ui-snapshot], style[data-native-ui-snapshot-base]');
   const changes = new MutationObserver((records) => {
     if (!preinteraction) return;
     if (
@@ -579,7 +579,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
   });
   changes.observe(doc.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
   const backgroundChanged = (event: Event) => {
-    if (preinteraction && !(event.target instanceof Node && projectionNode(event.target))) changed();
+    if (preinteraction && !projectionNode(event.target as Node | null)) changed();
   };
   doc.addEventListener('scroll', backgroundChanged, true);
   doc.addEventListener('load', backgroundChanged, true);

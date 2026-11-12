@@ -955,3 +955,57 @@ test('identical recapture keeps the decoded Web image while adopting the new cap
   await started;
   expect(f.manager.token).toBe('image-2');
 });
+
+test('iframe projection updates and image loads do not rearm capture, but author changes do', async () => {
+  const iframe = document.createElement('iframe');
+  document.body.append(iframe);
+  const doc = iframe.contentDocument!;
+  const frame = iframe.contentWindow! as Window & typeof globalThis;
+  frame.Element.prototype.getAnimations = () => [];
+  Object.defineProperty(frame.HTMLImageElement.prototype, 'decode', { configurable: true, value: vi.fn().mockResolvedValue(undefined) });
+  vi.spyOn(frame.HTMLImageElement.prototype, 'getBoundingClientRect').mockReturnValue(
+    DOMRect.fromRect({ x: 1, y: 2, width: 50, height: 40 }),
+  );
+  const button = doc.createElement('button');
+  doc.body.append(button);
+  const candidate = createCandidate(button, 'button', () => 'button');
+  let interaction: (event: WebProjectionInteraction) => void = () => {};
+  let serial = 0;
+  const send = vi.fn(async (args: { action: string }) =>
+    args.action === 'prepare'
+      ? {
+          token: `frame-${++serial}`,
+          parts: [{ ids: ['button'], url: 'file:///snapshot.png', x: 1, y: 2, width: 50, height: 40 }],
+        }
+      : { shown: true },
+  );
+  const manager = await createWebProjectionSurface(
+    {
+      send,
+      listen: async (callback) => {
+        interaction = callback;
+        return { remove: async () => {} };
+      },
+    },
+    { namespace: 'frame-ui', target: ({ element }) => element, wake: vi.fn(), blocked: () => false },
+  );
+  managers.push(manager);
+  manager.consider(1, [candidate]);
+  await drain();
+  interaction({ active: false, capturePolicy: 'preinteraction' });
+  manager.changed();
+  await drain();
+  const count = () => send.mock.calls.filter(([args]) => args.action === 'prepare').length;
+  const prepared = count();
+  const image = doc.querySelector('[data-native-ui-projection-node]')!;
+  expect(image).not.toBeInstanceOf(Element);
+  expect(image).toBeInstanceOf(frame.Element);
+  image.dispatchEvent(new frame.Event('load', { bubbles: true }));
+  await drain();
+  expect(count()).toBe(prepared);
+  doc.body.style.backgroundColor = 'blue';
+  await drain();
+  expect(count()).toBe(prepared + 1);
+  await drain();
+  expect(count()).toBe(prepared + 1);
+});
