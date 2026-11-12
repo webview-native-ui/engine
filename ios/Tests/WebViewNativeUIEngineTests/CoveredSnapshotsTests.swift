@@ -5,6 +5,77 @@ import UIKit
 @testable import WebViewNativeUIEngine
 
 final class NativeUICoveredSnapshotsTests: XCTestCase {
+    @MainActor func testExactWindowPixelsReuseFilesAndChangedPixelsReplaceThem() async throws {
+        let window = SnapshotTestWindow(frame: UIScreen.main.bounds)
+        window.rootViewController = UIViewController(); window.makeKeyAndVisible()
+        let web = try XCTUnwrap(window.rootViewController?.view)
+        let snapshots = NativeUICoveredSnapshots()
+        snapshots.observeInteractions(window) { _ in }
+        defer { snapshots.reset(); window.isHidden = true }
+        func capture(_ id: String, owner: String = "a", release: String? = nil) async -> [String: Any] {
+            await withCheckedContinuation { continuation in
+                snapshots.prepare(frames: { ["button": CGRect(x: 40, y: 100, width: 60, height: 44),
+                                             "bottom": CGRect(x: 40, y: 550, width: 60, height: 44)] },
+                                  in: web, viewportWidth: web.bounds.width, captureID: id, captureOwner: owner, delay: 500) {
+                    continuation.resume(returning: $0)
+                }
+                snapshots.pinBeforeInteraction()
+                if let release { snapshots.release(release) }
+            }
+        }
+        func url(_ result: [String: Any]) -> URL { URL(string: (result["parts"] as! [[String: Any]])[0]["url"] as! String)! }
+        let first = await capture("first")
+        let firstURL = url(first)
+        snapshots.invalidateAcquisition(owner: "a")
+        let same = await capture("same", release: first["token"] as? String)
+        XCTAssertEqual(same["reused"] as? Bool, true)
+        XCTAssertEqual(url(same), firstURL)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: firstURL.path), "In-flight reuse retains files across old-token release")
+        XCTAssertGreaterThanOrEqual(window.draws, 2, "Equality is checked after a fresh acquisition")
+        let otherOwner = await capture("other", owner: "b")
+        XCTAssertEqual(otherOwner["reused"] as? Bool, false)
+        XCTAssertNotEqual(url(otherOwner), firstURL)
+        window.pattern = true
+        let changed = await capture("changed")
+        XCTAssertEqual(changed["reused"] as? Bool, false)
+        XCTAssertNotEqual(url(changed), firstURL)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: firstURL.path), "Keep the old image until its owner releases it")
+        snapshots.release(same["token"] as! String)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: firstURL.path))
+        let changedAgain = await capture("changed-again")
+        XCTAssertEqual(changedAgain["reused"] as? Bool, true)
+        XCTAssertEqual(url(changedAgain), url(changed))
+        window.bottomPatch = true
+        let bottomChanged = await capture("bottom-changed")
+        XCTAssertEqual(bottomChanged["reused"] as? Bool, false, "A change in either crop prevents whole-capture reuse")
+    }
+
+    @MainActor func testResetDuringComparisonRejectsReuseAndReleasesItsFiles() async throws {
+        let window = SnapshotTestWindow(frame: UIScreen.main.bounds)
+        window.rootViewController = UIViewController(); window.makeKeyAndVisible()
+        let web = try XCTUnwrap(window.rootViewController?.view)
+        let snapshots = NativeUICoveredSnapshots()
+        snapshots.observeInteractions(window) { _ in }
+        defer { snapshots.reset(); window.isHidden = true }
+        let first: [String: Any] = await withCheckedContinuation { continuation in
+            snapshots.prepare(frames: { ["button": CGRect(x: 40, y: 100, width: 60, height: 44)] },
+                              in: web, viewportWidth: web.bounds.width, captureID: "first", delay: 500) {
+                continuation.resume(returning: $0)
+            }
+            snapshots.pinBeforeInteraction()
+        }
+        let file = URL(string: (first["parts"] as! [[String: Any]])[0]["url"] as! String)!
+        let done = expectation(description: "reset rejects comparison")
+        snapshots.prepare(frames: { ["button": CGRect(x: 40, y: 100, width: 60, height: 44)] },
+                          in: web, viewportWidth: web.bounds.width, captureID: "second", delay: 500) {
+            XCTAssertNil($0["token"]); done.fulfill()
+        }
+        snapshots.pinBeforeInteraction()
+        snapshots.reset()
+        await fulfillment(of: [done], timeout: 3)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
+    }
+
     func testBandsOnlySplitLargeGapsAndMergeOverlappingRegions() {
         let top = CGRect(x: 0, y: 68, width: 466, height: 68)
         let bottom = CGRect(x: 0, y: 583, width: 466, height: 95)
@@ -657,6 +728,7 @@ final class SnapshotTestWindow: UIWindow {
     var updateFlags: [Bool] = []
     var pattern = false
     var precisionPattern = false
+    var bottomPatch = false
     override func drawHierarchy(in rect: CGRect, afterScreenUpdates: Bool) -> Bool {
         draws += 1
         updateFlags.append(afterScreenUpdates)
@@ -667,6 +739,10 @@ final class SnapshotTestWindow: UIWindow {
             UIRectFill(CGRect(x: 8, y: 68, width: 72, height: 36))
             UIColor.blue.setFill()
             UIRectFill(CGRect(x: 8, y: 104, width: 72, height: 36))
+        }
+        if bottomPatch {
+            UIColor.green.setFill()
+            UIRectFill(CGRect(x: 40, y: 550, width: 20, height: 20))
         }
         if precisionPattern {
             let context = UIGraphicsGetCurrentContext()!

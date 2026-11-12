@@ -936,3 +936,22 @@ test('native waiting still releases a completion after the processing deadline',
   expect(f.manager.token).toBeUndefined();
   expect(f.bridge).toHaveBeenCalledWith({ action: 'release', token: 'image-1' });
 });
+
+test('identical recapture keeps the decoded Web image while adopting the new capture token', async () => {
+  const f = await fixture();
+  f.manager.consider(1, [f.candidate]);
+  await drain();
+  const image = document.querySelector<HTMLImageElement>('[data-native-ui-projection-node]')!;
+  Object.defineProperties(image, { complete: { value: true }, naturalWidth: { value: 50 } });
+  const decode = vi.mocked(HTMLImageElement.prototype.decode);
+  expect(decode).toHaveBeenCalledTimes(1);
+  f.bridge.mockImplementation(async (args) => (args.action === 'prepare' ? { ...f.capture(), reused: true } : { shown: true }));
+  f.manager.changed();
+  await drain();
+  expect(decode).toHaveBeenCalledTimes(1);
+  expect(document.querySelector('[data-native-ui-projection-node]')).toBe(image);
+  const started = f.manager.begin();
+  await drain();
+  await started;
+  expect(f.manager.token).toBe('image-2');
+});

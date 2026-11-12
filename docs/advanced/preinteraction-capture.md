@@ -58,6 +58,8 @@ Explicit View capture uses the same planner with a separate conservative estimat
 
 Composited captures on the enabled path use Float16 extended Display P3 and `afterScreenUpdates: false`. Background conversion retains the existing PNG16 Display P3 encoder and two-worker limit. Direct 8-bit display capture and the experimental C encoder are not adopted.
 
+After acquisition, Engine compares the valid Float16 crop pixels with the last comparable capture for the same owner and geometry, on a background queue. Exact equality reuses the existing PNG files, native images and decoded Web images; PNG conversion, native decoding and file writes are skipped. Content notifications retain the previous completed capture until its replacement is ready. Comparison buffers are limited to 32 MB per owner; unsupported or larger captures use normal processing. In-flight comparisons retain their source files through token release, while lifecycle invalidation still rejects stale completion.
+
 ## Timing
 
 Listen for `${namespace}:capture-timing` on `window`. No telemetry is sent externally.

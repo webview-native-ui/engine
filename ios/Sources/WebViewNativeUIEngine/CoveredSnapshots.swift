@@ -16,6 +16,8 @@ public final class NativeUICoveredSnapshots {
         let size: CGSize
         let webFrame: CGRect
         let parts: [Part]
+        var owner: String?
+        var rawPixels: [Data]?
         var preservesLayout = false
         var acquisitionStartedAt: CFTimeInterval?
         var contactStartedAt: CFTimeInterval?
@@ -68,6 +70,7 @@ public final class NativeUICoveredSnapshots {
     private let imageContext = CIContext()
     private let pngEncoder = NativeUIPngEncoder()
     private var captures: [String: Capture] = [:]
+    private var comparisonLeases: [URL: Int] = [:]
     private var restoration: (token: String, views: [UIImageView], entry: Bool)?
     private var hiddenControls: (token: String, restore: [() -> Void])?
     private final class Acquisition {
@@ -408,11 +411,25 @@ public final class NativeUICoveredSnapshots {
         job?.pixels = true
         job?.pixelsAt = CACurrentMediaTime()
         job?.cancel = nil
+        // Retain only the latest bounded raw baseline per owner. Compare actual crop pixels,
+        // not the unused gaps in the planner's drawing rectangles or row padding.
+        let comparePixels = job != nil && crops.reduce(0, { $0 + Int($1.image.size.width * scale) * Int($1.image.size.height * scale) * 8 }) <= 32_000_000
+        let baseline = comparePixels ? captures.values.first { previous in
+            previous.owner == job?.owner && previous.rawPixels != nil && previous.size == size && previous.webFrame == webFrame &&
+            previous.parts.count == crops.count && zip(previous.parts, crops).allSatisfy { part, crop in
+                part.ids == crop.ids && part.frame == crop.frame && part.anchorFrame == crop.anchorFrame &&
+                part.image.cgImage?.width == crop.image.cgImage?.width && part.image.cgImage?.height == crop.image.cgImage?.height &&
+                FileManager.default.fileExists(atPath: part.file.path)
+            }
+        } : nil
+        baseline?.parts.forEach { comparisonLeases[$0.file, default: 0] += 1 }
         let imageContext = self.imageContext
         let pngEncoder = self.pngEncoder
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            var parts: [Part] = []
-            do {
+            let rawPixels = comparePixels ? Self.comparisonPixels(crops.map(\.image)) : nil
+            let reused = rawPixels != nil && baseline?.rawPixels == rawPixels
+            var parts: [Part] = reused ? baseline?.parts ?? [] : []
+            if !reused { do {
                 try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
                 let workerLimit = 2
                 let smallCrops = crops.allSatisfy { ($0.image.cgImage?.width ?? 0) * ($0.image.cgImage?.height ?? 0) <= 500_000 }
@@ -450,12 +467,21 @@ public final class NativeUICoveredSnapshots {
             } catch {
                 parts.forEach { try? FileManager.default.removeItem(at: $0.file) }
                 parts = []
-            }
+            } }
             DispatchQueue.main.async {
+                defer {
+                    if let self, let baseline {
+                        baseline.parts.forEach { part in
+                            let count = (self.comparisonLeases[part.file] ?? 1) - 1
+                            self.comparisonLeases[part.file] = count > 0 ? count : nil
+                            self.removeIfUnused(part)
+                        }
+                    }
+                }
                 guard let self,
                       (job.map { $0.epoch == self.epoch && ($0 === self.acquisitions[$0.owner] || $0.pinned) } ?? (self.generation == stamp && !self.touching)),
                       webView.window === window, window.bounds.size == size, webView.convert(webView.bounds, to: window) == webFrame, parts.count == crops.count else {
-                    parts.forEach { try? FileManager.default.removeItem(at: $0.file) }
+                    if !reused { parts.forEach { try? FileManager.default.removeItem(at: $0.file) } }
                     complete([:]); return
                 }
                 if job == nil || job === self.acquisitions[job?.owner ?? ""], views != nil, let revision = contentRevision,
@@ -465,9 +491,29 @@ public final class NativeUICoveredSnapshots {
                                                views: capturedViews ?? [], geometry: geometry, parts: parts)
                     previous?.parts.forEach(self.removeIfUnused)
                 }
-                self.deliver(parts, size: size, webFrame: webFrame, ratio: ratio, acquisition: job, complete: complete)
+                self.deliver(parts, size: size, webFrame: webFrame, ratio: ratio, reused: reused, acquisition: job,
+                             rawPixels: job === self.acquisitions[job?.owner ?? ""] ? rawPixels : nil, complete: complete)
             }
         }
+    }
+
+    private static func comparisonPixels(_ images: [UIImage]) -> [Data]? {
+        var result: [Data] = []
+        for image in images {
+            guard let pixels = image.cgImage, pixels.bitsPerPixel == 64, pixels.bitsPerComponent == 16,
+                  let source = pixels.dataProvider?.data, let bytes = CFDataGetBytePtr(source),
+                  CFDataGetLength(source) >= pixels.bytesPerRow * (pixels.height - 1) + pixels.width * 8 else { return nil }
+            let rowBytes = pixels.width * 8
+            var packed = Data(count: rowBytes * pixels.height)
+            packed.withUnsafeMutableBytes { destination in
+                guard let base = destination.baseAddress else { return }
+                for row in 0..<pixels.height {
+                    memcpy(base.advanced(by: row * rowBytes), bytes.advanced(by: row * pixels.bytesPerRow), rowBytes)
+                }
+            }
+            result.append(packed)
+        }
+        return result
     }
 
     func decoded(_ token: String) -> [String: Any] {
@@ -480,9 +526,12 @@ public final class NativeUICoveredSnapshots {
     }
 
     private func deliver(_ parts: [Part], size: CGSize, webFrame: CGRect, ratio: CGFloat, reused: Bool = false,
-                         acquisition job: Acquisition? = nil, complete: ([String: Any]) -> Void) {
+                         acquisition job: Acquisition? = nil, rawPixels: [Data]? = nil, complete: ([String: Any]) -> Void) {
+        if rawPixels != nil, let owner = job?.owner {
+            for key in Array(captures.keys) where captures[key]?.owner == owner { captures[key]?.rawPixels = nil }
+        }
         let token = UUID().uuidString
-        captures[token] = Capture(size: size, webFrame: webFrame, parts: parts,
+        captures[token] = Capture(size: size, webFrame: webFrame, parts: parts, owner: job?.owner, rawPixels: rawPixels,
                                   acquisitionStartedAt: job?.acquisitionStarted, contactStartedAt: job?.contactStartedAt)
         complete(["token": token, "reused": reused, "parts": parts.map { part in
             ["ids": part.ids, "url": part.file.absoluteString,
@@ -495,7 +544,7 @@ public final class NativeUICoveredSnapshots {
     }
 
     private func removeIfUnused(_ part: Part) {
-        guard viewCache?.parts.contains(where: { $0.file == part.file }) != true,
+        guard comparisonLeases[part.file] == nil, viewCache?.parts.contains(where: { $0.file == part.file }) != true,
               !captures.values.contains(where: { $0.parts.contains(where: { $0.file == part.file }) }) else { return }
         try? FileManager.default.removeItem(at: part.file)
     }
