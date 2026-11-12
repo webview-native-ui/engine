@@ -20,7 +20,7 @@ The Window-width row-area term is an empirical predictor. It does not assert how
 
 For full-width native-scale groups, the break-even point is **0.933 million saved pixels per additional draw**. For example, at width 466 points and scale 3, that is approximately 223 points of otherwise captured vertical gap. Narrow areas use both terms. The planner evaluates complete partitions instead of independently applying a gap rule.
 
-View draws have different costs. They use the same planner with a conservative default of 7 ms per explicit-root draw plus 2.5 ms per million output pixels, preserving every root's draw order in each pass. Both measured View layouts select one pass. The per-instance `captureCostModel` and `viewCaptureCostModel` remain configurable for other renderers/devices; these defaults are not universal device calibration.
+View draws have different costs. They use the same planner with a conservative default of 7 ms per explicit-root draw plus 2.5 ms per million output pixels, preserving every root's draw order in each pass. Both measured View layouts select one pass. These internal estimates are not universal device calibration.
 
 Full-window capture was included in measurement. The implementation does not enlarge a one-pass union to the full Window: its positive cost model predicts at least as much work, and the holdout did not establish a stable benefit from that expansion.
 
@@ -50,9 +50,9 @@ All **148 Window pixel comparisons** matched the union's decoded RGBA16 P3 crops
 
 ## No application WindowHook
 
-The Engine now intercepts the concrete registered Window class's existing `sendEvent` automatically, using public Objective-C runtime APIs. It adds a local override when the method is inherited, or wraps the class's own implementation. It preserves and calls the original implementation exactly once. Nested superclass wrappers and an existing explicit `NativeUISnapshotWindow` are deduplicated.
+The Engine now intercepts the concrete registered Window class's existing `sendEvent` automatically, using public Objective-C runtime APIs. It adds a local override when the method is inherited, or wraps the class's own implementation. It preserves and calls the original implementation exactly once. Nested superclass wrappers are deduplicated.
 
-There is no Window replacement or runtime subclass/isa change. Unregistered windows do not acquire pixels. Wrappers stay installed for process lifetime to preserve other libraries' implementation chains; weak owner registration is removed on teardown. Other method replacers must chain correctly. `automaticallyInterceptsEvents = false`, set before registration, retains the explicit host-managed option.
+There is no Window replacement or runtime subclass/isa change. Unregistered windows do not acquire pixels. Wrappers stay installed for process lifetime to preserve other libraries' implementation chains; weak owner registration is removed on teardown. Other method replacers must chain correctly. `automaticallyInterceptsEvents = false`, set before registration, retains the existing idle capture behavior.
 
 An ordinary **`UIWindow`**—without subclassing or a manual call to the hook—completed all 36 production Web handoffs. The Device Hub press separately promoted a waiting request before the normal gesture notification and button action. Both resulting PNGs were byte-for-byte identical to the idle reference. That actual contact's acquisition hook took **34.36 ms**; it is a single input sample, distinct from the controlled acquisition matrix above.
 

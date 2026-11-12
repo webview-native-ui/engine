@@ -38,6 +38,8 @@ try {
   assert(!files.has('native/licenses/dependencies.json'), 'Rust notices must have one canonical source');
   for (const entry of Object.values(manifest.exports))
     for (const path of Object.values(entry)) assert(files.has(path.replace(/^\.\//, '')), path);
+  assert(![...files].some((file) => file.startsWith('docs/validation/')), 'Measurement evidence stays in Git, outside the npm archive');
+  assert(files.has('docs/advanced/preinteraction-capture.md'), 'Ship the integration guide');
   assert(!files.has('Package.swift'), 'SwiftPM resolves from Git');
   assert(![...files].some((file) => /^(tests|android|node_modules)\//.test(file)));
   execFileSync('tar', ['-xzf', archive, '-C', directory]);

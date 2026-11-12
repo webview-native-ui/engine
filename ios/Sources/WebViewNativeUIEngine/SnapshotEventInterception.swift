@@ -8,7 +8,6 @@ enum NativeUISnapshotEventInterception {
     private typealias SendEvent = @convention(c) (UIWindow, Selector, UIEvent) -> Void
     private static var installed = Set<ObjectIdentifier>()
     private static var dispatching = Set<ObjectIdentifier>()
-    private static var announced = Set<ObjectIdentifier>()
 
     static func install(in window: UIWindow) -> Bool {
         precondition(Thread.isMainThread)
@@ -24,7 +23,7 @@ enum NativeUISnapshotEventInterception {
                 original(window, selector, event)
                 return
             }
-            defer { announced.remove(identity); dispatching.remove(identity) }
+            defer { dispatching.remove(identity) }
             if NativeUICoveredSnapshots.automaticallyInterceptsEvents {
                 NativeUICoveredSnapshots.willSendEvent(event, in: window)
             }
@@ -40,9 +39,4 @@ enum NativeUISnapshotEventInterception {
         return true
     }
 
-    /// Also covers an existing explicit NativeUISnapshotWindow forwarding the same dispatch.
-    static func shouldAnnounce(in window: UIWindow) -> Bool {
-        let identity = ObjectIdentifier(window)
-        return !dispatching.contains(identity) || announced.insert(identity).inserted
-    }
 }

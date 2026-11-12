@@ -63,8 +63,8 @@ public final class NativeUICoveredSnapshots {
     }
     private static let pixelVisibility = NSMapTable<UIView, PixelVisibility>(keyOptions: .weakMemory, valueOptions: .strongMemory)
     public init() {}
-    public var captureCostModel: NativeUICaptureCostModel = .default
-    public var viewCaptureCostModel: NativeUICaptureCostModel = .viewDefault
+    var captureCostModel: NativeUICaptureCostModel = .default
+    var viewCaptureCostModel: NativeUICaptureCostModel = .viewDefault
     private let imageContext = CIContext()
     private let pngEncoder = NativeUIPngEncoder()
     private var captures: [String: Capture] = [:]
@@ -88,23 +88,15 @@ public final class NativeUICoveredSnapshots {
     private var acquisitions: [String: Acquisition] = [:]
     private var epoch = 0
     private var interaction: (([String: Any]) -> Void)?
-    /// Set before registering windows to retain explicit host-managed event forwarding.
+    /// Set before registering windows to disable pre-interaction acquisition.
     public static var automaticallyInterceptsEvents = true
     private static let observers = NSHashTable<NativeUICoveredSnapshots>.weakObjects()
     private static let enabledWindows = NSHashTable<UIWindow>.weakObjects()
 
-    /// Optional manual integration when automatic interception is disabled.
-    /// Call during window setup, then call willSendEvent before super.sendEvent.
-    public static func enablePreinteractionCapture(in window: UIWindow) {
-        precondition(Thread.isMainThread)
-        enabledWindows.add(window)
-    }
-
-    public static func willSendEvent(_ event: UIEvent, in window: UIWindow) {
+    static func willSendEvent(_ event: UIEvent, in window: UIWindow) {
         precondition(Thread.isMainThread)
         guard enabledWindows.contains(window), event.type == .touches,
               event.allTouches?.contains(where: { $0.window === window && $0.phase == .began }) == true else { return }
-        guard NativeUISnapshotEventInterception.shouldAnnounce(in: window) else { return }
         for owner in observers.allObjects where owner.window === window && !owner.touching {
             owner.pinBeforeInteraction()
         }
@@ -127,7 +119,7 @@ public final class NativeUICoveredSnapshots {
         }
     }
 
-    public func invalidateAcquisition(owner: String? = nil) {
+    func invalidateAcquisition(owner: String? = nil) {
         let retired = owner.map { acquisitions[$0].map { [$0] } ?? [] } ?? Array(acquisitions.values)
         for job in retired {
             acquisitions.removeValue(forKey: job.owner)
@@ -244,7 +236,13 @@ public final class NativeUICoveredSnapshots {
     // Gesture release can keep changing SwiftUI button bounds after touchesEnded.
     // Wait off the presentation path for unchanged rendered geometry, not a guessed delay.
     public func prepare(frames: @escaping () -> [String: CGRect], in webView: UIView, viewportWidth: CGFloat,
-                        views: [UIView]? = nil, anchorFrames: (() -> [String: CGRect])? = nil, captureID: String? = nil, captureOwner: String = "", delay: Double = 0, complete: @escaping ([String: Any]) -> Void) {
+                        views: [UIView]? = nil, anchorFrames: (() -> [String: CGRect])? = nil, complete: @escaping ([String: Any]) -> Void) {
+        prepareCapture(frames: frames, in: webView, viewportWidth: viewportWidth, views: views,
+                       anchorFrames: anchorFrames, contentRevision: nil, complete: complete)
+    }
+
+    func prepare(frames: @escaping () -> [String: CGRect], in webView: UIView, viewportWidth: CGFloat,
+                 views: [UIView]? = nil, anchorFrames: (() -> [String: CGRect])? = nil, captureID: String?, captureOwner: String = "", delay: Double = 0, complete: @escaping ([String: Any]) -> Void) {
         prepareCapture(frames: frames, in: webView, viewportWidth: viewportWidth, views: views,
                        anchorFrames: anchorFrames, contentRevision: nil, captureID: captureID, captureOwner: captureOwner, delay: delay, complete: complete)
     }
@@ -472,7 +470,7 @@ public final class NativeUICoveredSnapshots {
         }
     }
 
-    public func decoded(_ token: String) -> [String: Any] {
+    func decoded(_ token: String) -> [String: Any] {
         guard let capture = captures[token] else { return [:] }
         let now = CACurrentMediaTime()
         var result: [String: Any] = [:]
@@ -646,25 +644,5 @@ private final class SnapshotTouchObserver: UIGestureRecognizer {
     private func finish(_ touches: Set<UITouch>) {
         self.touches.subtract(touches)
         if self.touches.isEmpty { changed(false); state = .failed }
-    }
-}
-
-/// Use this window, or forward sendEvent from your existing UIWindow subclass.
-open class NativeUISnapshotWindow: UIWindow {
-    override public init(frame: CGRect) {
-        super.init(frame: frame)
-        NativeUICoveredSnapshots.enablePreinteractionCapture(in: self)
-    }
-    override public init(windowScene: UIWindowScene) {
-        super.init(windowScene: windowScene)
-        NativeUICoveredSnapshots.enablePreinteractionCapture(in: self)
-    }
-    public required init?(coder: NSCoder) {
-        super.init(coder: coder)
-        NativeUICoveredSnapshots.enablePreinteractionCapture(in: self)
-    }
-    override open func sendEvent(_ event: UIEvent) {
-        NativeUICoveredSnapshots.willSendEvent(event, in: self)
-        super.sendEvent(event)
     }
 }

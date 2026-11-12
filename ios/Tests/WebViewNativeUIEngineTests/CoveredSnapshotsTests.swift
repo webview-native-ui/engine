@@ -23,7 +23,6 @@ final class NativeUICoveredSnapshotsTests: XCTestCase {
         window.makeKeyAndVisible()
         let web = try XCTUnwrap(window.rootViewController?.view)
         let snapshots = NativeUICoveredSnapshots()
-        NativeUICoveredSnapshots.enablePreinteractionCapture(in: window)
         var events: [[String: Any]] = []
         snapshots.observeInteractions(window) { events.append($0) }
         defer { snapshots.reset(); window.isHidden = true }
@@ -53,7 +52,6 @@ final class NativeUICoveredSnapshotsTests: XCTestCase {
         window.makeKeyAndVisible()
         let web = try XCTUnwrap(window.rootViewController?.view)
         let snapshots = NativeUICoveredSnapshots()
-        NativeUICoveredSnapshots.enablePreinteractionCapture(in: window)
         snapshots.observeInteractions(window) { _ in }
         defer { snapshots.reset(); window.isHidden = true }
         let done = expectation(description: "reset retires late pixels")
@@ -72,7 +70,6 @@ final class NativeUICoveredSnapshotsTests: XCTestCase {
         window.makeKeyAndVisible()
         let web = try XCTUnwrap(window.rootViewController?.view)
         let snapshots = NativeUICoveredSnapshots()
-        NativeUICoveredSnapshots.enablePreinteractionCapture(in: window)
         var events: [[String: Any]] = []
         snapshots.observeInteractions(window) { events.append($0) }
         defer { snapshots.reset(); window.isHidden = true }

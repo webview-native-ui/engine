@@ -2,12 +2,12 @@ import UIKit
 
 /// Acquisition cost, excluding conversion/encoding, for one hierarchy draw and one million Float16 pixels.
 /// Calibrate on representative devices; a pass draws every explicit root in its original order.
-public struct NativeUICaptureCostModel {
-    public let drawMilliseconds: Double
-    public let megapixelMilliseconds: Double
-    public let rowMegapixelMilliseconds: Double
+struct NativeUICaptureCostModel {
+    let drawMilliseconds: Double
+    let megapixelMilliseconds: Double
+    let rowMegapixelMilliseconds: Double
 
-    public init(drawMilliseconds: Double, megapixelMilliseconds: Double, rowMegapixelMilliseconds: Double = 0) {
+    init(drawMilliseconds: Double, megapixelMilliseconds: Double, rowMegapixelMilliseconds: Double = 0) {
         precondition(drawMilliseconds.isFinite && drawMilliseconds > 0)
         precondition(megapixelMilliseconds.isFinite && megapixelMilliseconds > 0)
         precondition(rowMegapixelMilliseconds.isFinite && rowMegapixelMilliseconds >= 0)
@@ -18,8 +18,8 @@ public struct NativeUICaptureCostModel {
 
     // Rounded positive fit of the Device Hub matrix. The row-area term is an empirical
     // proxy for window rendering work, not a claim about UIKit's internal implementation.
-    public static let `default` = NativeUICaptureCostModel(drawMilliseconds: 7, megapixelMilliseconds: 2.5, rowMegapixelMilliseconds: 5)
-    public static let viewDefault = NativeUICaptureCostModel(drawMilliseconds: 7, megapixelMilliseconds: 2.5)
+    static let `default` = NativeUICaptureCostModel(drawMilliseconds: 7, megapixelMilliseconds: 2.5, rowMegapixelMilliseconds: 5)
+    static let viewDefault = NativeUICaptureCostModel(drawMilliseconds: 7, megapixelMilliseconds: 2.5)
 
     func cost(_ rect: CGRect, scale: CGFloat, drawsPerPass: Int, windowWidth: CGFloat? = nil, nativeScale: CGFloat? = nil) -> Double {
         let displayScale = nativeScale ?? scale
