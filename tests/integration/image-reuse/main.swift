@@ -67,10 +67,12 @@ class Screen: UIViewController, WKScriptMessageHandler, WKNavigationDelegate {
         web.frame = view.bounds
         let top = max(140, view.bounds.height * 0.3)
         let pitch = min(62, (view.bounds.height - top - 60) / 6)
+        // Keep twelve independent crops, but bound their pixels: this verifies
+        // pipeline reuse/counts within the same deadlines on CI runners.
         for (index, button) in controls.enumerated() {
             button.frame = CGRect(x: 20 + CGFloat(index % 2) * view.bounds.width / 2,
-                                  y: top + CGFloat(index / 2) * pitch, width: view.bounds.width / 2 - 30,
-                                  height: min(48, pitch - 8))
+                                  y: top + CGFloat(index / 2) * pitch, width: min(80, view.bounds.width / 2 - 30),
+                                  height: min(32, pitch - 8))
         }
     }
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
