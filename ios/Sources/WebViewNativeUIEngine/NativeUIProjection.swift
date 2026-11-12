@@ -242,13 +242,14 @@ public final class NativeUIProjection: NSObject, WKScriptMessageHandler {
                   let window = webView.window else { complete([:]); return }
             let selected = views().filter { ids.contains($0.key) }
             guard selected.count == ids.count else { complete([:]); return }
-            snapshots.observe(window) { [weak self] active in self?.reply(nil, ["active": active]) }
+            snapshots.observeInteractions(window) { [weak self] event in self?.reply(nil, event) }
             snapshots.prepare(frames: { [weak self, weak webView] in
                 guard let self, let webView, self.visible, self.canCapture() else { return [:] }
                 let current = self.views()
                 guard selected.allSatisfy({ current[$0.key] === $0.value && !$0.value.isHidden && $0.value.window != nil }) else { return [:] }
                 return selected.mapValues { $0.convert($0.bounds, to: webView) }
-            }, in: webView, viewportWidth: width) { [weak self] result in
+            }, in: webView, viewportWidth: width, captureID: request["captureID"] as? String,
+                              captureOwner: request["captureOwner"] as? String ?? "", delay: request["captureDelayMs"] as? Double ?? 0) { [weak self] result in
                 if let self, let token = result["token"] as? String, let parts = result["parts"] as? [[String: Any]] {
                     self.captured[token] = selected
                     let scale = webView.bounds.width / width
@@ -320,9 +321,11 @@ public final class NativeUIProjection: NSObject, WKScriptMessageHandler {
                 }
             }
             complete([:])
+        case "decoded": complete(snapshots.decoded(token))
         case "painted": snapshots.retireCopy(token); complete(["shown": !snapshots.identifiers(for: token).isEmpty])
         case "restored": snapshots.retireCopy(token, entry: false); complete([:])
         case "release": snapshots.release(token); captured.removeValue(forKey: token); anchors.removeValue(forKey: token); complete([:])
+        case "change": snapshots.invalidateAcquisition(owner: request["captureOwner"] as? String); complete([:])
         case "reset": snapshots.reset(); captured.removeAll(); anchors.removeAll(); complete([:])
         default: complete([:])
         }

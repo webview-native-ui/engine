@@ -3,6 +3,7 @@ const projectionState = getProjectionState(document);
 const { isProjectionMutation } = projectionState;
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { createCoveredSnapshots } from '../../src/controls/shared/covered-snapshot';
+import type { WebProjectionInteraction } from '../../src/types';
 import type { NativeUIPlugin } from '../../src/controls/definitions';
 import { createCandidate } from '../../src/controls/shared/candidate';
 let managers: Awaited<ReturnType<typeof createCoveredSnapshots>>[];
@@ -33,7 +34,7 @@ const fixture = async (modal?: HTMLIonModalElement) => {
     modal.append(clone);
     projectionState.setTarget(button, clone);
   }
-  let interaction: (event: { active: boolean }) => void = () => {};
+  let interaction: (event: WebProjectionInteraction) => void = () => {};
   let serial = 0;
   const capture = () => ({
     token: `image-${++serial}`,
@@ -57,7 +58,16 @@ const fixture = async (modal?: HTMLIonModalElement) => {
     callbacks,
   );
   managers.push(manager);
-  return { manager, button, candidate, bridge, capture, callbacks, touch: (active: boolean) => interaction({ active }) };
+  return {
+    manager,
+    button,
+    candidate,
+    bridge,
+    capture,
+    callbacks,
+    interaction: (event: WebProjectionInteraction) => interaction(event),
+    touch: (active: boolean) => interaction({ active }),
+  };
 };
 test('missing image keeps Web projection without waiting or capturing', async () => {
   const f = await fixture();
@@ -754,4 +764,119 @@ test('retained engine image mutations do not invalidate captures, but author cha
   expect(observer.takeRecords().map(isProjectionMutation)).toEqual([true, true, true, true, true, true, false, false, false]);
   observer.disconnect();
   source.remove();
+});
+
+test('pre-dispatch pins a processing capture across contact and DOM revisions', async () => {
+  const f = await fixture();
+  let finish!: (value: ReturnType<typeof f.capture>) => void;
+  f.bridge.mockImplementation(async (args) =>
+    args.action === 'prepare'
+      ? new Promise((resolve) => {
+          finish = resolve;
+        })
+      : { shown: true },
+  );
+  f.manager.consider(1, [f.candidate]);
+  await vi.advanceTimersByTimeAsync(1);
+  f.interaction({ active: false, capturePolicy: 'preinteraction' });
+  await vi.advanceTimersByTimeAsync(1);
+  const request = f.bridge.mock.calls.find(([args]) => args.action === 'prepare')![0] as { captureID: string; captureDelayMs: number };
+  expect(request.captureDelayMs).toBe(50);
+  f.interaction({ active: true, captureID: request.captureID, captureState: 'processing' });
+  f.touch(true); // The ordinary gesture observer must not unpin the early selection.
+  f.manager.consider(2, [f.candidate]);
+  f.manager.begin();
+  finish(f.capture());
+  await drain();
+  expect(f.manager.token).toBe('image-1');
+  expect(f.bridge.mock.calls.filter(([args]) => args.action === 'prepare')).toHaveLength(1);
+});
+
+test('source invalidation rejects a pinned late completion', async () => {
+  const f = await fixture();
+  let finish!: (value: ReturnType<typeof f.capture>) => void;
+  f.bridge.mockImplementation(async (args) =>
+    args.action === 'prepare'
+      ? new Promise((resolve) => {
+          finish = resolve;
+        })
+      : { shown: true },
+  );
+  f.manager.consider(1, [f.candidate]);
+  await vi.advanceTimersByTimeAsync(1);
+  f.interaction({ active: false, capturePolicy: 'preinteraction' });
+  await vi.advanceTimersByTimeAsync(1);
+  const request = f.bridge.mock.calls.find(([args]) => args.action === 'prepare')![0] as { captureID: string };
+  f.interaction({ active: true, captureID: request.captureID });
+  f.manager.invalidate(true);
+  finish(f.capture());
+  await drain();
+  f.manager.begin();
+  expect(f.manager.token).toBeUndefined();
+  expect(f.bridge).toHaveBeenCalledWith({ action: 'release', token: 'image-1' });
+});
+
+test('a newer capture wins when an obsolete conversion completes last', async () => {
+  const f = await fixture();
+  const finishes: ((value: ReturnType<typeof f.capture>) => void)[] = [];
+  f.bridge.mockImplementation(async (args) =>
+    args.action === 'prepare'
+      ? new Promise((resolve) => {
+          finishes.push(resolve);
+        })
+      : { shown: true },
+  );
+  f.manager.consider(1, [f.candidate]);
+  await vi.advanceTimersByTimeAsync(1);
+  f.interaction({ active: false, capturePolicy: 'preinteraction' });
+  await vi.advanceTimersByTimeAsync(1);
+  f.manager.consider(2, [f.candidate]);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(finishes).toHaveLength(2);
+  finishes[1](f.capture());
+  await vi.advanceTimersByTimeAsync(1);
+  finishes[0](f.capture());
+  await vi.advanceTimersByTimeAsync(1);
+  f.manager.begin();
+  expect(f.manager.token).toBe('image-1');
+  expect(f.bridge).toHaveBeenCalledWith({ action: 'release', token: 'image-2' });
+});
+
+test('background DOM changes rearm capture while projection mutations do not loop', async () => {
+  const f = await fixture();
+  f.manager.consider(1, [f.candidate]);
+  await vi.advanceTimersByTimeAsync(1);
+  f.interaction({ active: false, capturePolicy: 'preinteraction' });
+  await drain();
+  const before = f.bridge.mock.calls.filter(([args]) => args.action === 'prepare').length;
+  await drain();
+  expect(f.bridge.mock.calls.filter(([args]) => args.action === 'prepare')).toHaveLength(before);
+  document.body.style.backgroundColor = 'blue';
+  await drain();
+  expect(f.bridge.mock.calls.filter(([args]) => args.action === 'prepare')).toHaveLength(before + 1);
+});
+
+test('another surface contact cannot steal this surface capture ownership', async () => {
+  const f = await fixture();
+  f.manager.consider(1, [f.candidate]);
+  await drain();
+  f.interaction({ active: false, capturePolicy: 'preinteraction' });
+  f.interaction({ active: true, captureID: 'foreign', captureOwner: 'another-surface' });
+  f.manager.begin();
+  expect(f.manager.token).toBe('image-1');
+});
+
+test('projection image load does not rearm capture but a background image load does', async () => {
+  const f = await fixture();
+  f.manager.consider(1, [f.candidate]);
+  await drain();
+  f.interaction({ active: false, capturePolicy: 'preinteraction' });
+  const before = f.bridge.mock.calls.filter(([args]) => args.action === 'prepare').length;
+  const image = document.querySelector('[data-native-ui-projection-node]')!;
+  image.dispatchEvent(new Event('load', { bubbles: true }));
+  await drain();
+  expect(f.bridge.mock.calls.filter(([args]) => args.action === 'prepare')).toHaveLength(before);
+  document.body.dispatchEvent(new Event('load', { bubbles: true }));
+  await drain();
+  expect(f.bridge.mock.calls.filter(([args]) => args.action === 'prepare')).toHaveLength(before + 1);
 });

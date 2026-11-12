@@ -29,6 +29,9 @@ try {
     'native/artifacts/NativeUIPng.xcframework/Info.plist',
     'ios/Sources/WebViewNativeUIEngine/Resources/NativeUIPngLicenses/dependencies.json',
     'ios/Sources/WebViewNativeUIControls/NativeUIController.swift',
+    'ios/Sources/WebViewNativeUIEngine/CoveredSnapshots.swift',
+    'ios/Sources/WebViewNativeUIEngine/CapturePlanner.swift',
+    'ios/Sources/WebViewNativeUIEngine/SnapshotEventInterception.swift',
     'ios/Sources/WebViewNativeUIEngine/Resources/native-ui-engine.js',
   ])
     assert(files.has(file), file);

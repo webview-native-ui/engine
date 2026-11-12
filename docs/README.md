@@ -75,3 +75,5 @@ Use these to check contracts and supported behavior while implementing either ro
 
 [Development and releases](maintenance.md) covers repository structure, local
 verification, CI and publication. It is not required for consuming the Engine.
+
+For the optional iOS Window hook, state ownership and timing events, see [pre-interaction capture](advanced/preinteraction-capture.md).

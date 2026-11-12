@@ -1,0 +1,121 @@
+{
+  "calibrationSamples": 1824,
+  "verificationSamples": 456,
+  "warmupPerPlan": 2,
+  "windowFit": {
+    "drawMilliseconds": 7.006939007486169,
+    "rowMegapixelMilliseconds": 4.977502166743313,
+    "megapixelMilliseconds": 2.4848657224905333
+  },
+  "productionWindowCoefficients": {
+    "drawMilliseconds": 7,
+    "rowMegapixelMilliseconds": 5,
+    "megapixelMilliseconds": 2.5
+  },
+  "fullWidthBreakEvenSavedMegapixels": 0.9333333333333333,
+  "verifiedWindowPixelComparisons": 148,
+  "holdout": [
+    {
+      "scenario": "bars",
+      "scale": 3,
+      "passes": 2,
+      "selectedP50": 14.533583336742595,
+      "selectedP90": 17.59072499262402,
+      "unionP50": 22.899312505614944,
+      "oracleP50": 14.533583336742595,
+      "regretMs": 0.0
+    },
+    {
+      "scenario": "four",
+      "scale": 3,
+      "passes": 1,
+      "selectedP50": 26.36387500388082,
+      "selectedP90": 28.62866249633953,
+      "unionP50": 26.36387500388082,
+      "oracleP50": 26.36387500388082,
+      "regretMs": 0.0
+    },
+    {
+      "scenario": "medium-width",
+      "scale": 3,
+      "passes": 2,
+      "selectedP50": 12.528833336546086,
+      "selectedP90": 13.405779167078435,
+      "unionP50": 18.667833333893213,
+      "oracleP50": 12.528833336546086,
+      "regretMs": 0.0
+    },
+    {
+      "scenario": "narrow",
+      "scale": 3,
+      "passes": 2,
+      "selectedP50": 12.46066666499246,
+      "selectedP90": 13.919070837437175,
+      "unionP50": 17.697687500913162,
+      "oracleP50": 12.46066666499246,
+      "regretMs": 0.0
+    },
+    {
+      "scenario": "three-wide",
+      "scale": 3,
+      "passes": 3,
+      "selectedP50": 21.462770833750255,
+      "selectedP90": 22.983520835987292,
+      "unionP50": 25.747458334080875,
+      "oracleP50": 21.462770833750255,
+      "regretMs": 0.0
+    },
+    {
+      "scenario": "two-clusters",
+      "scale": 3,
+      "passes": 2,
+      "selectedP50": 19.68297916755546,
+      "selectedP90": 21.06855416786857,
+      "unionP50": 24.827958332025446,
+      "oracleP50": 19.68297916755546,
+      "regretMs": 0.0
+    },
+    {
+      "scenario": "view-grid",
+      "scale": 3,
+      "passes": 1,
+      "selectedP50": 87.98735416348791,
+      "selectedP90": 105.94440415879944,
+      "unionP50": 87.98735416348791,
+      "oracleP50": 87.98735416348791,
+      "regretMs": 0.0
+    },
+    {
+      "scenario": "view-two",
+      "scale": 3,
+      "passes": 1,
+      "selectedP50": 18.620583330630325,
+      "selectedP90": 22.02023333084071,
+      "unionP50": 18.620583330630325,
+      "oracleP50": 18.620583330630325,
+      "regretMs": 0.0
+    }
+  ],
+  "viewNonrepeatability": [
+    {
+      "scenario": "view-two",
+      "plan": 1,
+      "repeatUnionMatchesInitial": false
+    },
+    {
+      "scenario": "view-two",
+      "plan": 2,
+      "repeatUnionMatchesInitial": false
+    },
+    {
+      "scenario": "view-grid",
+      "plan": 1,
+      "repeatUnionMatchesInitial": false
+    },
+    {
+      "scenario": "view-grid",
+      "plan": 2,
+      "repeatUnionMatchesInitial": false
+    }
+  ]
+}

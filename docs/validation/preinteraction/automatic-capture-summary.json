@@ -1,0 +1,136 @@
+{
+  "trials": 36,
+  "warmupPerRequestedMode": 2,
+  "stages": {
+    "ready": {
+      "n": 14,
+      "mainThreadMs": {
+        "n": 14,
+        "p50": 0.00020833249436691403,
+        "p90": 0.0002500019036233425
+      },
+      "contactToReadyMs": null,
+      "acquisitionToReadyMs": {
+        "n": 14,
+        "p50": 57.92066665890161,
+        "p90": 62.4457541591255
+      },
+      "requestToReadyMs": {
+        "n": 14,
+        "p50": 111.0,
+        "p90": 116.10000000000001
+      },
+      "decodeAndInstallMs": {
+        "n": 14,
+        "p50": 8.0,
+        "p90": 9.700000000000001
+      }
+    },
+    "waiting": {
+      "n": 10,
+      "mainThreadMs": {
+        "n": 10,
+        "p50": 18.165729168686084,
+        "p90": 19.789362502342556
+      },
+      "contactToReadyMs": {
+        "n": 10,
+        "p50": 49.053687500418164,
+        "p90": 50.63726249500178
+      },
+      "acquisitionToReadyMs": {
+        "n": 10,
+        "p50": 49.05093750130618,
+        "p90": 50.634162487403955
+      },
+      "requestToReadyMs": {
+        "n": 10,
+        "p50": 50.0,
+        "p90": 51.0
+      },
+      "decodeAndInstallMs": {
+        "n": 10,
+        "p50": 8.0,
+        "p90": 9.0
+      }
+    },
+    "processing": {
+      "n": 6,
+      "mainThreadMs": {
+        "n": 6,
+        "p50": 0.00022917083697393537,
+        "p90": 0.0004374960553832352
+      },
+      "contactToReadyMs": {
+        "n": 6,
+        "p50": 2.479041664628312,
+        "p90": 5.678458335751202
+      },
+      "acquisitionToReadyMs": {
+        "n": 6,
+        "p50": 59.45339582831366,
+        "p90": 62.434624996967614
+      },
+      "requestToReadyMs": {
+        "n": 6,
+        "p50": 113.0,
+        "p90": 116.0
+      },
+      "decodeAndInstallMs": {
+        "n": 6,
+        "p50": 8.0,
+        "p90": 8.5
+      }
+    }
+  },
+  "idle": {
+    "waitMs": {
+      "n": 10,
+      "p50": 54.19947917107493,
+      "p90": 55.110941668681335
+    },
+    "acquisitionMs": {
+      "n": 10,
+      "p50": 26.914979171124287,
+      "p90": 28.282775002298877
+    },
+    "processingMs": {
+      "n": 10,
+      "p50": 22.643625001364853,
+      "p90": 26.115687501442153
+    },
+    "waitAndAcquisitionMs": {
+      "n": 10,
+      "p50": 80.56941667746287,
+      "p90": 83.54962499870453
+    }
+  },
+  "manual": {
+    "matchesIdlePNGBytes": true,
+    "timing": {
+      "acquisitionMs": 34.33929166931193,
+      "processingMs": 43.64341667678673,
+      "waitMs": 26311.497749993578
+    },
+    "events": [
+      {
+        "active": false,
+        "capturePolicy": "preinteraction"
+      },
+      {
+        "active": true,
+        "captureID": "manual",
+        "captureOwner": "",
+        "captureState": "waiting",
+        "mainThreadMs": 34.359083336312324
+      },
+      {
+        "active": true
+      },
+      {
+        "active": false
+      }
+    ],
+    "actionDelivered": true
+  }
+}

@@ -34,7 +34,27 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: io.ionic.nativeui.hostedtests
         GENERATE_INFOPLIST_FILE: YES
         SWIFT_VERSION: '5.0'
+  WebViewNativeUIEngineTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [WebViewNativeUIEngineTests]
+    dependencies:
+      - target: TestHost
+      - package: NativeUI
+        product: WebViewNativeUIEngine
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.ionic.nativeui.enginehostedtests
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_VERSION: '5.0'
 schemes:
+  NativeUIEngineHostedTests:
+    build:
+      targets:
+        TestHost: all
+        WebViewNativeUIEngineTests: [test]
+    test:
+      targets: [WebViewNativeUIEngineTests]
   NativeUIControlsHostedTests:
     build:
       targets:

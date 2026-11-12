@@ -5,6 +5,129 @@ import UIKit
 @testable import WebViewNativeUIEngine
 
 final class NativeUICoveredSnapshotsTests: XCTestCase {
+    func testBandsOnlySplitLargeGapsAndMergeOverlappingRegions() {
+        let top = CGRect(x: 0, y: 68, width: 466, height: 68)
+        let bottom = CGRect(x: 0, y: 583, width: 466, height: 95)
+        XCTAssertEqual(NativeUICapturePlanner.plan([bottom, top], scale: 3), [top, bottom])
+        let overlap = CGRect(x: 10, y: 90, width: 30, height: 30)
+        XCTAssertEqual(NativeUICapturePlanner.plan([top, overlap, bottom], scale: 3), [top, bottom])
+        let vertical = CGRect(x: 10, y: 68, width: 30, height: 610)
+        XCTAssertEqual(NativeUICapturePlanner.plan([top, vertical, bottom], scale: 3), [top.union(bottom)])
+        let dense = CGRect(x: 0, y: 200, width: 466, height: 300)
+        XCTAssertEqual(NativeUICapturePlanner.plan([top, dense], scale: 3), [top.union(dense)])
+    }
+
+    @MainActor func testContactPromotesWaitingCaptureAndKeepsPixelsAcrossInvalidation() async throws {
+        let window = SnapshotTestWindow(frame: UIScreen.main.bounds)
+        window.rootViewController = UIViewController()
+        window.makeKeyAndVisible()
+        let web = try XCTUnwrap(window.rootViewController?.view)
+        let snapshots = NativeUICoveredSnapshots()
+        NativeUICoveredSnapshots.enablePreinteractionCapture(in: window)
+        var events: [[String: Any]] = []
+        snapshots.observeInteractions(window) { events.append($0) }
+        defer { snapshots.reset(); window.isHidden = true }
+        var results: [[String: Any]] = []
+        let done = expectation(description: "pinned pixels finish conversion")
+        snapshots.prepare(frames: { ["button": CGRect(x: 40, y: 100, width: 60, height: 44)] },
+                          in: web, viewportWidth: web.bounds.width, captureID: "first", delay: 500) { result in
+            results.append(result); done.fulfill()
+        }
+        XCTAssertEqual(window.draws, 0)
+        snapshots.pinBeforeInteraction()
+        XCTAssertEqual(window.draws, 1)
+        XCTAssertEqual(window.updateFlags, [false])
+        XCTAssertEqual(events.last?["captureID"] as? String, "first")
+        XCTAssertEqual(events.last?["captureState"] as? String, "waiting")
+        snapshots.invalidateAcquisition()
+        await fulfillment(of: [done], timeout: 3)
+        XCTAssertEqual(results.count, 1)
+        XCTAssertNotNil(results.first?["token"])
+        XCTAssertNotNil(results.first?["timing"])
+        XCTAssertEqual(window.draws, 1, "Pinning never recaptures immutable pixels")
+    }
+
+    @MainActor func testResetRejectsPinnedProcessingPixels() async throws {
+        let window = SnapshotTestWindow(frame: UIScreen.main.bounds)
+        window.rootViewController = UIViewController()
+        window.makeKeyAndVisible()
+        let web = try XCTUnwrap(window.rootViewController?.view)
+        let snapshots = NativeUICoveredSnapshots()
+        NativeUICoveredSnapshots.enablePreinteractionCapture(in: window)
+        snapshots.observeInteractions(window) { _ in }
+        defer { snapshots.reset(); window.isHidden = true }
+        let done = expectation(description: "reset retires late pixels")
+        snapshots.prepare(frames: { ["button": CGRect(x: 40, y: 100, width: 60, height: 44)] },
+                          in: web, viewportWidth: web.bounds.width, captureID: "first", delay: 500) { result in
+            XCTAssertNil(result["token"]); done.fulfill()
+        }
+        snapshots.pinBeforeInteraction()
+        snapshots.reset()
+        await fulfillment(of: [done], timeout: 3)
+    }
+
+    @MainActor func testOwnersAreIndependentAndReadyContactDoesNotDrawAgain() async throws {
+        let window = SnapshotTestWindow(frame: UIScreen.main.bounds)
+        window.rootViewController = UIViewController()
+        window.makeKeyAndVisible()
+        let web = try XCTUnwrap(window.rootViewController?.view)
+        let snapshots = NativeUICoveredSnapshots()
+        NativeUICoveredSnapshots.enablePreinteractionCapture(in: window)
+        var events: [[String: Any]] = []
+        snapshots.observeInteractions(window) { events.append($0) }
+        defer { snapshots.reset(); window.isHidden = true }
+        let cancelled = expectation(description: "only owner A is cancelled")
+        let ready = expectation(description: "owner B finishes")
+        snapshots.prepare(frames: { ["a": CGRect(x: 40, y: 100, width: 60, height: 44)] },
+                          in: web, viewportWidth: web.bounds.width, captureID: "A", captureOwner: "a", delay: 500) { result in
+            XCTAssertNil(result["token"]); cancelled.fulfill()
+        }
+        var token = ""
+        snapshots.prepare(frames: { ["b": CGRect(x: 40, y: 200, width: 60, height: 44)] },
+                          in: web, viewportWidth: web.bounds.width, captureID: "B", captureOwner: "b") { result in
+            token = result["token"] as? String ?? ""; ready.fulfill()
+        }
+        snapshots.invalidateAcquisition(owner: "a")
+        await fulfillment(of: [cancelled, ready], timeout: 3)
+        XCTAssertFalse(token.isEmpty)
+        XCTAssertEqual(window.draws, 1)
+        snapshots.pinBeforeInteraction()
+        XCTAssertEqual(window.draws, 1)
+        XCTAssertEqual(events.last?["captureOwner"] as? String, "b")
+        XCTAssertNotNil(snapshots.decoded(token)["contactToReadyMs"])
+    }
+
+    @MainActor func testExplicitViewCapturesUsePlannerAndKeepSharedRootOrder() async throws {
+        let window = SnapshotTestWindow(frame: UIScreen.main.bounds)
+        window.rootViewController = UIViewController(); window.makeKeyAndVisible()
+        let web = try XCTUnwrap(window.rootViewController?.view)
+        let red = CountingSnapshotView(frame: CGRect(x: 40, y: 100, width: 100, height: 44))
+        let blue = CountingSnapshotView(frame: CGRect(x: 70, y: 110, width: 100, height: 44)); blue.color = .blue
+        let green = CountingSnapshotView(frame: CGRect(x: 40, y: 550, width: 100, height: 44)); green.color = .green
+        for root in [red, blue, green] { web.addSubview(root) }
+        let split = NativeUICoveredSnapshots(), union = NativeUICoveredSnapshots()
+        split.viewCaptureCostModel = .init(drawMilliseconds: 0.01, megapixelMilliseconds: 100)
+        union.viewCaptureCostModel = .init(drawMilliseconds: 1000, megapixelMilliseconds: 0.01)
+        defer { split.reset(); union.reset(); window.isHidden = true }
+        func capture(_ snapshots: NativeUICoveredSnapshots) async throws -> [Data] {
+            let result: [String: Any] = await withCheckedContinuation { continuation in
+                snapshots.prepare(frames: { ["red": red.frame, "blue": blue.frame, "green": green.frame] },
+                                  in: web, viewportWidth: web.bounds.width, views: [red, blue, green]) {
+                    continuation.resume(returning: $0)
+                }
+            }
+            return try XCTUnwrap(result["parts"] as? [[String: Any]]).map {
+                let url = try XCTUnwrap(URL(string: try XCTUnwrap($0["url"] as? String)))
+                return try Data(contentsOf: url)
+            }
+        }
+        let splitPixels = try await capture(split)
+        XCTAssertEqual(red.draws, 2)
+        let unionPixels = try await capture(union)
+        XCTAssertEqual(red.draws, 3)
+        XCTAssertEqual(splitPixels, unionPixels, "Grouping must preserve alpha and overlapping root draw order")
+    }
+
     @MainActor func testOverlappingRootsInvalidateRelativeMovementButReuseCommonTranslation() async throws {
         let window = SnapshotTestWindow(frame: UIScreen.main.bounds)
         window.rootViewController = UIViewController()
@@ -533,9 +656,13 @@ final class NativeUICoveredSnapshotsTests: XCTestCase {
 // Swift package tests have no hosted application scene. Supply deterministic
 // pixels here; actual UIKit capture is also verified in hosted device integration tests.
 final class SnapshotTestWindow: UIWindow {
+    var draws = 0
+    var updateFlags: [Bool] = []
     var pattern = false
     var precisionPattern = false
     override func drawHierarchy(in rect: CGRect, afterScreenUpdates: Bool) -> Bool {
+        draws += 1
+        updateFlags.append(afterScreenUpdates)
         UIColor.white.setFill()
         UIRectFill(rect)
         if pattern {

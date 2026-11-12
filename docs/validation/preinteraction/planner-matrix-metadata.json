@@ -1,0 +1,17 @@
+{
+  "device": "6F9075AF-F614-4B37-9B95-EC889255C0BF",
+  "sdk": "27.1",
+  "hashes": {
+    "ios/Sources/WebViewNativeUIEngine/CoveredSnapshots.swift": "7e28b3830502a869f48579a2b2bb44aa7a2387daaa647c364355190de5352cfc",
+    "ios/Sources/WebViewNativeUIEngine/NativeUIPngEncoder.swift": "e76709ca1e43fa6fdd35b8dc48d1f861400d1a34d35f7a55b15ce22e46342d86",
+    "ios/Sources/WebViewNativeUIEngine/CapturePlanner.swift": "7c6510f6af9761682aecc7479b802af63d288ee92521368a50a1fe9f4ca8df4b",
+    "tests/performance/preinteraction/production.swift": "b6e64f24f1edd386180236df8a55b0af8e566f4460221629e115a2973340f368",
+    "tests/performance/preinteraction/planner.swift": "5dd4db0ba0e88d11352a52e6e813d29d13b1eb2d5d9aabb5933a2c7a6a62e02a",
+    "tests/performance/preinteraction/production.ts": "70fb794b625c19059a0215a19378d990b1201b1894f999704647fc3b09f12ba2",
+    "src/projection/web.ts": "96b9f38aa455b8c7e13c9d5bd9ab260b13617d6054d48a8e0c45c81bf1dda96b",
+    "src/types.ts": "7b1569f6c466dfa60505fc7db9d37fb342a83ce76c9c4bf9d1438f6e4c354892"
+  },
+  "rawSHA256": "42bd7707c50c5c52e0a05aec1819082b76cca247dbca27b28550daabc3f89836",
+  "originalRawSHA256": "42bd7707c50c5c52e0a05aec1819082b76cca247dbca27b28550daabc3f89836",
+  "pathsSanitized": true
+}

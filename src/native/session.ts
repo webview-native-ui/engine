@@ -6,7 +6,7 @@ import { projectionAncestors } from '../dom/geometry.js';
 import { createWebProjection, type WebProjection } from '../projection/web.js';
 import { createWebProjectionScope } from '../projection/scope.js';
 import { bindProjectionEvents, type ProjectionDestination } from '../projection/events.js';
-import type { Frame, ScrollPlacement, ListenerHandle, WebProjectionRequest } from '../types.js';
+import type { Frame, ScrollPlacement, ListenerHandle, WebProjectionRequest, WebProjectionInteraction } from '../types.js';
 
 /** Serialized by the native library. One registration owns one fixed fallback container. */
 export interface NativeSessionConfiguration {
@@ -46,7 +46,7 @@ export interface NativeSessionBridge {
       | { action: 'values' }
       | { action: 'destination'; destination: ProjectionDestination },
   ): Promise<any>;
-  listen(listener: (event: { active: boolean; precovered?: string }) => void): Promise<ListenerHandle>;
+  listen(listener: (event: WebProjectionInteraction & { precovered?: string }) => void): Promise<ListenerHandle>;
 }
 
 /** Native startup calls this; application code does not initialize or wrap the plugin. */
