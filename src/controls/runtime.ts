@@ -1250,8 +1250,16 @@ export const createRuntime = async (
     const remove = overlayMonitor.subscribe(callback);
     listeners.signal.addEventListener('abort', remove, { once: true });
   };
+  const endUncoveredProjections = () => {
+    // An unrelated dismissal or sheet change must not cancel a background's
+    // pending image request. Restore only surfaces exposed by the current stack.
+    for (const owner of projectionSurfaces.keys()) {
+      const target = owner === doc ? doc.documentElement : (owner as HTMLIonModalElement);
+      if (!overlayMonitor.isCovered(target)) projectionSurfaces.get(owner)?.end();
+    }
+  };
   onOverlay(({ element, phase, event }) => {
-    if (phase === 'change') projectionSurfaces.end();
+    if (phase === 'change') endUncoveredProjections();
     if (!element) {
       schedule();
       return;
@@ -1282,7 +1290,7 @@ export const createRuntime = async (
         const modal = element as HTMLIonModalElement;
         void projectionSurfaces.delete(modal);
       }
-      projectionSurfaces.end();
+      endUncoveredProjections();
       schedule();
     }
   });
