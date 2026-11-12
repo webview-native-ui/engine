@@ -54,9 +54,7 @@ The Window estimate is:
 
 For full-width regions at native scale, one additional draw needs to save approximately **0.933 megapixels** to pay off. Narrow rectangles use both area terms, rather than treating the output buffer size as the only work.
 
-Explicit View capture uses the same planner with a separate conservative estimate: `7 × root draws + 2.5 × outputMegapixels`. Each pass preserves every root's original draw order. The measured View fixtures both select one pass. The internal cost estimates are based on the documented Device Hub measurements. Acquisition stays serial on main.
-
-See [planner measurements and automatic interception validation](https://github.com/webview-native-ui/engine/blob/main/docs/validation/preinteraction/capture-planner.md) for fit, independent layout verification and limitations.
+Explicit View capture uses the same planner with a separate conservative estimate: `7 × root draws + 2.5 × outputMegapixels`. Each pass preserves every root's original draw order. The measured View fixtures both select one pass. The internal cost estimates are based on Device Hub measurements. Acquisition stays serial on main.
 
 Composited captures on the enabled path use Float16 extended Display P3 and `afterScreenUpdates: false`. Background conversion retains the existing PNG16 Display P3 encoder and two-worker limit. Direct 8-bit display capture and the experimental C encoder are not adopted.
 
@@ -69,7 +67,7 @@ Listen for `${namespace}:capture-timing` on `window`. No telemetry is sent exter
 - `stage: acknowledged`: `acquisitionToReadyMs` and, when contact preceded readiness, `contactToReadyMs`. These use one native clock through the Web decode/install acknowledgement, including the return bridge. They are upper bounds on Web usability, not proof of a displayed compositor frame.
 - `notificationToReadyMs` starts when Web receives the native contact notification; it excludes the preceding synchronous acquisition. Do not use it as total contact latency.
 
-The fixture also waits for the normal `painted` handoff acknowledgement. See [production measurements](https://github.com/webview-native-ui/engine/blob/main/docs/validation/preinteraction/capture-planner.md).
+The benchmark fixture also waits for the normal `painted` handoff acknowledgement.
 
 ## Limits
 
