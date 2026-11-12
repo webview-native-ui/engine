@@ -204,6 +204,61 @@ final class NativeUIProjectionTests: XCTestCase {
         XCTAssertNil(first.layer.mask, "Teardown must release the previously bound view")
     }
 
+    @MainActor func testPinnedCaptureKeepsAcquisitionGeometryAcrossProcessing() async throws {
+        let configuration = WKWebViewConfiguration()
+        configuration.setURLSchemeHandler(ProjectionFixture(), forURLScheme: "capacitor")
+        configuration.userContentController.addUserScript(WKUserScript(source: """
+          window.testPolicy = false;
+          window.testCapture = null;
+          window.testRestore = null;
+          window.WebViewNativeUIEngineRuntime = {
+            start: async () => {}, stop: () => {},
+            receive: (id, key, value) => {
+              if (value.capturePolicy) testPolicy = true;
+              if (key?.endsWith(':prepare')) testCapture = value;
+              if (key?.endsWith(':restore')) testRestore = value;
+            }
+          };
+        """, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        let window = SnapshotTestWindow(frame: UIScreen.main.bounds)
+        let owner = UIViewController(); window.rootViewController = owner; window.makeKeyAndVisible()
+        let web = WKWebView(frame: window.bounds, configuration: configuration)
+        owner.view.addSubview(web)
+        let original = CGRect(x: 20, y: 100, width: 100, height: 40)
+        let native = UIView(frame: original); owner.view.addSubview(native)
+        let snapshots = NativeUICoveredSnapshots()
+        let registration = try NativeUIProjection(webView: web, plugin: "Fixture", projectionSelector: "#absent",
+                                                  snapshots: snapshots, view: { native })
+        defer { registration.destroy(); window.isHidden = true }
+        web.load(URLRequest(url: URL(string: "capacitor://localhost/fixture")!))
+        try await wait(web, "document.readyState === 'complete' && location.host === 'localhost'")
+        let script = try XCTUnwrap(configuration.userContentController.userScripts.last?.source)
+        let id = String(script[try XCTUnwrap(script.range(of: "nativeUI[0-9A-F]{32}", options: .regularExpression))])
+        _ = try await web.evaluateJavaScript("""
+          webkit.messageHandlers['\(id)'].postMessage(JSON.stringify({key:'\(id):anchor:prepare',request:{
+            action:'prepare',ids:['view'],viewportWidth:\(web.bounds.width),
+            captureID:'anchor',captureOwner:'anchor',captureDelayMs:60000
+          }})); true
+        """)
+        try await wait(web, "testPolicy")
+        snapshots.pinBeforeInteraction()
+        XCTAssertEqual(window.draws, 1)
+        // Simulate a press changing native geometry after immutable pixels exist,
+        // while background conversion is still pending its main-queue completion.
+        native.frame = CGRect(x: 30, y: 110, width: 120, height: 48)
+        try await wait(web, "testCapture?.token !== undefined")
+        native.frame = original
+        _ = try await web.evaluateJavaScript("""
+          webkit.messageHandlers['\(id)'].postMessage(JSON.stringify({key:'\(id):anchor:restore',request:{
+            action:'restore',token:testCapture.token,parts:testCapture.parts,viewportWidth:\(web.bounds.width)
+          }})); true
+        """)
+        try await wait(web, "testRestore !== null")
+        let shown = try await web.evaluateJavaScript("testRestore.shown") as? Bool
+        XCTAssertEqual(shown, true, "Return geometry must be compared with the captured frame, not processing-time press geometry")
+        XCTAssertEqual(native.frame, original)
+    }
+
     @MainActor func testPreparedImageReturnsToNativeAfterWebProjection() async throws {
         let configuration = WKWebViewConfiguration()
         configuration.setURLSchemeHandler(ProjectionFixture(), forURLScheme: "capacitor")

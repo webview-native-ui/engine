@@ -261,8 +261,8 @@ public final class NativeUIController: NSObject, UITabBarDelegate {
         DispatchQueue.main.async { [weak self] in
             guard let self, let webView = self.webView else { reject("WebView unavailable"); return }
             if (options["action"] as? String) == "prepare", let window = webView.window {
-                self.coveredSnapshots.observe(window) { [weak self] active in
-                    self?.notifyListeners("snapshotInteraction", ["active": active])
+                self.coveredSnapshots.observeInteractions(window) { [weak self] event in
+                    self?.notifyListeners("snapshotInteraction", event)
                 }
             }
             let measure: (Set<String>, Int) -> [String: CGRect] = { [weak self, weak webView] ids, revision in

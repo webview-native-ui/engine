@@ -34,12 +34,23 @@ export interface PreparedWebProjection {
   token: string;
   /** Native guarantees that these immutable image files were reused without changing their pixels. */
   reused?: boolean;
+  timing?: { waitMs: number; acquisitionMs: number; processingMs: number };
   /** anchorBounds locates the renderer’s layout anchor within the image crop, in viewport units. */
   parts: (Frame & { ids: string[]; url: string; anchorBounds?: Frame })[];
 }
 /** Each action carries only the fields required by that phase of handoff. */
 export type WebProjectionRequest =
-  | { action: 'prepare'; revision: number; viewportWidth: number; ids: string[]; captureMode?: 'view'; imageSurface?: 'web' }
+  | {
+      action: 'prepare';
+      revision: number;
+      viewportWidth: number;
+      ids: string[];
+      captureMode?: 'view';
+      imageSurface?: 'web';
+      captureID?: string;
+      captureOwner?: string;
+      captureDelayMs?: number;
+    }
   | {
       action: 'cover';
       token: string;
@@ -49,20 +60,34 @@ export type WebProjectionRequest =
     }
   | { action: 'restore'; token: string; viewportWidth: number; parts: (Frame & { ids: string[] })[] }
   | { action: 'prepared' | 'painted' | 'restored' | 'release'; token: string }
-  | { action: 'reset' };
+  | { action: 'decoded'; token: string }
+  | { action: 'reset' }
+  | { action: 'change'; captureOwner?: string };
 /** Empty prepare results mean capture is unavailable; a partial capture is never valid. */
 export type WebProjectionResult<Request extends WebProjectionRequest> = Request extends { action: 'prepare' }
   ? PreparedWebProjection | { token?: never; parts?: never }
   : Request extends { action: 'cover' | 'restore' }
     ? { shown: boolean }
-    : Request extends { action: 'painted' }
-      ? { shown: boolean } | void
-      : void;
+    : Request extends { action: 'decoded' }
+      ? { acquisitionToReadyMs?: number; contactToReadyMs?: number }
+      : Request extends { action: 'painted' }
+        ? { shown: boolean } | void
+        : void;
 export interface ListenerHandle {
   remove(): Promise<void> | void;
 }
 /** Implement with the owning plugin's existing ordered transport. No engine plugin registration. */
+export interface WebProjectionInteraction {
+  active: boolean;
+  /** Advertised only by a native window with a pre-dispatch hook. */
+  capturePolicy?: 'preinteraction';
+  /** Immutable pixels selected before this contact changes the screen. */
+  captureID?: string;
+  captureOwner?: string;
+  captureState?: 'waiting' | 'processing';
+  mainThreadMs?: number;
+}
 export interface WebProjectionTransport {
   send<Request extends WebProjectionRequest>(request: Request): Promise<WebProjectionResult<Request>>;
-  listen(listener: (event: { active: boolean }) => void): Promise<ListenerHandle>;
+  listen(listener: (event: WebProjectionInteraction) => void): Promise<ListenerHandle>;
 }

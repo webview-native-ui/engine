@@ -3,7 +3,7 @@ import CoreImage
 import ImageIO
 
 /// Immutable, locally served images of controls that will be covered by a Web overlay.
-/// Native interaction invalidates in-flight captures before Web receives the activation.
+/// Pixel acquisition stays on main; immutable pixels survive an explicitly pinned interaction.
 public final class NativeUICoveredSnapshots {
     private struct Part {
         let ids: [String]
@@ -13,10 +13,15 @@ public final class NativeUICoveredSnapshots {
         let file: URL
     }
     private struct Capture {
+        weak var window: UIWindow?
         let size: CGSize
         let webFrame: CGRect
         let parts: [Part]
+        var owner: String?
+        var rawPixels: [Data]?
         var preservesLayout = false
+        var acquisitionStartedAt: CFTimeInterval?
+        var contactStartedAt: CFTimeInterval?
     }
     private final class CachedView {
         weak var view: UIView?
@@ -61,11 +66,71 @@ public final class NativeUICoveredSnapshots {
     }
     private static let pixelVisibility = NSMapTable<UIView, PixelVisibility>(keyOptions: .weakMemory, valueOptions: .strongMemory)
     public init() {}
+    var captureCostModel: NativeUICaptureCostModel = .default
+    var viewCaptureCostModel: NativeUICaptureCostModel = .viewDefault
     private let imageContext = CIContext()
     private let pngEncoder = NativeUIPngEncoder()
     private var captures: [String: Capture] = [:]
+    private var comparisonLeases: [URL: Int] = [:]
     private var restoration: (token: String, views: [UIImageView], entry: Bool)?
     private var hiddenControls: (token: String, restore: [() -> Void])?
+    private final class Acquisition {
+        let id: String
+        let epoch: Int
+        let owner: String
+        let started = CACurrentMediaTime()
+        var acquisitionStarted: CFTimeInterval?
+        var pixelsAt: CFTimeInterval?
+        var pixels = false
+        var pinned = false
+        var contactStartedAt: CFTimeInterval?
+        var run: (() -> Void)?
+        var cancel: (() -> Void)?
+        var token: String?
+        init(_ id: String, owner: String, epoch: Int) { self.id = id; self.owner = owner; self.epoch = epoch }
+    }
+    private var acquisitions: [String: Acquisition] = [:]
+    private var epoch = 0
+    private var interaction: (([String: Any]) -> Void)?
+    /// Set before registering windows to disable pre-interaction acquisition.
+    public static var automaticallyInterceptsEvents = true
+    private static let observers = NSHashTable<NativeUICoveredSnapshots>.weakObjects()
+    private static let enabledWindows = NSHashTable<UIWindow>.weakObjects()
+
+    static func willSendEvent(_ event: UIEvent, in window: UIWindow) {
+        precondition(Thread.isMainThread)
+        guard enabledWindows.contains(window), event.type == .touches,
+              event.allTouches?.contains(where: { $0.window === window && $0.phase == .began }) == true else { return }
+        for owner in observers.allObjects where owner.window === window && !owner.touching {
+            owner.pinBeforeInteraction()
+        }
+    }
+
+    // Separate from UIEvent plumbing so lifecycle/race cases can be tested deterministically.
+    func pinBeforeInteraction() {
+        guard !touching else { return }
+        for job in Array(acquisitions.values) {
+            job.pinned = true
+            job.contactStartedAt = CACurrentMediaTime()
+            if let token = job.token { captures[token]?.contactStartedAt = job.contactStartedAt }
+            let state = job.pixels ? "processing" : "waiting"
+            let start = CACurrentMediaTime()
+            job.run?()
+            if job.pixels {
+                interaction?(["active": true, "captureID": job.id, "captureOwner": job.owner, "captureState": state,
+                              "mainThreadMs": (CACurrentMediaTime() - start) * 1000])
+            }
+        }
+    }
+
+    func invalidateAcquisition(owner: String? = nil) {
+        let retired = owner.map { acquisitions[$0].map { [$0] } ?? [] } ?? Array(acquisitions.values)
+        for job in retired {
+            acquisitions.removeValue(forKey: job.owner)
+            if !job.pinned { job.cancel?() }
+        }
+    }
+
     private var generation = 0
     private var touching = false
     private weak var window: UIWindow?
@@ -96,10 +161,14 @@ public final class NativeUICoveredSnapshots {
                 let measured = initial ?? frames(expected, revision)
                 initial = nil
                 return Set(measured.keys) == expected ? measured : [:]
-            }, in: webView, viewportWidth: width, views: selected, anchorFrames: anchorFrames, contentRevision: viewCapture ? revision : nil, complete: { result in
+            }, in: webView, viewportWidth: width, views: selected, anchorFrames: anchorFrames, contentRevision: viewCapture ? revision : nil,
+                           captureID: request["captureID"] as? String, captureOwner: request["captureOwner"] as? String ?? "",
+                           delay: request["captureDelayMs"] as? Double ?? 0, complete: { result in
                 if let token = result["token"] as? String { self.captures[token]?.preservesLayout = request["imageSurface"] as? String == "web" }
                 complete(result)
             })
+        case "decoded":
+            complete(decoded(token))
         case "cover":
             let ids = identifiers(for: token)
             let destination = request["parts"] == nil ? nil : projectionFrames(request, in: webView)
@@ -114,6 +183,7 @@ public final class NativeUICoveredSnapshots {
         case "painted", "restored":
             retireCopy(token, entry: request["action"] as? String == "painted")
             complete(request["action"] as? String == "painted" ? ["shown": captures[token] != nil] : [:])
+        case "change": invalidateAcquisition(owner: request["captureOwner"] as? String); complete([:])
         case "release": release(token); complete([:])
         case "reset": reset(); complete([:])
         default: complete([:])
@@ -142,10 +212,21 @@ public final class NativeUICoveredSnapshots {
 
     public var covering: Bool { coveringToken != nil }
 
+    public func observeInteractions(_ window: UIWindow, changed: @escaping ([String: Any]) -> Void) {
+        observe(window) { active in changed(["active": active]) }
+        interaction = changed
+        if Self.enabledWindows.contains(window) { changed(["active": touching, "capturePolicy": "preinteraction"]) }
+    }
+
     public func observe(_ window: UIWindow, changed: @escaping (Bool) -> Void) {
         guard self.window !== window else { return }
+        if self.window != nil { reset() }
         if let observer { self.window?.removeGestureRecognizer(observer) }
         self.window = window
+        if Self.automaticallyInterceptsEvents && NativeUISnapshotEventInterception.install(in: window) {
+            Self.enabledWindows.add(window)
+        }
+        Self.observers.add(self)
         let observer = SnapshotTouchObserver { [weak self] active in
             guard let self else { return }
             self.touching = active
@@ -164,29 +245,68 @@ public final class NativeUICoveredSnapshots {
                        anchorFrames: anchorFrames, contentRevision: nil, complete: complete)
     }
 
+    func prepare(frames: @escaping () -> [String: CGRect], in webView: UIView, viewportWidth: CGFloat,
+                 views: [UIView]? = nil, anchorFrames: (() -> [String: CGRect])? = nil, captureID: String?, captureOwner: String = "", delay: Double = 0, complete: @escaping ([String: Any]) -> Void) {
+        prepareCapture(frames: frames, in: webView, viewportWidth: viewportWidth, views: views,
+                       anchorFrames: anchorFrames, contentRevision: nil, captureID: captureID, captureOwner: captureOwner, delay: delay, complete: complete)
+    }
+
     private func prepareCapture(frames: @escaping () -> [String: CGRect], in webView: UIView, viewportWidth: CGFloat,
                                 views: [UIView]?, anchorFrames: (() -> [String: CGRect])?, contentRevision: Int?,
-                                complete: @escaping ([String: Any]) -> Void) {
+                                captureID: String? = nil, captureOwner: String = "", delay: Double = 0, complete: @escaping ([String: Any]) -> Void) {
         let stamp = generation
         let start = CACurrentMediaTime()
+        let job = captureID.flatMap { id in
+            webView.window.map { Self.enabledWindows.contains($0) && !id.isEmpty ? Acquisition(id, owner: captureOwner, epoch: epoch) : nil } ?? nil
+        }
+        if let job {
+            invalidateAcquisition(owner: job.owner)
+            acquisitions[job.owner] = job
+        }
+        var finished = false
+        let finish: ([String: Any]) -> Void = { result in
+            guard !finished else { return }
+            finished = true
+            job?.cancel = nil
+            job?.run = nil
+            var response = result
+            if let token = result["token"] as? String {
+                job?.token = token
+                if let job, let acquisitionStart = job.acquisitionStarted, let pixelsAt = job.pixelsAt {
+                    response["timing"] = ["waitMs": (acquisitionStart - job.started) * 1000,
+                                          "acquisitionMs": (pixelsAt - acquisitionStart) * 1000,
+                                          "processingMs": (CACurrentMediaTime() - pixelsAt) * 1000]
+                }
+            }
+            complete(response)
+        }
+        job?.cancel = { finish([:]) }
+        let acquire: () -> Void = { [weak self, weak webView] in
+            guard let self, let webView, !finished, job?.pixels != true else { return }
+            job?.run = nil
+            let current = frames()
+            self.capture(frames: current, anchorFrames: anchorFrames?() ?? [:], in: webView,
+                         viewportWidth: viewportWidth, views: views, contentRevision: contentRevision,
+                         acquisition: job, complete: finish)
+        }
+        job?.run = acquire
+        let wait = job != nil && delay.isFinite ? min(max(delay, 0), 2_147_483_647) / 1000 : 0
         func sample(_ previous: [String: CGRect], _ stable: Int) {
-            guard generation == stamp, !touching, CACurrentMediaTime() - start < 1 else { complete([:]); return }
+            guard !finished, job?.pixels != true else { return }
+            guard generation == stamp, !touching, CACurrentMediaTime() - start < max(1, wait + 1) else { finish([:]); return }
             let current = frames()
             let count = !current.isEmpty && current == previous ? stable + 1 : 0
-            if count >= 3 {
-                capture(frames: current, anchorFrames: anchorFrames?() ?? [:], in: webView, viewportWidth: viewportWidth, views: views, contentRevision: contentRevision, complete: complete)
-            } else {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0 / 60.0) { sample(current, count) }
-            }
+            if count >= 3 && CACurrentMediaTime() - start >= wait { acquire() } else { DispatchQueue.main.asyncAfter(deadline: .now() + 1.0 / 60.0) { sample(current, count) } }
         }
         sample([:], 0)
     }
 
     private func capture(frames: [String: CGRect], anchorFrames: [String: CGRect], in webView: UIView, viewportWidth: CGFloat,
-                         views: [UIView]?, contentRevision: Int?, complete: @escaping ([String: Any]) -> Void) {
+                         views: [UIView]?, contentRevision: Int?, acquisition job: Acquisition? = nil, complete: @escaping ([String: Any]) -> Void) {
         guard !touching, let window = webView.window, !frames.isEmpty,
               viewportWidth > 0, webView.bounds.width > 0 else { complete([:]); return }
         let stamp = generation
+        job?.acquisitionStarted = CACurrentMediaTime()
         let scale = window.screen.scale
         let ratio = viewportWidth / webView.bounds.width
         let size = window.bounds.size
@@ -235,23 +355,14 @@ public final class NativeUICoveredSnapshots {
                 Part(ids: part.ids, frame: window.convert(region.rect, to: webView), anchorFrame: region.anchorFrame,
                      image: part.image, file: part.file)
             }
-            deliver(parts, size: size, webFrame: webFrame, ratio: ratio, reused: true, complete: complete)
+            job?.pixels = true
+            job?.pixelsAt = CACurrentMediaTime()
+            deliver(parts, window: window, size: size, webFrame: webFrame, ratio: ratio, reused: true, acquisition: job, complete: complete)
             return
         }
         let capturedViews = views?.map(CachedView.init)
-        let bounds = regions.reduce(CGRect.null) { $0.union($1.rect) }
-        // Preserve wide-gamut precision during capture. Encode to integer 16-bit
-        // Display P3 only off the presentation path, without a Canvas conversion.
         guard let space = CGColorSpace(name: CGColorSpace.extendedDisplayP3),
-              let outputSpace = CGColorSpace(name: CGColorSpace.displayP3),
-              let context = CGContext(data: nil, width: Int(bounds.width * scale), height: Int(bounds.height * scale),
-                                      bitsPerComponent: 16, bytesPerRow: 0, space: space,
-                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue |
-                                        CGBitmapInfo.floatComponents.rawValue | CGBitmapInfo.byteOrder16Little.rawValue)
-        else { complete([:]); return }
-        context.translateBy(x: 0, y: bounds.height * scale)
-        context.scaleBy(x: scale, y: -scale)
-        context.translateBy(x: -bounds.minX, y: -bounds.minY)
+              let outputSpace = CGColorSpace(name: CGColorSpace.displayP3) else { complete([:]); return }
         // View capture preserves transparent pixels outside the renderer's own material.
         // The default window capture retains composited backdrop effects.
         var roots: [UIView]?
@@ -262,31 +373,64 @@ public final class NativeUICoveredSnapshots {
                 seen.insert(ObjectIdentifier(view)).inserted && !views.contains { $0 !== view && view.isDescendant(of: $0) }
             }
         }
-        UIGraphicsPushContext(context)
-        var drawn = true
-        if let roots {
-            for root in roots {
-                drawn = root.drawHierarchy(in: root.convert(root.bounds, to: window), afterScreenUpdates: true) && drawn
+        let groups = NativeUICapturePlanner.plan(regions.map(\.rect), scale: scale,
+                                                 drawsPerPass: roots?.count ?? 1, model: roots == nil ? captureCostModel : viewCaptureCostModel,
+                                                 windowWidth: window.bounds.width, nativeScale: window.screen.scale)
+        var images: [(CGRect, CGImage)] = []
+        for area in groups {
+            guard let context = CGContext(data: nil, width: Int((area.width * scale).rounded()), height: Int((area.height * scale).rounded()),
+                                          bitsPerComponent: 16, bytesPerRow: 0, space: space,
+                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue |
+                                            CGBitmapInfo.floatComponents.rawValue | CGBitmapInfo.byteOrder16Little.rawValue)
+            else { complete([:]); return }
+            context.translateBy(x: 0, y: area.height * scale)
+            context.scaleBy(x: scale, y: -scale)
+            context.translateBy(x: -area.minX, y: -area.minY)
+            UIGraphicsPushContext(context)
+            var drawn = true
+            if let roots {
+                for root in roots {
+                    drawn = root.drawHierarchy(in: root.convert(root.bounds, to: window), afterScreenUpdates: true) && drawn
+                }
+            } else {
+                drawn = window.drawHierarchy(in: window.bounds, afterScreenUpdates: job == nil)
             }
-        } else {
-            drawn = window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+            UIGraphicsPopContext()
+            guard drawn, let pixels = context.makeImage() else { complete([:]); return }
+            images.append((area, pixels))
         }
-        UIGraphicsPopContext()
-        guard drawn, let pixels = context.makeImage() else { complete([:]); return }
         let token = UUID().uuidString
         let directory = self.directory
         let crops = regions.compactMap { region -> (ids: [String], frame: CGRect, anchorFrame: CGRect, image: UIImage)? in
-            let crop = CGRect(x: (region.rect.minX - bounds.minX) * scale, y: (region.rect.minY - bounds.minY) * scale,
+            guard let (area, pixels) = images.first(where: { $0.0.contains(region.rect) }) else { return nil }
+            let crop = CGRect(x: (region.rect.minX - area.minX) * scale, y: (region.rect.minY - area.minY) * scale,
                               width: region.rect.width * scale, height: region.rect.height * scale)
             guard let part = pixels.cropping(to: crop) else { return nil }
             return (region.ids, window.convert(region.rect, to: webView), region.anchorFrame, UIImage(cgImage: part, scale: scale, orientation: .up))
         }
         guard crops.count == regions.count else { complete([:]); return }
+        job?.pixels = true
+        job?.pixelsAt = CACurrentMediaTime()
+        job?.cancel = nil
+        // Retain only the latest bounded raw baseline per owner. Compare actual crop pixels,
+        // not the unused gaps in the planner's drawing rectangles or row padding.
+        let comparePixels = job != nil && crops.reduce(0, { $0 + Int($1.image.size.width * scale) * Int($1.image.size.height * scale) * 8 }) <= 32_000_000
+        let baseline = comparePixels ? captures.values.first { previous in
+            previous.owner == job?.owner && previous.rawPixels != nil && previous.window === window && previous.size == size && previous.webFrame == webFrame &&
+            previous.parts.count == crops.count && zip(previous.parts, crops).allSatisfy { part, crop in
+                part.ids == crop.ids && part.frame == crop.frame && part.anchorFrame == crop.anchorFrame &&
+                part.image.cgImage?.width == crop.image.cgImage?.width && part.image.cgImage?.height == crop.image.cgImage?.height &&
+                FileManager.default.fileExists(atPath: part.file.path)
+            }
+        } : nil
+        baseline?.parts.forEach { comparisonLeases[$0.file, default: 0] += 1 }
         let imageContext = self.imageContext
         let pngEncoder = self.pngEncoder
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            var parts: [Part] = []
-            do {
+            let rawPixels = comparePixels ? Self.comparisonPixels(crops.map(\.image)) : nil
+            let reused = rawPixels != nil && baseline?.rawPixels == rawPixels
+            var parts: [Part] = reused ? baseline?.parts ?? [] : []
+            if !reused { do {
                 try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
                 let workerLimit = 2
                 let smallCrops = crops.allSatisfy { ($0.image.cgImage?.width ?? 0) * ($0.image.cgImage?.height ?? 0) <= 500_000 }
@@ -324,29 +468,72 @@ public final class NativeUICoveredSnapshots {
             } catch {
                 parts.forEach { try? FileManager.default.removeItem(at: $0.file) }
                 parts = []
-            }
+            } }
             DispatchQueue.main.async {
-                guard let self, self.generation == stamp, !self.touching,
-                      window.bounds.size == size, webView.convert(webView.bounds, to: window) == webFrame, parts.count == crops.count else {
-                    parts.forEach { try? FileManager.default.removeItem(at: $0.file) }
+                defer {
+                    if let self, let baseline {
+                        baseline.parts.forEach { part in
+                            let count = (self.comparisonLeases[part.file] ?? 1) - 1
+                            self.comparisonLeases[part.file] = count > 0 ? count : nil
+                            self.removeIfUnused(part)
+                        }
+                    }
+                }
+                guard let self,
+                      (job.map { $0.epoch == self.epoch && ($0 === self.acquisitions[$0.owner] || $0.pinned) } ?? (self.generation == stamp && !self.touching)),
+                      webView.window === window, window.bounds.size == size, webView.convert(webView.bounds, to: window) == webFrame, parts.count == crops.count else {
+                    if !reused { parts.forEach { try? FileManager.default.removeItem(at: $0.file) } }
                     complete([:]); return
                 }
-                if views != nil, let revision = contentRevision,
+                if job == nil || job === self.acquisitions[job?.owner ?? ""], views != nil, let revision = contentRevision,
                    parts.reduce(0, { $0 + ($1.image.cgImage?.width ?? 0) * ($1.image.cgImage?.height ?? 0) }) <= 8_000_000 {
                     let previous = self.viewCache
                     self.viewCache = ViewCache(revision: revision, window: window, scale: scale,
                                                views: capturedViews ?? [], geometry: geometry, parts: parts)
                     previous?.parts.forEach(self.removeIfUnused)
                 }
-                self.deliver(parts, size: size, webFrame: webFrame, ratio: ratio, complete: complete)
+                self.deliver(parts, window: window, size: size, webFrame: webFrame, ratio: ratio, reused: reused, acquisition: job,
+                             rawPixels: job === self.acquisitions[job?.owner ?? ""] ? rawPixels : nil, complete: complete)
             }
         }
     }
 
-    private func deliver(_ parts: [Part], size: CGSize, webFrame: CGRect, ratio: CGFloat, reused: Bool = false,
-                         complete: ([String: Any]) -> Void) {
+    private static func comparisonPixels(_ images: [UIImage]) -> [Data]? {
+        var result: [Data] = []
+        for image in images {
+            guard let pixels = image.cgImage, pixels.bitsPerPixel == 64, pixels.bitsPerComponent == 16,
+                  let source = pixels.dataProvider?.data, let bytes = CFDataGetBytePtr(source),
+                  CFDataGetLength(source) >= pixels.bytesPerRow * (pixels.height - 1) + pixels.width * 8 else { return nil }
+            let rowBytes = pixels.width * 8
+            var packed = Data(count: rowBytes * pixels.height)
+            packed.withUnsafeMutableBytes { destination in
+                guard let base = destination.baseAddress else { return }
+                for row in 0..<pixels.height {
+                    memcpy(base.advanced(by: row * rowBytes), bytes.advanced(by: row * pixels.bytesPerRow), rowBytes)
+                }
+            }
+            result.append(packed)
+        }
+        return result
+    }
+
+    func decoded(_ token: String) -> [String: Any] {
+        guard let capture = captures[token] else { return [:] }
+        let now = CACurrentMediaTime()
+        var result: [String: Any] = [:]
+        if let start = capture.acquisitionStartedAt { result["acquisitionToReadyMs"] = (now - start) * 1000 }
+        if let start = capture.contactStartedAt { result["contactToReadyMs"] = (now - start) * 1000 }
+        return result
+    }
+
+    private func deliver(_ parts: [Part], window: UIWindow, size: CGSize, webFrame: CGRect, ratio: CGFloat, reused: Bool = false,
+                         acquisition job: Acquisition? = nil, rawPixels: [Data]? = nil, complete: ([String: Any]) -> Void) {
+        if rawPixels != nil, let owner = job?.owner {
+            for key in Array(captures.keys) where captures[key]?.owner == owner { captures[key]?.rawPixels = nil }
+        }
         let token = UUID().uuidString
-        captures[token] = Capture(size: size, webFrame: webFrame, parts: parts)
+        captures[token] = Capture(window: window, size: size, webFrame: webFrame, parts: parts, owner: job?.owner, rawPixels: rawPixels,
+                                  acquisitionStartedAt: job?.acquisitionStarted, contactStartedAt: job?.contactStartedAt)
         complete(["token": token, "reused": reused, "parts": parts.map { part in
             ["ids": part.ids, "url": part.file.absoluteString,
              "x": part.frame.minX * ratio, "y": part.frame.minY * ratio,
@@ -358,7 +545,7 @@ public final class NativeUICoveredSnapshots {
     }
 
     private func removeIfUnused(_ part: Part) {
-        guard viewCache?.parts.contains(where: { $0.file == part.file }) != true,
+        guard comparisonLeases[part.file] == nil, viewCache?.parts.contains(where: { $0.file == part.file }) != true,
               !captures.values.contains(where: { $0.parts.contains(where: { $0.file == part.file }) }) else { return }
         try? FileManager.default.removeItem(at: part.file)
     }
@@ -419,7 +606,7 @@ public final class NativeUICoveredSnapshots {
     // No capture, encoding, or decoding runs here.
     public func restore(in webView: UIView, token explicitToken: String? = nil, frames: [String: CGRect]? = nil, entry: Bool = false) -> Bool {
         guard let token = explicitToken ?? coveringToken, let capture = captures[token], let window = webView.window,
-              window.bounds.size == capture.size, webView.convert(webView.bounds, to: window) == capture.webFrame else { return false }
+              capture.window === window, window.bounds.size == capture.size, webView.convert(webView.bounds, to: window) == capture.webFrame else { return false }
         if let frames, capture.parts.contains(where: { part in !part.ids.allSatisfy { frames[$0] != nil } }) { return false }
         clearRestoration()
         let views = capture.parts.map { part in
@@ -456,10 +643,15 @@ public final class NativeUICoveredSnapshots {
         if hiddenControls?.token == token { restoreControls() }
         if coveringToken == token { coveringToken = nil }
         if restoration?.token == token { clearRestoration() }
+        for job in Array(acquisitions.values) where job.token == token { invalidateAcquisition(owner: job.owner) }
         captures.removeValue(forKey: token)?.parts.forEach(removeIfUnused)
     }
 
     public func reset() {
+        epoch += 1
+        invalidateAcquisition()
+        interaction = nil
+        Self.observers.remove(self)
         restoreControls()
         if let observer { window?.removeGestureRecognizer(observer) }
         observer = nil

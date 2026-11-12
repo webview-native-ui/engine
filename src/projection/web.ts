@@ -44,6 +44,7 @@ export interface WebProjectionOptions {
 
 interface Prepared {
   data: CoveredSnapshot;
+  captureID?: string;
   images: HTMLImageElement[];
   sources: HTMLElement[];
   targets: HTMLElement[];
@@ -53,6 +54,8 @@ interface Prepared {
   viewport: string;
   revision: number;
   layout: string;
+  ownership: string[];
+  displayable: boolean;
 }
 
 /** One pixel handoff; requests and renderer source ownership remain independent. */
@@ -123,7 +126,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     if (!sourceIDs.has(source)) sourceIDs.set(source, ++sourceSerial);
     return sourceIDs.get(source)!;
   };
-  const signature = (candidates: Candidate[]) =>
+  const signature = (candidates: Candidate[], ownershipOnly = false) =>
     JSON.stringify(
       candidates.map((candidate) => {
         if (!scopeIDs.has(candidate.scope)) scopeIDs.set(candidate.scope, ++scopeSerial);
@@ -149,7 +152,9 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
           : relative;
         return [
           scopeIDs.get(candidate.scope),
-          layout(reusable, !!callbacks.opaqueUnderlay || !!callbacks.imageSurface),
+          ownershipOnly
+            ? [candidate.control.id, candidate.control.kind, candidate.control.placement]
+            : layout(reusable, !!callbacks.opaqueUnderlay || !!callbacks.imageSurface),
           (candidate.sources ?? [candidate.element]).map(sourceIdentity),
         ];
       }),
@@ -214,7 +219,15 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
   let visualRevision = 0;
   let preparedVisualRevision = -1;
   let stopped = false;
-  let flight = false;
+  let flight = 0;
+  let preinteraction = false;
+  let captureSerial = 0;
+  let requestedGeneration = -1;
+  let ownerGeneration = 0;
+  let pinnedCaptureID: string | undefined;
+  let contactAt = 0;
+  const reportTiming = (detail: Record<string, unknown>) =>
+    win.dispatchEvent(new CustomEvent(`${scope.namespace}:capture-timing`, { detail }));
   let latest: { revision: number; candidates: Candidate[] } | undefined;
   const pruneIdleImages = () => {
     const targets = new Set(latest?.candidates.map((candidate) => candidate.scope.element));
@@ -285,7 +298,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     if (
       stopped ||
       destination !== 'native' ||
-      flight ||
+      (flight > 0 && (!preinteraction || requestedGeneration === generation)) ||
       touching ||
       handoff ||
       callbacks.blocked() ||
@@ -299,7 +312,14 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     const size = viewport();
     const selected = select(candidates);
     if (!selected.length) return;
-    flight = true;
+    const capturedLayout = signature(selected);
+    const capturedOwnership = selected.map((candidate) => signature([candidate], true));
+    flight++;
+    requestedGeneration = generation;
+    const captureID = `${imageIdentity}-${++captureSerial}`;
+    const requestAt = performance.now();
+    const owner = ownerGeneration;
+    const pinned = () => preinteraction && pinnedCaptureID === captureID && ownerGeneration === owner;
     let result: Partial<CoveredSnapshot> | undefined;
     let adopted = false;
     const images: HTMLImageElement[] = [];
@@ -307,6 +327,9 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
       let expired = false;
       const capture = call({
         action: 'prepare',
+        captureID,
+        captureOwner: imageIdentity,
+        ...(preinteraction ? { captureDelayMs } : {}),
         revision: callbacks.captureRevision?.() ?? revision,
         viewportWidth: win.innerWidth,
         ...(callbacks.imageSurface ? { imageSurface: 'web' as const } : {}),
@@ -318,7 +341,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
         })
         .catch(() => {});
       try {
-        result = await bounded(capture);
+        result = await bounded(capture, preinteraction ? captureDelayMs : 0);
       } finally {
         expired = true;
       }
@@ -350,6 +373,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
         )
       )
         return;
+      const decodeAt = performance.now();
       const partSources = result.parts.map((part) => selected.find((candidate) => part.ids.includes(candidate.control.id))!);
       await bounded(
         Promise.all(
@@ -362,7 +386,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
             }
             const url = projectionURL(part.url);
             const reusable =
-              result?.reused === true && cached?.data.parts[index]?.url === part.url && cached.targets[index] === target
+              result?.reused === true && cached?.data.parts[index]?.url === part.url && cached.scopes[index]?.element === target
                 ? cached.images[index]
                 : undefined;
             // Native view-cache hits keep their immutable URL. Reuse the completed
@@ -385,15 +409,15 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
           }),
         ),
       );
+      const currentOwners = new Set(latest?.candidates.map((candidate) => signature([candidate], true)));
       if (
+        !capturedOwnership.every((owner) => currentOwners.has(owner)) ||
         stopped ||
-        destination !== 'native' ||
-        touching ||
+        (!pinned() && (destination !== 'native' || touching || callbacks.blocked() || generation !== stamp)) ||
         handoff ||
-        callbacks.blocked() ||
-        generation !== stamp ||
+        ownerGeneration !== owner ||
         viewport() !== size ||
-        latest?.revision !== revision ||
+        (!pinned() && latest?.revision !== revision) ||
         selected.some(
           (candidate) => !validTarget(candidate.scope.element) || ![candidate.element, ...(candidate.sources ?? [])].every(validSource),
         )
@@ -402,6 +426,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
       const previous = cached;
       const prepared: Prepared = {
         data: result as CoveredSnapshot,
+        captureID,
         images,
         sources: Array.from(new Set(selected.flatMap((item) => item.sources ?? [item.element]))),
         targets: partSources.map((source) => source.element),
@@ -410,7 +435,9 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
         frames: [],
         viewport: size,
         revision,
-        layout: signature(selected),
+        layout: capturedLayout,
+        ownership: capturedOwnership,
+        displayable: !!latest && capturedLayout === signature(select(latest.candidates)),
       };
       try {
         if (!render(prepared)) throw new Error('Projection destination is unavailable');
@@ -430,6 +457,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
         throw error;
       }
       cached = prepared;
+      if (!pinned()) pinnedCaptureID = undefined;
       clearPrepared();
       cached.sources.forEach((source) => {
         preparedOwners.add(source);
@@ -439,6 +467,18 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
       win.dispatchEvent(new Event(sourcesChangedEvent));
       preparedVisualRevision = visual;
       adopted = true;
+      if (preinteraction)
+        void call({ action: 'decoded', token: result.token })
+          .then((timing) => reportTiming({ captureID, stage: 'acknowledged', ...timing }))
+          .catch(() => {});
+      reportTiming({
+        captureID,
+        stage: pinned() ? 'processing' : 'idle',
+        native: result.timing,
+        requestToReadyMs: performance.now() - requestAt,
+        decodeAndInstallMs: performance.now() - decodeAt,
+        ...(pinned() ? { notificationToReadyMs: performance.now() - contactAt } : {}),
+      });
       dispose(previous);
       if (imageRequested()) present();
     } catch {
@@ -449,7 +489,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
           retireImage(image);
         });
       if (result?.token && !adopted) void call({ action: 'release', token: result.token }).catch(() => {});
-      flight = false;
+      flight--;
       if (latest && (latest.revision !== revision || visualRevision !== visual)) schedule();
     }
   };
@@ -458,7 +498,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
   const schedule = () => {
     win.clearTimeout(timer);
     if (!stopped && destination === 'native' && !handoff && !touching && !callbacks.blocked())
-      timer = win.setTimeout(() => void prepare(), captureDelayMs);
+      timer = win.setTimeout(() => void prepare(), preinteraction ? 0 : captureDelayMs);
   };
   let consideredLayout: string | undefined;
   const consider = (revision: number, candidates: Candidate[]) => {
@@ -473,21 +513,29 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     // Overlay retirement is not a new source layout. Preserve the pre-overlay
     // image until the presentation path has chosen whether to use it.
     if (callbacks.blocked()) return;
-    if (!handoff && cached && cached.layout !== signature(select(candidates))) invalidate();
+    if (!handoff && cached) {
+      const selected = select(candidates);
+      const owners = new Set(candidates.map((candidate) => signature([candidate], true)));
+      if (!cached.ownership.every((owner) => owners.has(owner)) || !cached.sources.every(validSource)) invalidate();
+      else if (cached.layout !== signature(selected)) cached.displayable = false;
+    }
     const nextLayout = signature(candidates);
     if (consideredLayout !== nextLayout) {
       consideredLayout = nextLayout;
       visualRevision++;
       generation++;
     }
-    if (latest?.revision !== revision) generation++;
+    if (latest?.revision !== revision) {
+      generation++;
+      if (preinteraction) void call({ action: 'change', captureOwner: imageIdentity }).catch(() => {});
+    }
     latest = { revision, candidates };
     pruneIdleImages();
     if (cached?.revision !== revision || preparedVisualRevision !== visualRevision) schedule();
   };
   const changed = (scrollOwner?: EventTarget) => {
-    // A pre-interaction state image is reusable; an image from another scroll
-    // position/clip is not. Invalidate only the surface containing that owner.
+    // A different scroll position blocks ordinary presentation, but keeps the
+    // completed pixels for comparison and any pre-contact selection.
     if (
       !handoff &&
       cached &&
@@ -498,24 +546,59 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
           (candidate.sources ?? [candidate.element]).some((source) => cached!.sources.includes(source)),
       )
     )
-      invalidate();
+      cached.displayable = false;
     if (handoff) {
       updateOffsets();
     }
     visualRevision++;
     generation++;
+    if (preinteraction) void call({ action: 'change', captureOwner: imageIdentity }).catch(() => {});
     schedule();
   };
   const listener = await boundedListener(
-    transport.listen(({ active: pressed }) => {
+    transport.listen(({ active: pressed, capturePolicy, captureID, captureOwner, captureState, mainThreadMs }) => {
+      if (captureOwner !== undefined && captureOwner !== imageIdentity) return;
+      if (capturePolicy === 'preinteraction') {
+        if (!preinteraction) {
+          preinteraction = true;
+          schedule();
+        }
+        return;
+      }
+      if (pressed && captureID) {
+        pinnedCaptureID = captureID;
+        contactAt = performance.now();
+        reportTiming({ captureID, stage: cached?.captureID === captureID ? 'ready' : captureState, mainThreadMs });
+      } else if (pressed && !touching) pinnedCaptureID = preinteraction ? '' : undefined;
       touching = pressed;
       generation++;
+      visualRevision++;
       win.clearTimeout(timer);
-      // The completed cache itself is the pre-interaction image. No separate
-      // pin can outlive the interaction and override a newer completed image.
       if (!pressed) schedule();
     }),
   );
+  const projectionNode = (node: Node | null) =>
+    node?.nodeType === 1 &&
+    !!(node as Element).closest('[data-native-ui-projection-node], style[data-native-ui-snapshot], style[data-native-ui-snapshot-base]');
+  const changes = new MutationObserver((records) => {
+    if (!preinteraction) return;
+    if (
+      records.some((record) => {
+        if (projectionNode(record.target)) return false;
+        if (record.type === 'attributes' && record.attributeName?.startsWith('data-native-ui-')) return false;
+        const nodes = [...record.addedNodes, ...record.removedNodes];
+        return record.type !== 'childList' || !nodes.length || nodes.some((node) => !projectionNode(node));
+      })
+    )
+      changed();
+  });
+  changes.observe(doc.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
+  const backgroundChanged = (event: Event) => {
+    if (preinteraction && !projectionNode(event.target as Node | null)) changed();
+  };
+  doc.addEventListener('scroll', backgroundChanged, true);
+  doc.addEventListener('load', backgroundChanged, true);
+
   const preparedTargets = new Set<HTMLElement>();
   const clearTarget = (target: HTMLElement) => {
     shadowHosts.get(target)?.forEach((host) => host.removeAttribute('data-native-ui-snapshot-content'));
@@ -775,6 +858,8 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     const image = handoff?.image ?? cached;
     if (
       !image ||
+      (!handoff && !image.displayable && !(preinteraction && pinnedCaptureID === image.captureID)) ||
+      (preinteraction && pinnedCaptureID !== undefined && image.captureID !== pinnedCaptureID) ||
       image.viewport !== viewport() ||
       !image.sources.every(validSource) ||
       (callbacks.current && !callbacks.current(image.sources)) ||
@@ -927,6 +1012,9 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
   };
   const invalidate = (nativeHidden = false) => {
     pendingCleanup.forEach((run) => run());
+    ownerGeneration++;
+    pinnedCaptureID = undefined;
+    if (preinteraction) void call({ action: 'change', captureOwner: imageIdentity }).catch(() => {});
     generation++;
     win.clearTimeout(timer);
     const previous = cached;
@@ -1040,6 +1128,9 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     invalidate,
     async destroy() {
       stopped = true;
+      changes.disconnect();
+      doc.removeEventListener('scroll', backgroundChanged, true);
+      doc.removeEventListener('load', backgroundChanged, true);
       stopPause();
       invalidate();
       imagePool.forEach((pool) => pool.forEach((image) => image.remove()));
