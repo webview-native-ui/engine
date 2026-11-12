@@ -27,7 +27,7 @@ const settle = () => new Promise((resolve) => setTimeout(resolve, 120));
 const emit = (target: Element, type: string, detail?: unknown) => target.dispatchEvent(new CustomEvent(type, { bubbles: true, detail }));
 const cases = [0, 1, 4].flatMap((switches) =>
   ['ready', 'transfer', 'decode'].flatMap((stage) =>
-    ['none', 'breakpoint', 'unrelated-dismiss'].flatMap((event) =>
+    ['none', 'breakpoint', 'unrelated-dismiss', 'dismiss-before-ready'].flatMap((event) =>
       ['dom-tabs', 'angular-lifecycle'].map((route) => ({ switches, stage, event, route })),
     ),
   ),
@@ -154,7 +154,9 @@ test.each(cases)('$route overlay after $switches tab switches: $stage / $event',
   // A DOM change also makes the zero-switch case request a fresh capture.
   if (switches === 0) active.querySelector('button')!.textContent += ' updated';
   await vi.waitFor(() => expect(requests.slice(before).some((r) => r.action === 'prepare')).toBe(true));
-  if (stage === 'ready') await settle();
+  // Drain the tab's reconciliation frames while the selected native/decode gate
+  // stays closed; pinning an already superseded request is not a native contact.
+  await settle();
   if (stage === 'decode') await vi.waitFor(() => expect(decodes.length).toBeGreaterThan(0));
   const request = requests.filter((r): r is Extract<WebProjectionRequest, { action: 'prepare' }> => r.action === 'prepare').at(-1)!;
   interaction({ active: false, capturePolicy: 'preinteraction' });
@@ -169,6 +171,17 @@ test.each(cases)('$route overlay after $switches tab switches: $stage / $event',
     document.body.append(toast);
     emit(toast, 'ionToastDidDismiss');
     toast.remove();
+  }
+  if (event === 'dismiss-before-ready') {
+    interaction({ active: false });
+    emit(modal, 'ionModalWillDismiss');
+    emit(modal, 'ionModalDidDismiss');
+    modal.remove();
+    releasePending();
+    await settle();
+    expect([...active.querySelectorAll('button')].some((button) => getProjectionState(document).isVisible(button))).toBe(false);
+    expect(snapshots.at(-1)?.controls.length).toBe(2);
+    return;
   }
   releasePending();
   emit(modal, 'ionModalDidPresent');
@@ -196,4 +209,22 @@ test.each(cases)('$route overlay after $switches tab switches: $stage / $event',
     evidence.imageOpacity.every((opacity) => opacity === '1'),
     JSON.stringify(evidence),
   ).toBe(true);
+
+  interaction({ active: false });
+  emit(modal, 'ionModalWillDismiss');
+  emit(modal, 'ionModalDidDismiss');
+  modal.remove();
+  await settle();
+  expect(buttons.some((button) => state.isVisible(button))).toBe(false);
+  expect(snapshots.at(-1)?.controls.length).toBe(2);
+
+  // A surviving request must not poison the next presentation or leave native
+  // controls hidden after dismissal.
+  const nextCapture = requests.filter((r): r is Extract<WebProjectionRequest, { action: 'prepare' }> => r.action === 'prepare').at(-1)!;
+  interaction({ active: true, captureID: nextCapture.captureID, captureOwner: nextCapture.captureOwner, captureState: 'processing' });
+  document.querySelector('ion-app')!.append(modal);
+  emit(modal, 'ionModalWillPresent');
+  emit(modal, 'ionModalDidPresent');
+  await settle();
+  expect(buttons.every((button) => state.isVisible(button))).toBe(true);
 });
