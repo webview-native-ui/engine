@@ -42,6 +42,7 @@ class Screen: UIViewController, WKScriptMessageHandler, WKNavigationDelegate {
     var controls: [UIButton] = []
     var captureDirectory: URL?
     var bridgeTrace: [[String: Any]] = []
+    var graphicsWarmupMs: Double = 0
     override func viewDidLoad() {
         super.viewDidLoad()
         let configuration = WKWebViewConfiguration()
@@ -76,10 +77,62 @@ class Screen: UIViewController, WKScriptMessageHandler, WKNavigationDelegate {
         }
     }
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+        // Initialize UIKit/CoreImage/ImageIO before testing an empty capture cache.
+        // This fixture verifies reuse and cleanup, not graphics cold-start latency.
+        let started = CACurrentMediaTime()
+        var pending = true
+        let timeout = DispatchWorkItem {
+            guard pending else { return }
+            pending = false
+            self.record(["action": "failed", "phase": "graphics-warmup", "error": "warmup exceeded 30 seconds"])
+            self.snapshots.reset()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 30, execute: timeout)
+        snapshots.prepare(frames: {
+            Dictionary(uniqueKeysWithValues: self.controls.enumerated().map {
+                (String($0.offset), $0.element.convert($0.element.bounds, to: self.web))
+            })
+        }, in: web, viewportWidth: web.bounds.width, views: controls) { result in
+            guard pending else { return }
+            pending = false; timeout.cancel()
+            guard let token = result["token"] as? String,
+                  let parts = result["parts"] as? [[String: Any]], parts.count == 12 else {
+                self.record(["action": "failed", "phase": "graphics-warmup", "error": "warmup did not produce twelve parts"])
+                return
+            }
+            let files = parts.compactMap { ($0["url"] as? String).flatMap(URL.init(string:)) }
+            guard files.count == 12, files.allSatisfy({ FileManager.default.fileExists(atPath: $0.path) }) else {
+                self.record(["action": "failed", "phase": "graphics-warmup", "error": "warmup files missing"])
+                return
+            }
+            self.snapshots.reset()
+            guard self.snapshots.identifiers(for: token).isEmpty,
+                  files.allSatisfy({ !FileManager.default.fileExists(atPath: $0.path) }) else {
+                self.record(["action": "failed", "phase": "graphics-warmup", "error": "warmup images survived reset"])
+                return
+            }
+            self.graphicsWarmupMs = (CACurrentMediaTime() - started) * 1000
+            pipelineCounterLock.lock()
+            rasterCaptures = 0; pngEncodes = 0; pngWrites = 0; nativeDecodes = 0; fileReads = 0
+            pipelineStages.removeAll()
+            pipelineCounterLock.unlock()
             let url = Bundle.main.url(forResource: "pipeline", withExtension: "js")!
             self.web.evaluateJavaScript(try! String(contentsOf: url, encoding: .utf8))
         }
+    }
+    func record(_ request: [String: Any]) {
+        let path = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("pipeline.json")
+        var output = request
+        output["graphicsWarmupMs"] = graphicsWarmupMs
+        if request["action"] as? String == "failed" {
+            pipelineCounterLock.lock()
+            output["nativeCounters"] = ["captures": rasterCaptures, "encodes": pngEncodes, "writes": pngWrites,
+                                        "nativeDecodes": nativeDecodes, "fileReads": fileReads]
+            output["nativeStages"] = pipelineStages
+            pipelineCounterLock.unlock()
+            output["nativeTrace"] = bridgeTrace
+        }
+        try! JSONSerialization.data(withJSONObject: output, options: [.prettyPrinted, .sortedKeys]).write(to: path)
     }
     func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
         guard let value = message.body as? [String: Any], let key = value["key"] as? Int,
@@ -118,17 +171,7 @@ class Screen: UIViewController, WKScriptMessageHandler, WKNavigationDelegate {
             complete([:]); return
         }
         if action == "done" || action == "failed" {
-            let path = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("pipeline.json")
-            var output = request
-            if action == "failed" {
-                pipelineCounterLock.lock()
-                output["nativeCounters"] = ["captures": rasterCaptures, "encodes": pngEncodes, "writes": pngWrites,
-                                            "nativeDecodes": nativeDecodes, "fileReads": fileReads]
-                output["nativeStages"] = pipelineStages
-                pipelineCounterLock.unlock()
-                output["nativeTrace"] = bridgeTrace
-            }
-            try! JSONSerialization.data(withJSONObject: output, options: [.prettyPrinted, .sortedKeys]).write(to: path)
+            record(request)
             complete([:]); return
         }
         snapshots.handle(request, in: web, frames: { ids, _ in

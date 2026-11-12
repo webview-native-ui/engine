@@ -49,7 +49,7 @@ with tempfile.TemporaryDirectory(prefix='native-pipeline-') as folder:
             data = json.loads(result.read_text())
             assert data['action'] == 'done', data
             rows = {x['stage']: x for x in data['checkpoints']}
-            cold = rows['cold']
+            cold = rows['empty-cache']
             assert cold['captures'] == 1 and cold['files'] == 12, data
             for key in ('encodes', 'writes', 'nativeDecodes', 'fileReads', 'decodes'):
                 assert cold[key] == 12, (key, data)

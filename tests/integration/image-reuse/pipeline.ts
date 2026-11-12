@@ -64,8 +64,8 @@ async function run() {
   const checkpoints: unknown[] = [];
   const record = async (stage: string) => checkpoints.push({ stage, decodes, ...(await send({ action: 'metrics' })) });
   manager.consider(1, sources);
-  await wait('cold-adoption', () => adoptions === 1);
-  await record('cold');
+  await wait('empty-cache-adoption', () => adoptions === 1);
+  await record('empty-cache');
   for (let i = 0; i < 3; i++) {
     const previous = adoptions;
     const moved = await send({ action: 'move' });
