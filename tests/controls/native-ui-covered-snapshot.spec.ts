@@ -240,13 +240,17 @@ test('horizontal and vertical tabs share the prepared image path', async () => {
   expect(f.bridge).toHaveBeenCalledWith(expect.objectContaining({ action: 'prepare', ids: ['button'] }));
 });
 
-test('layout or appearance changes invalidate the old image before a new one is ready', async () => {
+test('layout or appearance changes block presentation but retain the completed baseline', async () => {
   const f = await fixture();
   f.manager.consider(1, [f.candidate]);
   await drain();
   f.candidate.control.dark = !f.candidate.control.dark;
   f.manager.consider(2, [f.candidate]);
   expect(f.manager.begin()).toBeUndefined();
+  expect(f.manager.token).toBeUndefined();
+  expect(f.bridge).not.toHaveBeenCalledWith({ action: 'release', token: 'image-1' });
+  await drain();
+  expect(f.manager.token).toBe('image-2');
   expect(f.bridge).toHaveBeenCalledWith({ action: 'release', token: 'image-1' });
 });
 
@@ -1008,4 +1012,97 @@ test('iframe projection updates and image loads do not rearm capture, but author
   expect(count()).toBe(prepared + 1);
   await drain();
   expect(count()).toBe(prepared + 1);
+});
+
+test.each(['ready', 'processing'] as const)('appearance reconciliation preserves the %s pre-contact capture', async (state) => {
+  const f = await fixture();
+  f.manager.consider(1, [f.candidate]);
+  await drain();
+  f.interaction({ active: false, capturePolicy: 'preinteraction' });
+  let finish: ((value: ReturnType<typeof f.capture>) => void) | undefined;
+  if (state === 'processing') {
+    f.bridge.mockImplementation(async (args) =>
+      args.action === 'prepare'
+        ? new Promise((resolve) => {
+            finish = resolve;
+          })
+        : { shown: true },
+    );
+    f.manager.changed();
+    await vi.advanceTimersByTimeAsync(1);
+  }
+  const request = f.bridge.mock.calls.filter(([args]) => args.action === 'prepare').at(-1)![0] as { captureID: string };
+  f.interaction({ active: true, captureID: request.captureID, captureState: 'processing' });
+  f.candidate.control.dark = !f.candidate.control.dark;
+  f.manager.consider(2, [f.candidate]);
+  expect(f.bridge).not.toHaveBeenCalledWith({ action: 'release', token: 'image-1' });
+  f.manager.begin();
+  if (finish) finish(f.capture());
+  await drain();
+  expect(f.manager.token).toBe(state === 'ready' ? 'image-1' : 'image-2');
+  expect(f.bridge).not.toHaveBeenCalledWith({ action: 'release', token: f.manager.token });
+});
+
+test('scroll changes retain the comparison baseline through a failed replacement', async () => {
+  const f = await fixture();
+  const scroller = document.createElement('div');
+  document.body.append(scroller);
+  f.candidate.scrollElement = scroller;
+  f.manager.consider(1, [f.candidate]);
+  await drain();
+  f.interaction({ active: false, capturePolicy: 'preinteraction' });
+  f.bridge.mockImplementation(async (args) => {
+    if (args.action === 'prepare') throw new Error('capture unavailable');
+    return { shown: true };
+  });
+  f.manager.changed(scroller);
+  await drain();
+  f.manager.begin();
+  expect(f.manager.token).toBeUndefined();
+  expect(f.bridge).not.toHaveBeenCalledWith({ action: 'release', token: 'image-1' });
+  f.bridge.mockImplementation(async (args) => (args.action === 'prepare' ? f.capture() : { shown: true }));
+  f.manager.changed();
+  await drain();
+  expect(f.manager.token).toBe('image-2');
+  expect(f.bridge).toHaveBeenCalledWith({ action: 'release', token: 'image-1' });
+});
+
+test('replacing the source still releases a retained completed image', async () => {
+  const f = await fixture();
+  f.manager.consider(1, [f.candidate]);
+  await drain();
+  f.candidate.control.dark = !f.candidate.control.dark;
+  f.manager.consider(2, [f.candidate]);
+  expect(f.bridge).not.toHaveBeenCalledWith({ action: 'release', token: 'image-1' });
+  const replacement = document.createElement('ion-button');
+  f.button.replaceWith(replacement);
+  f.manager.consider(3, [createCandidate(replacement, 'button', () => 'button')]);
+  expect(f.bridge).toHaveBeenCalledWith({ action: 'release', token: 'image-1' });
+});
+
+test('the first pinned capture cannot adopt a source replaced while still connected', async () => {
+  const f = await fixture();
+  let finish!: (value: ReturnType<typeof f.capture>) => void;
+  f.bridge.mockImplementation(async (args) =>
+    args.action === 'prepare'
+      ? new Promise((resolve) => {
+          finish = resolve;
+        })
+      : { shown: true },
+  );
+  f.manager.consider(1, [f.candidate]);
+  await vi.advanceTimersByTimeAsync(1);
+  f.interaction({ active: false, capturePolicy: 'preinteraction' });
+  await vi.advanceTimersByTimeAsync(1);
+  const request = f.bridge.mock.calls.find(([args]) => args.action === 'prepare')![0] as { captureID: string };
+  f.interaction({ active: true, captureID: request.captureID, captureState: 'processing' });
+  const replacement = document.createElement('ion-button');
+  document.body.append(replacement);
+  f.manager.consider(2, [createCandidate(replacement, 'button', () => 'button')]);
+  expect(f.button.isConnected).toBe(true);
+  finish(f.capture());
+  await drain();
+  f.manager.begin();
+  expect(f.manager.token).toBeUndefined();
+  expect(f.bridge).toHaveBeenCalledWith({ action: 'release', token: 'image-1' });
 });

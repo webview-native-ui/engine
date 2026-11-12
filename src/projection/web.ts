@@ -54,6 +54,8 @@ interface Prepared {
   viewport: string;
   revision: number;
   layout: string;
+  ownership: string[];
+  displayable: boolean;
 }
 
 /** One pixel handoff; requests and renderer source ownership remain independent. */
@@ -124,7 +126,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     if (!sourceIDs.has(source)) sourceIDs.set(source, ++sourceSerial);
     return sourceIDs.get(source)!;
   };
-  const signature = (candidates: Candidate[]) =>
+  const signature = (candidates: Candidate[], ownershipOnly = false) =>
     JSON.stringify(
       candidates.map((candidate) => {
         if (!scopeIDs.has(candidate.scope)) scopeIDs.set(candidate.scope, ++scopeSerial);
@@ -150,7 +152,9 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
           : relative;
         return [
           scopeIDs.get(candidate.scope),
-          layout(reusable, !!callbacks.opaqueUnderlay || !!callbacks.imageSurface),
+          ownershipOnly
+            ? [candidate.control.id, candidate.control.kind, candidate.control.placement]
+            : layout(reusable, !!callbacks.opaqueUnderlay || !!callbacks.imageSurface),
           (candidate.sources ?? [candidate.element]).map(sourceIdentity),
         ];
       }),
@@ -308,6 +312,8 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     const size = viewport();
     const selected = select(candidates);
     if (!selected.length) return;
+    const capturedLayout = signature(selected);
+    const capturedOwnership = selected.map((candidate) => signature([candidate], true));
     flight++;
     requestedGeneration = generation;
     const captureID = `${imageIdentity}-${++captureSerial}`;
@@ -403,7 +409,9 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
           }),
         ),
       );
+      const currentOwners = new Set(latest?.candidates.map((candidate) => signature([candidate], true)));
       if (
+        !capturedOwnership.every((owner) => currentOwners.has(owner)) ||
         stopped ||
         (!pinned() && (destination !== 'native' || touching || callbacks.blocked() || generation !== stamp)) ||
         handoff ||
@@ -427,7 +435,9 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
         frames: [],
         viewport: size,
         revision,
-        layout: signature(selected),
+        layout: capturedLayout,
+        ownership: capturedOwnership,
+        displayable: !!latest && capturedLayout === signature(select(latest.candidates)),
       };
       try {
         if (!render(prepared)) throw new Error('Projection destination is unavailable');
@@ -503,7 +513,12 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     // Overlay retirement is not a new source layout. Preserve the pre-overlay
     // image until the presentation path has chosen whether to use it.
     if (callbacks.blocked()) return;
-    if (!handoff && cached && cached.layout !== signature(select(candidates))) invalidate();
+    if (!handoff && cached) {
+      const selected = select(candidates);
+      const owners = new Set(candidates.map((candidate) => signature([candidate], true)));
+      if (!cached.ownership.every((owner) => owners.has(owner)) || !cached.sources.every(validSource)) invalidate();
+      else if (cached.layout !== signature(selected)) cached.displayable = false;
+    }
     const nextLayout = signature(candidates);
     if (consideredLayout !== nextLayout) {
       consideredLayout = nextLayout;
@@ -519,8 +534,8 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     if (cached?.revision !== revision || preparedVisualRevision !== visualRevision) schedule();
   };
   const changed = (scrollOwner?: EventTarget) => {
-    // A pre-interaction state image is reusable; an image from another scroll
-    // position/clip is not. Invalidate only the surface containing that owner.
+    // A different scroll position blocks ordinary presentation, but keeps the
+    // completed pixels for comparison and any pre-contact selection.
     if (
       !handoff &&
       cached &&
@@ -531,7 +546,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
           (candidate.sources ?? [candidate.element]).some((source) => cached!.sources.includes(source)),
       )
     )
-      invalidate();
+      cached.displayable = false;
     if (handoff) {
       updateOffsets();
     }
@@ -843,6 +858,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     const image = handoff?.image ?? cached;
     if (
       !image ||
+      (!handoff && !image.displayable && !(preinteraction && pinnedCaptureID === image.captureID)) ||
       (preinteraction && pinnedCaptureID !== undefined && image.captureID !== pinnedCaptureID) ||
       image.viewport !== viewport() ||
       !image.sources.every(validSource) ||
