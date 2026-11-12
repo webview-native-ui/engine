@@ -13,6 +13,7 @@ public final class NativeUICoveredSnapshots {
         let file: URL
     }
     private struct Capture {
+        weak var window: UIWindow?
         let size: CGSize
         let webFrame: CGRect
         let parts: [Part]
@@ -356,7 +357,7 @@ public final class NativeUICoveredSnapshots {
             }
             job?.pixels = true
             job?.pixelsAt = CACurrentMediaTime()
-            deliver(parts, size: size, webFrame: webFrame, ratio: ratio, reused: true, acquisition: job, complete: complete)
+            deliver(parts, window: window, size: size, webFrame: webFrame, ratio: ratio, reused: true, acquisition: job, complete: complete)
             return
         }
         let capturedViews = views?.map(CachedView.init)
@@ -415,7 +416,7 @@ public final class NativeUICoveredSnapshots {
         // not the unused gaps in the planner's drawing rectangles or row padding.
         let comparePixels = job != nil && crops.reduce(0, { $0 + Int($1.image.size.width * scale) * Int($1.image.size.height * scale) * 8 }) <= 32_000_000
         let baseline = comparePixels ? captures.values.first { previous in
-            previous.owner == job?.owner && previous.rawPixels != nil && previous.size == size && previous.webFrame == webFrame &&
+            previous.owner == job?.owner && previous.rawPixels != nil && previous.window === window && previous.size == size && previous.webFrame == webFrame &&
             previous.parts.count == crops.count && zip(previous.parts, crops).allSatisfy { part, crop in
                 part.ids == crop.ids && part.frame == crop.frame && part.anchorFrame == crop.anchorFrame &&
                 part.image.cgImage?.width == crop.image.cgImage?.width && part.image.cgImage?.height == crop.image.cgImage?.height &&
@@ -491,7 +492,7 @@ public final class NativeUICoveredSnapshots {
                                                views: capturedViews ?? [], geometry: geometry, parts: parts)
                     previous?.parts.forEach(self.removeIfUnused)
                 }
-                self.deliver(parts, size: size, webFrame: webFrame, ratio: ratio, reused: reused, acquisition: job,
+                self.deliver(parts, window: window, size: size, webFrame: webFrame, ratio: ratio, reused: reused, acquisition: job,
                              rawPixels: job === self.acquisitions[job?.owner ?? ""] ? rawPixels : nil, complete: complete)
             }
         }
@@ -525,13 +526,13 @@ public final class NativeUICoveredSnapshots {
         return result
     }
 
-    private func deliver(_ parts: [Part], size: CGSize, webFrame: CGRect, ratio: CGFloat, reused: Bool = false,
+    private func deliver(_ parts: [Part], window: UIWindow, size: CGSize, webFrame: CGRect, ratio: CGFloat, reused: Bool = false,
                          acquisition job: Acquisition? = nil, rawPixels: [Data]? = nil, complete: ([String: Any]) -> Void) {
         if rawPixels != nil, let owner = job?.owner {
             for key in Array(captures.keys) where captures[key]?.owner == owner { captures[key]?.rawPixels = nil }
         }
         let token = UUID().uuidString
-        captures[token] = Capture(size: size, webFrame: webFrame, parts: parts, owner: job?.owner, rawPixels: rawPixels,
+        captures[token] = Capture(window: window, size: size, webFrame: webFrame, parts: parts, owner: job?.owner, rawPixels: rawPixels,
                                   acquisitionStartedAt: job?.acquisitionStarted, contactStartedAt: job?.contactStartedAt)
         complete(["token": token, "reused": reused, "parts": parts.map { part in
             ["ids": part.ids, "url": part.file.absoluteString,
@@ -605,7 +606,7 @@ public final class NativeUICoveredSnapshots {
     // No capture, encoding, or decoding runs here.
     public func restore(in webView: UIView, token explicitToken: String? = nil, frames: [String: CGRect]? = nil, entry: Bool = false) -> Bool {
         guard let token = explicitToken ?? coveringToken, let capture = captures[token], let window = webView.window,
-              window.bounds.size == capture.size, webView.convert(webView.bounds, to: window) == capture.webFrame else { return false }
+              capture.window === window, window.bounds.size == capture.size, webView.convert(webView.bounds, to: window) == capture.webFrame else { return false }
         if let frames, capture.parts.contains(where: { part in !part.ids.allSatisfy { frames[$0] != nil } }) { return false }
         clearRestoration()
         let views = capture.parts.map { part in

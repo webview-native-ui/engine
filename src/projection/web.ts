@@ -386,7 +386,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
             }
             const url = projectionURL(part.url);
             const reusable =
-              result?.reused === true && cached?.data.parts[index]?.url === part.url && cached.targets[index] === target
+              result?.reused === true && cached?.data.parts[index]?.url === part.url && cached.scopes[index]?.element === target
                 ? cached.images[index]
                 : undefined;
             // Native view-cache hits keep their immutable URL. Reuse the completed

@@ -5,6 +5,31 @@ import UIKit
 @testable import WebViewNativeUIEngine
 
 final class NativeUICoveredSnapshotsTests: XCTestCase {
+    @MainActor func testCompletedCaptureCannotCoverAnotherWindowWithIdenticalGeometry() async throws {
+        let first = SnapshotTestWindow(frame: UIScreen.main.bounds)
+        first.rootViewController = UIViewController(); first.makeKeyAndVisible()
+        let web = try XCTUnwrap(first.rootViewController?.view)
+        let snapshots = NativeUICoveredSnapshots()
+        let second = SnapshotTestWindow(frame: first.bounds)
+        second.rootViewController = UIViewController(); second.makeKeyAndVisible()
+        defer { snapshots.reset(); first.isHidden = true; second.isHidden = true }
+        let result: [String: Any] = await withCheckedContinuation { continuation in
+            snapshots.prepare(frames: { ["button": CGRect(x: 40, y: 100, width: 60, height: 44)] },
+                              in: web, viewportWidth: web.bounds.width) { continuation.resume(returning: $0) }
+        }
+        let token = try XCTUnwrap(result["token"] as? String)
+        XCTAssertTrue(snapshots.restore(in: web, token: token))
+        snapshots.retireCopy(token, entry: false)
+        let originalFrame = web.convert(web.bounds, to: first)
+        second.rootViewController!.view.addSubview(web)
+        web.frame = originalFrame
+        XCTAssertEqual(web.convert(web.bounds, to: second), originalFrame)
+        XCTAssertEqual(second.bounds.size, first.bounds.size)
+        XCTAssertFalse(snapshots.cover(token, in: web, views: []))
+        XCTAssertFalse(snapshots.restore(in: web, token: token))
+        XCTAssertFalse(snapshots.covering)
+    }
+
     @MainActor func testExactWindowPixelsReuseFilesAndChangedPixelsReplaceThem() async throws {
         let window = SnapshotTestWindow(frame: UIScreen.main.bounds)
         window.rootViewController = UIViewController(); window.makeKeyAndVisible()

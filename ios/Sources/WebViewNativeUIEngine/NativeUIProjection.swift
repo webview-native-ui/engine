@@ -256,13 +256,15 @@ public final class NativeUIProjection: NSObject, WKScriptMessageHandler {
                     var entries: [String: Anchor] = [:]
                     for part in parts {
                         guard let ids = part["ids"] as? [String], let x = part["x"] as? CGFloat, let y = part["y"] as? CGFloat,
-                              let w = part["width"] as? CGFloat, let h = part["height"] as? CGFloat else { continue }
+                              let w = part["width"] as? CGFloat, let h = part["height"] as? CGFloat,
+                              let anchor = part["anchorBounds"] as? [String: CGFloat],
+                              let anchorX = anchor["x"], let anchorY = anchor["y"],
+                              let anchorWidth = anchor["width"], let anchorHeight = anchor["height"] else { continue }
                         let image = CGRect(x: x*scale, y: y*scale, width: w*scale, height: h*scale)
-                        for id in ids {
-                            if let view = selected[id] {
-                                entries[id] = Anchor(native: view.convert(view.bounds, to: webView), image: image)
-                            }
-                        }
+                        // The crop's anchor belongs to acquisition time. Input may change the
+                        // live view while immutable pixels are converted and delivered.
+                        let native = CGRect(x: (x+anchorX)*scale, y: (y+anchorY)*scale, width: anchorWidth*scale, height: anchorHeight*scale)
+                        for id in ids where selected[id] != nil { entries[id] = Anchor(native: native, image: image) }
                     }
                     self.anchors[token] = entries
                 }

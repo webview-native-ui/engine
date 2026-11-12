@@ -29,6 +29,8 @@ with tempfile.TemporaryDirectory(prefix='native-pipeline-') as folder:
     capture = replace_once(capture, '        let groups = NativeUICapturePlanner.plan', '        rasterCaptures += 1\n        let groups = NativeUICapturePlanner.plan')
     capture = replace_once(capture, 'try png.write(to: file, options: .atomic)', 'pipelineCounterLock.lock(); pngWrites += 1; pipelineCounterLock.unlock()\n                                try png.write(to: file, options: .atomic)')
     capture = replace_once(capture, 'let image = UIImage(cgImage: decoded', 'pipelineCounterLock.lock(); nativeDecodes += 1; pipelineCounterLock.unlock()\n                                let image = UIImage(cgImage: decoded')
+    capture = replace_once(capture, '        let comparePixels = job != nil', '        pipelineStage("acquired")\n        let comparePixels = job != nil')
+    capture = replace_once(capture, '            let rawPixels = comparePixels', '            pipelineStage("processing")\n            let rawPixels = comparePixels')
     (folder / 'Capture.swift').write_text(capture)
     encoder = (root / 'ios/Sources/WebViewNativeUIEngine/NativeUIPngEncoder.swift').read_text()
     encoder = replace_once(encoder, '        let bounds = image.extent', '        pipelineCounterLock.lock(); pngEncodes += 1; pipelineCounterLock.unlock()\n        let bounds = image.extent')

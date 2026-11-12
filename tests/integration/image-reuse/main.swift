@@ -7,6 +7,11 @@ var pngEncodes = 0
 var pngWrites = 0
 var nativeDecodes = 0
 var fileReads = 0
+var pipelineStages: [String: Double] = [:]
+func pipelineStage(_ name: String) {
+    pipelineCounterLock.lock(); defer { pipelineCounterLock.unlock() }
+    pipelineStages[name] = CACurrentMediaTime()
+}
 
 @main class App: UIResponder, UIApplicationDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions options: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool { true }
@@ -36,6 +41,7 @@ class Screen: UIViewController, WKScriptMessageHandler, WKNavigationDelegate {
     let snapshots = NativeUICoveredSnapshots()
     var controls: [UIButton] = []
     var captureDirectory: URL?
+    var bridgeTrace: [[String: Any]] = []
     override func viewDidLoad() {
         super.viewDidLoad()
         let configuration = WKWebViewConfiguration()
@@ -77,7 +83,10 @@ class Screen: UIViewController, WKScriptMessageHandler, WKNavigationDelegate {
         guard let value = message.body as? [String: Any], let key = value["key"] as? Int,
               let request = value["request"] as? [String: Any] else { return }
         let action = request["action"] as? String ?? ""
+        let receivedAt = CACurrentMediaTime()
+        bridgeTrace.append(["key": key, "action": action, "receivedAt": receivedAt])
         let complete: (Any) -> Void = { result in
+            self.bridgeTrace.append(["key": key, "action": action, "elapsedMs": (CACurrentMediaTime() - receivedAt) * 1000])
             let json = try! JSONSerialization.data(withJSONObject: result, options: [.fragmentsAllowed])
             let text = String(data: json, encoding: .utf8)!
             self.web.evaluateJavaScript("window.reply(\(key),\(text));true")
@@ -108,7 +117,16 @@ class Screen: UIViewController, WKScriptMessageHandler, WKNavigationDelegate {
         }
         if action == "done" || action == "failed" {
             let path = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("pipeline.json")
-            try! JSONSerialization.data(withJSONObject: request, options: [.prettyPrinted, .sortedKeys]).write(to: path)
+            var output = request
+            if action == "failed" {
+                pipelineCounterLock.lock()
+                output["nativeCounters"] = ["captures": rasterCaptures, "encodes": pngEncodes, "writes": pngWrites,
+                                            "nativeDecodes": nativeDecodes, "fileReads": fileReads]
+                output["nativeStages"] = pipelineStages
+                pipelineCounterLock.unlock()
+                output["nativeTrace"] = bridgeTrace
+            }
+            try! JSONSerialization.data(withJSONObject: output, options: [.prettyPrinted, .sortedKeys]).write(to: path)
             complete([:]); return
         }
         snapshots.handle(request, in: web, frames: { ids, _ in

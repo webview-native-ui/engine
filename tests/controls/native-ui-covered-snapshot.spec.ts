@@ -941,8 +941,10 @@ test('native waiting still releases a completion after the processing deadline',
   expect(f.bridge).toHaveBeenCalledWith({ action: 'release', token: 'image-1' });
 });
 
-test('identical recapture keeps the decoded Web image while adopting the new capture token', async () => {
-  const f = await fixture();
+test.each([false, true])('identical recapture keeps the decoded Web image with distinct fallback %s', async (distinctFallback) => {
+  const modal = distinctFallback ? document.createElement('ion-modal') : undefined;
+  if (modal) document.body.append(modal);
+  const f = await fixture(modal);
   f.manager.consider(1, [f.candidate]);
   await drain();
   const image = document.querySelector<HTMLImageElement>('[data-native-ui-projection-node]')!;
