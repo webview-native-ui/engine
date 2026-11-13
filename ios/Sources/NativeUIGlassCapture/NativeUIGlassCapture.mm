@@ -1,7 +1,7 @@
 #import "NativeUIGlassCapture.h"
 
 // Objective-C++ enables ARC exception cleanup without unsafe SwiftPM compiler flags.
-// Private implementation details: never invoked unless the host explicitly opts in.
+// Private implementation details: skipped when the host disables the workaround.
 static BOOL restore(NSArray<NSArray *> *states) {
     BOOL restored = YES;
     for (NSArray *state in states.reverseObjectEnumerator) {

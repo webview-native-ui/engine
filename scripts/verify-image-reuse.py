@@ -36,7 +36,20 @@ with tempfile.TemporaryDirectory(prefix='native-pipeline-') as folder:
     encoder = replace_once(encoder, '        let bounds = image.extent', '        pipelineCounterLock.lock(); pngEncodes += 1; pipelineCounterLock.unlock()\n        let bounds = image.extent')
     (folder / 'Encoder.swift').write_text(encoder)
     library = root / 'native/artifacts/NativeUIPng.xcframework/ios-arm64_x86_64-simulator/libnative_ui_png.a'
-    run('xcrun', '--sdk', 'iphonesimulator', 'swiftc', '-O', '-parse-as-library', '-target', platform.machine() + '-apple-ios15.0-simulator', '-module-cache-path', folder / 'modules', '-I', root / 'native/include', root / 'tests/integration/image-reuse/main.swift', folder / 'Capture.swift', folder / 'Encoder.swift', root / 'ios/Sources/WebViewNativeUIEngine/CapturePlanner.swift', root / 'ios/Sources/WebViewNativeUIEngine/SnapshotEventInterception.swift', library, '-o', app / 'Pipeline')
+    target = platform.machine() + '-apple-ios15.0-simulator'
+    sdk = run('xcrun', '--sdk', 'iphonesimulator', '--show-sdk-path')
+    glass = root / 'ios/Sources/NativeUIGlassCapture'
+    # This fixture compiles Swift sources directly, outside SwiftPM/CocoaPods.
+    # Compile the real Objective-C++ boundary and expose its header to Swift too.
+    run('xcrun', '--sdk', 'iphonesimulator', 'clang++', '-target', target, '-isysroot', sdk,
+        '-fobjc-arc', '-I', glass / 'include', '-c', glass / 'NativeUIGlassCapture.mm', '-o', folder / 'GlassCapture.o')
+    run('xcrun', '--sdk', 'iphonesimulator', 'swiftc', '-O', '-parse-as-library', '-target', target,
+        '-module-cache-path', folder / 'modules', '-I', root / 'native/include',
+        '-import-objc-header', glass / 'include/NativeUIGlassCapture.h',
+        root / 'tests/integration/image-reuse/main.swift', folder / 'Capture.swift', folder / 'Encoder.swift',
+        root / 'ios/Sources/WebViewNativeUIEngine/CapturePlanner.swift',
+        root / 'ios/Sources/WebViewNativeUIEngine/SnapshotEventInterception.swift',
+        folder / 'GlassCapture.o', library, '-lc++', '-o', app / 'Pipeline')
     plist = {'CFBundleIdentifier': 'local.native.pipeline', 'CFBundleExecutable': 'Pipeline', 'CFBundleName': 'Pipeline', 'CFBundlePackageType': 'APPL', 'MinimumOSVersion': '15.0', 'UILaunchScreen': {}, 'UIApplicationSceneManifest': {'UIApplicationSupportsMultipleScenes': False, 'UISceneConfigurations': {'UIWindowSceneSessionRoleApplication': [{'UISceneConfigurationName': 'Default', 'UISceneDelegateClassName': 'Pipeline.Scene'}]}}}
     (app / 'Info.plist').write_bytes(plistlib.dumps(plist))
     run('xcrun', 'simctl', 'install', args.device, app)
