@@ -34,6 +34,19 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: io.ionic.nativeui.hostedtests
         GENERATE_INFOPLIST_FILE: YES
         SWIFT_VERSION: '5.0'
+  NativeUIGlassCaptureTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [NativeUIGlassCaptureTests]
+    dependencies:
+      - target: TestHost
+      - package: NativeUI
+        product: WebViewNativeUIEngine
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.ionic.glasscapture.hostedtests
+        GENERATE_INFOPLIST_FILE: YES
+        CLANG_ENABLE_OBJC_ARC: YES
   WebViewNativeUIEngineTests:
     type: bundle.unit-test
     platform: iOS
@@ -53,8 +66,9 @@ schemes:
       targets:
         TestHost: all
         WebViewNativeUIEngineTests: [test]
+        NativeUIGlassCaptureTests: [test]
     test:
-      targets: [WebViewNativeUIEngineTests]
+      targets: [WebViewNativeUIEngineTests, NativeUIGlassCaptureTests]
   NativeUIControlsHostedTests:
     build:
       targets:

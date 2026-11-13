@@ -37,6 +37,8 @@ When the Web layer needs to own presentation, the Engine displays a prepared ima
 
 The image is a temporary visual projection, not a second interactive control. It does not forward clicks or play live video. Capture eligibility and platform rendering limits still apply, including differences in Liquid Glass highlights. When a suitable image is unavailable, the integration uses its configured Web fallback. See [concepts and limits](docs/concepts.md) and [platform support](docs/reference/platforms.md) before choosing a component.
 
+On iOS 26+, an experimental workaround using a **private Apple API** is enabled by default for Liquid Glass capture. Review the risks and [disable it if required](docs/experimental/glass-capture.md) before adopting this version.
+
 ## Start building
 
 The Engine supports **iOS and Android**. Ionic and Angular are optional. Start with a native view and its DOM container, then connect the lifecycle notifications your UI needs. The integration guides cover runtime startup and optional framework support.
