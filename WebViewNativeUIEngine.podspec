@@ -11,7 +11,8 @@ Pod::Spec.new do |s|
  s.source = { :git => 'https://github.com/webview-native-ui/engine.git', :tag => "v#{s.version}" }
  s.resource_bundles = { 'WebViewNativeUIEngine' => ['ios/Sources/WebViewNativeUIEngine/Resources/*.js', 'ios/Sources/WebViewNativeUIEngine/Resources/NativeUIPngLicenses/*'] }
  s.vendored_frameworks = 'native/artifacts/NativeUIPng.xcframework'
- s.source_files = 'ios/Sources/WebViewNativeUIEngine/**/*.swift'
+ s.source_files = 'ios/Sources/WebViewNativeUIEngine/**/*.swift', 'ios/Sources/NativeUIGlassCapture/**/*.{h,mm}'
+ s.public_header_files = 'ios/Sources/NativeUIGlassCapture/include/*.h'
  s.ios.deployment_target = '15.0'
  s.swift_version = '5.9'
  s.frameworks = 'UIKit', 'WebKit'

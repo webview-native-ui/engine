@@ -77,3 +77,5 @@ Use these to check contracts and supported behavior while implementing either ro
 verification, CI and publication. It is not required for consuming the Engine.
 
 For the optional iOS Window hook, state ownership and timing events, see [pre-interaction capture](advanced/preinteraction-capture.md).
+
+For the default-enabled private-API workaround for iOS cold-launch Liquid Glass capture and how to disable it, see [experimental glass capture](experimental/glass-capture.md). It is not a supported Apple API.

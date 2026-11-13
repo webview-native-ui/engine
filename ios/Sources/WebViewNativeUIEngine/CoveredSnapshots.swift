@@ -1,4 +1,7 @@
 import UIKit
+#if SWIFT_PACKAGE
+import NativeUIGlassCapture
+#endif
 import CoreImage
 import ImageIO
 
@@ -65,6 +68,21 @@ public final class NativeUICoveredSnapshots {
         }
     }
     private static let pixelVisibility = NSMapTable<UIView, PixelVisibility>(keyOptions: .weakMemory, valueOptions: .strongMemory)
+    private static let filteringOptionLock = NSLock()
+    private static var filteringOption = true
+    /// Experimental private-API workaround for cold-launch Liquid Glass capture (iOS 26+).
+    /// Default is true. Set before registering native controls to opt out.
+    /// This uses a private Apple API and carries App Store review and OS compatibility risks.
+    public static var experimentalInPlaceFilteringEnabled: Bool {
+        get {
+            filteringOptionLock.lock(); defer { filteringOptionLock.unlock() }
+            return filteringOption
+        }
+        set {
+            filteringOptionLock.lock(); defer { filteringOptionLock.unlock() }
+            filteringOption = newValue
+        }
+    }
     public init() {}
     var captureCostModel: NativeUICaptureCostModel = .default
     var viewCaptureCostModel: NativeUICaptureCostModel = .viewDefault
@@ -387,13 +405,24 @@ public final class NativeUICoveredSnapshots {
             context.scaleBy(x: scale, y: -scale)
             context.translateBy(x: -area.minX, y: -area.minY)
             UIGraphicsPushContext(context)
-            var drawn = true
-            if let roots {
-                for root in roots {
-                    drawn = root.drawHierarchy(in: root.convert(root.bounds, to: window), afterScreenUpdates: true) && drawn
+            let draw: () -> Bool = {
+                var drawn = true
+                if let roots {
+                    for root in roots {
+                        drawn = root.drawHierarchy(in: root.convert(root.bounds, to: window), afterScreenUpdates: true) && drawn
+                    }
+                } else {
+                    drawn = window.drawHierarchy(in: window.bounds, afterScreenUpdates: job == nil)
                 }
+                return drawn
+            }
+            let drawn: Bool
+            if #available(iOS 26.0, *), Self.experimentalInPlaceFilteringEnabled {
+                // The temporary backdrop flag must be committed for this capture.
+                // afterScreenUpdates:false ignores it on cold-launch pre-interaction draws.
+                drawn = NUICaptureHierarchyWithInPlaceFiltering(window, roots, true)
             } else {
-                drawn = window.drawHierarchy(in: window.bounds, afterScreenUpdates: job == nil)
+                drawn = draw()
             }
             UIGraphicsPopContext()
             guard drawn, let pixels = context.makeImage() else { complete([:]); return }

@@ -114,32 +114,39 @@ final class NativeUICoveredSnapshotsTests: XCTestCase {
     }
 
     @MainActor func testContactPromotesWaitingCaptureAndKeepsPixelsAcrossInvalidation() async throws {
-        let window = SnapshotTestWindow(frame: UIScreen.main.bounds)
-        window.rootViewController = UIViewController()
-        window.makeKeyAndVisible()
-        let web = try XCTUnwrap(window.rootViewController?.view)
-        let snapshots = NativeUICoveredSnapshots()
-        var events: [[String: Any]] = []
-        snapshots.observeInteractions(window) { events.append($0) }
-        defer { snapshots.reset(); window.isHidden = true }
-        var results: [[String: Any]] = []
-        let done = expectation(description: "pinned pixels finish conversion")
-        snapshots.prepare(frames: { ["button": CGRect(x: 40, y: 100, width: 60, height: 44)] },
-                          in: web, viewportWidth: web.bounds.width, captureID: "first", delay: 500) { result in
-            results.append(result); done.fulfill()
+        let original = NativeUICoveredSnapshots.experimentalInPlaceFilteringEnabled
+        defer { NativeUICoveredSnapshots.experimentalInPlaceFilteringEnabled = original }
+        for enabled in [false, true] {
+            NativeUICoveredSnapshots.experimentalInPlaceFilteringEnabled = enabled
+            let window = SnapshotTestWindow(frame: UIScreen.main.bounds)
+            window.rootViewController = UIViewController()
+            window.makeKeyAndVisible()
+            let web = try XCTUnwrap(window.rootViewController?.view)
+            let snapshots = NativeUICoveredSnapshots()
+            var events: [[String: Any]] = []
+            snapshots.observeInteractions(window) { events.append($0) }
+            defer { snapshots.reset(); window.isHidden = true }
+            var results: [[String: Any]] = []
+            let done = expectation(description: "pinned pixels finish conversion")
+            snapshots.prepare(frames: { ["button": CGRect(x: 40, y: 100, width: 60, height: 44)] },
+                              in: web, viewportWidth: web.bounds.width, captureID: "first", delay: 500) { result in
+                results.append(result); done.fulfill()
+            }
+            XCTAssertEqual(window.draws, 0)
+            snapshots.pinBeforeInteraction()
+            XCTAssertEqual(window.draws, 1)
+            let waitsForUpdates: Bool
+            if #available(iOS 26.0, *) { waitsForUpdates = enabled } else { waitsForUpdates = false }
+            XCTAssertEqual(window.updateFlags, [waitsForUpdates])
+            XCTAssertEqual(events.last?["captureID"] as? String, "first")
+            XCTAssertEqual(events.last?["captureState"] as? String, "waiting")
+            snapshots.invalidateAcquisition()
+            await fulfillment(of: [done], timeout: 3)
+            XCTAssertEqual(results.count, 1)
+            XCTAssertNotNil(results.first?["token"])
+            XCTAssertNotNil(results.first?["timing"])
+            XCTAssertEqual(window.draws, 1, "Pinning never recaptures immutable pixels")
         }
-        XCTAssertEqual(window.draws, 0)
-        snapshots.pinBeforeInteraction()
-        XCTAssertEqual(window.draws, 1)
-        XCTAssertEqual(window.updateFlags, [false])
-        XCTAssertEqual(events.last?["captureID"] as? String, "first")
-        XCTAssertEqual(events.last?["captureState"] as? String, "waiting")
-        snapshots.invalidateAcquisition()
-        await fulfillment(of: [done], timeout: 3)
-        XCTAssertEqual(results.count, 1)
-        XCTAssertNotNil(results.first?["token"])
-        XCTAssertNotNil(results.first?["timing"])
-        XCTAssertEqual(window.draws, 1, "Pinning never recaptures immutable pixels")
     }
 
     @MainActor func testResetRejectsPinnedProcessingPixels() async throws {
