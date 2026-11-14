@@ -98,13 +98,15 @@ const prepare = async (
             w.calls.push(request);
             if (request.action === 'prepare')
               return {
-                token: 'image',
+                token: w.nextToken ?? 'image',
                 parts: [{ ids: ['counter'], url: 'file:///image.png', x: rect.x, y: rect.y, width: rect.width, height: rect.height }],
               };
             if (request.action === 'cover') {
               if (w.holdCover) return new Promise((resolve) => w.coverReplies.push(resolve));
               return { shown: true };
             }
+            if (request.action === 'release' && w.failRelease) throw new Error('release rejected');
+            if (request.action === 'release' && w.holdRelease) return new Promise((resolve) => (w.releaseReply = resolve));
             return transient && request.action === 'restore' ? { shown: !w.failRestore } : {};
           },
           listen: async (listener: (event: { active: boolean }) => void) => {
@@ -1589,6 +1591,146 @@ for (const localFirst of [true, false]) {
     await expect.poll(() => page.evaluate(() => (window as any).manager.restoring)).toBe(true);
     await page.evaluate(() => (window as any).manager.updated(undefined, ['counter'], 2));
     expect(await page.evaluate(() => (window as any).manager.visibleOwners.length)).toBe(0);
+  });
+}
+
+const beginDelayedReturn = async (page: Page) => {
+  await prepare(page);
+  await page.evaluate(() => (window as any).manager.begin());
+  await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
+  await page.evaluate(() => {
+    const w = window as any;
+    w.holdRelease = true;
+    w.manager.end();
+    // A permanently missing ID cannot acknowledge the normal return.
+    w.manager.updated(undefined, [], 2);
+  });
+  await expect.poll(() => page.evaluate(() => !!(window as any).releaseReply)).toBe(true);
+};
+
+test('scrolling followed by modal handoff covers with a decoded PNG instead of Web fallback', async ({ page }) => {
+  await prepare(page);
+  await page.evaluate((png) => {
+    const w = window as any;
+    w.Capacitor.convertFileSrc = () => 'data:image/png;base64,' + png;
+    w.interact({ active: false, capturePolicy: 'preinteraction' });
+    const scroll = document.querySelector('#scroll')!;
+    scroll.scrollTop = 30;
+    scroll.dispatchEvent(new Event('scroll', { bubbles: true }));
+  }, 'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAEklEQVR4nGP4z8DwHx9mGBkKAMLXf4EvceABAAAAAElFTkSuQmCC');
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => (window as any).calls.filter((call: any) => call.action === 'prepare' && call.captureDelayMs !== undefined).length,
+      ),
+    )
+    .toBeGreaterThan(0);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => document.querySelector<HTMLImageElement>('[data-native-ui-projection-node][src^="data:image/png"]')?.naturalWidth,
+      ),
+    )
+    .toBe(8);
+  await page.evaluate(() => {
+    const w = window as any;
+    const capture = w.calls.filter((call: any) => call.action === 'prepare').at(-1);
+    w.interact({ active: true, captureID: capture.captureID, captureOwner: capture.captureOwner, captureState: 'processing' });
+    w.manager.begin();
+  });
+  await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
+  const image = page.locator('img[data-native-ui-projection-image]');
+  await expect(image).toHaveCSS('opacity', '1');
+  expect(await image.evaluate((element: HTMLImageElement) => element.naturalWidth)).toBe(8);
+  expect(
+    await page.evaluate(() => (window as any).calls.filter((call: any) => call.action === 'cover').map((call: any) => call.token)),
+  ).toEqual(['image']);
+  await destroyProjection(page);
+});
+
+test('a missing native return acknowledgement retains pixels until ordered release completes', async ({ page }) => {
+  await beginDelayedReturn(page);
+  await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
+  await page.evaluate(() => {
+    const w = window as any;
+    w.holdRelease = false;
+    w.releaseReply({});
+  });
+  await expect(page.locator('#source')).not.toHaveAttribute('data-native-ui-snapshot-visible', '');
+  expect(await page.evaluate(() => (window as any).manager.restoring)).toBe(false);
+  await destroyProjection(page);
+});
+
+test('a normal acknowledgement and reopen during recovery cannot reuse the retiring token', async ({ page }) => {
+  await beginDelayedReturn(page);
+  await page.evaluate(() => {
+    const w = window as any;
+    w.manager.updated(undefined, ['counter'], 2);
+    w.manager.begin();
+  });
+  expect(await page.evaluate(() => (window as any).calls.filter((c: any) => c.action === 'cover').length)).toBe(1);
+  await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
+  await page.evaluate(() => {
+    const w = window as any;
+    w.holdRelease = false;
+    w.nextToken = 'new-image';
+    w.releaseReply({});
+  });
+  await expect.poll(() => page.evaluate(() => (window as any).manager.token)).toBe('new-image');
+  expect(await page.evaluate(() => (window as any).calls.filter((c: any) => c.action === 'cover' && c.token === 'image').length)).toBe(1);
+  await destroyProjection(page);
+});
+
+test('a rejected recovery release leaves restoring and exposes the Web source', async ({ page }) => {
+  await prepare(page);
+  await page.evaluate(() => (window as any).manager.begin());
+  await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
+  await page.evaluate(() => {
+    const w = window as any;
+    w.failRelease = true;
+    w.manager.end();
+  });
+  await expect.poll(() => page.evaluate(() => (window as any).manager.restoring)).toBe(false);
+  await expect(page.locator('#source')).not.toHaveAttribute('data-native-ui-snapshot-source', '');
+  await expect(page.locator('#source')).not.toHaveAttribute('data-native-ui-snapshot-prepared', '');
+  await destroyProjection(page);
+});
+
+for (const retire of ['invalidate', 'destroy', 'timeout'] as const) {
+  test(`a delayed recovery response after ${retire} cannot remove a newer presentation`, async ({ page }) => {
+    await beginDelayedReturn(page);
+    await page.evaluate((retire) => {
+      const w = window as any;
+      w.oldReply = w.releaseReply;
+      w.nextToken = 'new-image';
+      if (retire !== 'timeout') w.holdRelease = false;
+    }, retire);
+    if (retire === 'timeout')
+      await expect.poll(() => page.evaluate(() => (window as any).manager.restoring), { timeout: 7000 }).toBe(false);
+    await page.evaluate(async (retire) => {
+      const w = window as any;
+      w.holdRelease = false;
+      if (retire === 'destroy') {
+        await w.manager.destroy();
+        w.manager = await w.createProjection(document.querySelector('#source'), 'new-owner', async (request: any) => {
+          if (request.action === 'prepare')
+            return { token: 'new-image', parts: [{ ids: ['counter'], url: 'file:///new.png', ...w.source.control }] };
+          return { shown: true };
+        });
+      } else if (retire === 'invalidate') w.manager.invalidate(true);
+      w.manager.consider(2, [w.source]);
+    }, retire);
+    await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot', /.+/);
+    await page.evaluate(() => (window as any).manager.begin());
+    await expect.poll(() => page.evaluate(() => (window as any).manager.token)).toBe('new-image');
+    await page.evaluate(async () => {
+      const w = window as any;
+      w.oldReply({});
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    });
+    await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
+    expect(await page.evaluate(() => (window as any).manager.token)).toBe('new-image');
+    await destroyProjection(page);
   });
 }
 
