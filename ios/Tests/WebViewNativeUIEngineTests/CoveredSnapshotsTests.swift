@@ -5,6 +5,36 @@ import UIKit
 @testable import WebViewNativeUIEngine
 
 final class NativeUICoveredSnapshotsTests: XCTestCase {
+    @MainActor func testScrollingContactStillCapturesAndCoversNativePixels() async throws {
+        for motion in 1...3 {
+            let window = SnapshotTestWindow(frame: UIScreen.main.bounds)
+            window.rootViewController = UIViewController(); window.makeKeyAndVisible()
+            let web = try XCTUnwrap(window.rootViewController?.view)
+            let scroll = SnapshotMovingScrollView(frame: web.bounds)
+            web.addSubview(scroll)
+            let snapshots = NativeUICoveredSnapshots()
+            var interactions: [[String: Any]] = []
+            snapshots.observeInteractions(window) { interactions.append($0) }
+            defer { snapshots.reset(); window.isHidden = true }
+            let result: [String: Any] = await withCheckedContinuation { continuation in
+                snapshots.prepare(frames: { ["button": CGRect(x: 40, y: 100, width: 60, height: 44)] },
+                                  in: web, viewportWidth: web.bounds.width, captureID: "moving", delay: 500) {
+                    continuation.resume(returning: $0)
+                }
+                scroll.motion = motion
+                snapshots.pinBeforeInteraction()
+            }
+            XCTAssertGreaterThan(window.draws, 0)
+            XCTAssertTrue(interactions.contains { $0["captureID"] as? String == "moving" })
+            let token = try XCTUnwrap(result["token"] as? String)
+            let parts = try XCTUnwrap(result["parts"] as? [[String: Any]])
+            let url = try XCTUnwrap(URL(string: try XCTUnwrap(parts.first?["url"] as? String)))
+            XCTAssertNotNil(UIImage(contentsOfFile: url.path)?.cgImage)
+            XCTAssertTrue(snapshots.cover(token, in: web, views: []))
+            XCTAssertFalse(window.subviews.compactMap { $0 as? UIImageView }.isEmpty)
+        }
+    }
+
     @MainActor func testCompletedCaptureCannotCoverAnotherWindowWithIdenticalGeometry() async throws {
         let first = SnapshotTestWindow(frame: UIScreen.main.bounds)
         first.rootViewController = UIViewController(); first.makeKeyAndVisible()
@@ -755,6 +785,13 @@ final class NativeUICoveredSnapshotsTests: XCTestCase {
 
 // Swift package tests have no hosted application scene. Supply deterministic
 // pixels here; actual UIKit capture is also verified in hosted device integration tests.
+private final class SnapshotMovingScrollView: UIScrollView {
+    var motion = 0
+    override var isTracking: Bool { motion == 1 }
+    override var isDragging: Bool { motion == 2 }
+    override var isDecelerating: Bool { motion == 3 }
+}
+
 final class SnapshotTestWindow: UIWindow {
     var draws = 0
     var updateFlags: [Bool] = []

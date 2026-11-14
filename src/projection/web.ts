@@ -209,6 +209,9 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
   let cached: Prepared | undefined;
   let retiring: object | undefined;
   let handoff: ImageHandoff | undefined;
+  // Recovery retires this pixel lease even if a normal acknowledgement arrives
+  // before release. An immediate reopen must acquire a different token.
+  const recoveringImages = new WeakSet<Prepared>();
   const restoring = () => handoff?.phase === 'restoring';
   const imageVisible = () =>
     !!handoff && (!!callbacks.opaqueUnderlay || handoff.phase === 'image' || (handoff.phase === 'restoring' && handoff.visible));
@@ -644,6 +647,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
   };
   const finishRestoration = () => {
     if (!handoff) return;
+    if (recoveringImages.has(handoff.image)) return;
     // A moved return invalidates the cached coordinates, but keeps the active
     // visual until Native has taken ownership at its destination.
     if (cached !== handoff?.image) {
@@ -851,6 +855,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     });
 
   const present = (force = false) => {
+    if (handoff && recoveringImages.has(handoff.image)) return;
     const returning = restoring();
     if (!returning) retireRestoration();
     if (stopped || destination === 'none' || (handoff && !force && !returning)) return;
@@ -997,7 +1002,26 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     };
     const returning = handoff;
     restoreTimeout = win.setTimeout(() => {
-      if (handoff === returning) abandon(returning.image, false);
+      if (handoff !== returning) return;
+      const image = returning.image;
+      recoveringImages.add(image);
+      if (cached === image) cached = undefined;
+      // Preserve the existing retirement policy, but keep pixels through
+      // native's ordered release instead of removing them before it completes.
+      void bounded(call({ action: 'release', token: image.data.token }))
+        .catch(() => {})
+        .then(() => {
+          if (handoff !== returning) return;
+          // Release acknowledges view mutation, not presentation. Cross a paint
+          // boundary before removing the Web image, just as on a normal return.
+          win.requestAnimationFrame(() =>
+            win.requestAnimationFrame(() => {
+              if (handoff !== returning) return;
+              abandon(image, false);
+              schedule();
+            }),
+          );
+        });
     }, 250);
     callbacks.wake();
   };
