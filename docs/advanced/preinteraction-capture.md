@@ -36,6 +36,14 @@ Selection precedes touch invalidation. Later content changes retire the next-use
 
 A request must already have reached native with eligible sources. Before the first registration, after source removal, or on acquisition failure, Engine uses the configured fallback. It cannot reconstruct a missed pre-contact frame after UIKit has dispatched the input.
 
+## Stop before measuring a native contact
+
+An iOS host can set `stopScrollBeforeCapture: true` on `prepare` requests to use the same policy as its native activation setting. The default is `false` for existing hosts. While this policy is enabled, idle acquisition waits while any descendant scroll view is tracking, dragging or decelerating; it does not stop a user's scroll in the background. The existing preparation deadline and Web fallback remain in effect.
+
+At the next contact, Engine checks the hit view against the native views supplied for the requested IDs. Only contact inside those native views cancels momentum. All registered owners settle that motion before any owner pins pixels, then the capture remeasures frames instead of using the pre-stop validation geometry. Acquisition still precedes UIKit's highlight and gesture dispatch. Contact in Web content does not invoke this cancellation, and an unregistered window rejects this policy without stopping anything.
+
+This cancels the current fling without disabling scrolling. PNG encoding and decoding remain asynchronous, so stopping momentum is not a guarantee that every capture succeeds. Empty, stale or failed captures retain the normal Web fallback. Hosts should retain their activation-time cancellation for actions without a prepared capture. Disable this request flag when the application's `stopScrollOnActivate` setting is `false`.
+
 ## Idle capture
 
 The Web manager observes document DOM changes, scrolling and resource loads in addition to renderer updates. Engine-owned projection nodes, attributes and image loads are excluded. The native request is armed immediately after coalescing notifications, rather than waiting for the entire debounce on the Web side.
