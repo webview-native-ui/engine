@@ -793,12 +793,14 @@ private final class SnapshotMovingScrollView: UIScrollView {
 }
 
 final class SnapshotTestWindow: UIWindow {
+    var beforeDraw: (() -> Void)?
     var draws = 0
     var updateFlags: [Bool] = []
     var pattern = false
     var precisionPattern = false
     var bottomPatch = false
     override func drawHierarchy(in rect: CGRect, afterScreenUpdates: Bool) -> Bool {
+        beforeDraw?()
         draws += 1
         updateFlags.append(afterScreenUpdates)
         UIColor.white.setFill()

@@ -50,6 +50,10 @@ export type WebProjectionRequest =
       captureID?: string;
       captureOwner?: string;
       captureDelayMs?: number;
+      /** iOS: defer idle acquisition while scrolling. Native-view contact stops momentum,
+       * then measures and captures before UIKit handles the contact. Defaults to false.
+       */
+      stopScrollBeforeCapture?: boolean;
     }
   | {
       action: 'cover';

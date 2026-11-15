@@ -102,6 +102,7 @@ public final class NativeUICoveredSnapshots {
         var pixels = false
         var pinned = false
         var contactStartedAt: CFTimeInterval?
+        var beforeInteraction: (([UIView]) -> Void)?
         var run: (() -> Void)?
         var cancel: (() -> Void)?
         var token: String?
@@ -119,14 +120,21 @@ public final class NativeUICoveredSnapshots {
         precondition(Thread.isMainThread)
         guard enabledWindows.contains(window), event.type == .touches,
               event.allTouches?.contains(where: { $0.window === window && $0.phase == .began }) == true else { return }
-        for owner in observers.allObjects where owner.window === window && !owner.touching {
-            owner.pinBeforeInteraction()
-        }
+        let touched = event.allTouches?.filter { $0.window === window && $0.phase == .began }.compactMap(\.view) ?? []
+        let owners = observers.allObjects.filter { $0.window === window && !$0.touching }
+        // All owners sharing a window must settle motion before any owner reads pixels.
+        owners.forEach { $0.beforeInteraction(touched) }
+        owners.forEach { $0.pinBeforeInteraction() }
     }
 
     // Separate from UIEvent plumbing so lifecycle/race cases can be tested deterministically.
-    func pinBeforeInteraction() {
+    private func beforeInteraction(_ touched: [UIView]) {
+        for job in Array(acquisitions.values) { job.beforeInteraction?(touched) }
+    }
+
+    func pinBeforeInteraction(touchedViews: [UIView]? = nil) {
         guard !touching else { return }
+        if let touchedViews { beforeInteraction(touchedViews) }
         for job in Array(acquisitions.values) {
             job.pinned = true
             job.contactStartedAt = CACurrentMediaTime()
@@ -174,14 +182,22 @@ public final class NativeUICoveredSnapshots {
             let viewCapture = request["captureMode"] as? String == "view"
             let selected = viewCapture ? views(expected) : nil
             guard !viewCapture || selected?.isEmpty == false else { complete([:]); return }
-            var initial: [String: CGRect]? = firstFrames
+            let stopBeforeCapture = request["stopScrollBeforeCapture"] as? Bool == true
+            let contactViews = stopBeforeCapture ? (selected ?? views(expected) ?? []) : []
+            var initial: [String: CGRect]? = stopBeforeCapture ? nil : firstFrames
             prepareCapture(frames: {
                 let measured = initial ?? frames(expected, revision)
                 initial = nil
                 return Set(measured.keys) == expected ? measured : [:]
             }, in: webView, viewportWidth: width, views: selected, anchorFrames: anchorFrames, contentRevision: viewCapture ? revision : nil,
                            captureID: request["captureID"] as? String, captureOwner: request["captureOwner"] as? String ?? "",
-                           delay: request["captureDelayMs"] as? Double ?? 0, complete: { result in
+                           delay: request["captureDelayMs"] as? Double ?? 0,
+                           onInteraction: stopBeforeCapture ? { [weak webView] touched in
+                guard let webView,
+                      touched.contains(where: { touch in contactViews.contains { touch.isDescendant(of: $0) } }) else { return }
+                Self.stopMomentum(in: webView)
+                webView.window?.layoutIfNeeded()
+            } : nil, complete: { result in
                 if let token = result["token"] as? String { self.captures[token]?.preservesLayout = request["imageSurface"] as? String == "web" }
                 complete(result)
             })
@@ -271,7 +287,8 @@ public final class NativeUICoveredSnapshots {
 
     private func prepareCapture(frames: @escaping () -> [String: CGRect], in webView: UIView, viewportWidth: CGFloat,
                                 views: [UIView]?, anchorFrames: (() -> [String: CGRect])?, contentRevision: Int?,
-                                captureID: String? = nil, captureOwner: String = "", delay: Double = 0, complete: @escaping ([String: Any]) -> Void) {
+                                captureID: String? = nil, captureOwner: String = "", delay: Double = 0,
+                                onInteraction: (([UIView]) -> Void)? = nil, complete: @escaping ([String: Any]) -> Void) {
         let stamp = generation
         let start = CACurrentMediaTime()
         let job = captureID.flatMap { id in
@@ -286,6 +303,7 @@ public final class NativeUICoveredSnapshots {
             guard !finished else { return }
             finished = true
             job?.cancel = nil
+            job?.beforeInteraction = nil
             job?.run = nil
             var response = result
             if let token = result["token"] as? String {
@@ -308,15 +326,34 @@ public final class NativeUICoveredSnapshots {
                          acquisition: job, complete: finish)
         }
         job?.run = acquire
+        if let onInteraction {
+            // Never cancel scrolling from idle preparation or an unregistered window.
+            guard let job else { finish([:]); return }
+            job.beforeInteraction = onInteraction
+        }
         let wait = job != nil && delay.isFinite ? min(max(delay, 0), 2_147_483_647) / 1000 : 0
         func sample(_ previous: [String: CGRect], _ stable: Int) {
             guard !finished, job?.pixels != true else { return }
             guard generation == stamp, !touching, CACurrentMediaTime() - start < max(1, wait + 1) else { finish([:]); return }
             let current = frames()
-            let count = !current.isEmpty && current == previous ? stable + 1 : 0
+            let moving = onInteraction != nil && Self.isScrolling(in: webView)
+            let count = !moving && !current.isEmpty && current == previous ? stable + 1 : 0
             if count >= 3 && CACurrentMediaTime() - start >= wait { acquire() } else { DispatchQueue.main.asyncAfter(deadline: .now() + 1.0 / 60.0) { sample(current, count) } }
         }
         sample([:], 0)
+    }
+
+    private static func isScrolling(in view: UIView) -> Bool {
+        if let scroll = view as? UIScrollView,
+           scroll.isTracking || scroll.isDragging || scroll.isDecelerating { return true }
+        return view.subviews.contains { isScrolling(in: $0) }
+    }
+
+    private static func stopMomentum(in view: UIView) {
+        if let scroll = view as? UIScrollView {
+            scroll.setContentOffset(scroll.contentOffset, animated: false)
+        }
+        view.subviews.forEach { stopMomentum(in: $0) }
     }
 
     private func capture(frames: [String: CGRect], anchorFrames: [String: CGRect], in webView: UIView, viewportWidth: CGFloat,
