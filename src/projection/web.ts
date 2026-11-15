@@ -9,7 +9,8 @@ import type {
 import type { WebProjectionScope } from './scope.js';
 import { bounded, boundedListener } from '../native/bridge.js';
 import { bindProjectionEvents, type ProjectionEvents, type ProjectionDestination } from './events.js';
-import { snapshotStyles, snapshotShadowStyles } from './styles.js';
+import { createSnapshotStyles, imageMarker } from './styles.js';
+import { sourcesForCapture } from './capture-parts.js';
 import { getProjectionPause } from './pause.js';
 
 export interface WebProjectionOptions {
@@ -115,7 +116,6 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     pruneIdleImages();
   };
   const call = transport.send.bind(transport);
-  const imageMarker = 'data-native-ui-snapshot';
   const sourcesChangedEvent = `${scope.namespace}:sources-change`;
   const preparedOwners = new Set<HTMLElement>();
   const scopeIDs = new WeakMap<WebProjectionScope, number>();
@@ -159,49 +159,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
         ];
       }),
     );
-  const sheets = new Map<Document | ShadowRoot, HTMLStyleElement>();
-  const rootFor = (element: HTMLElement) => {
-    const root = element.getRootNode();
-    return root.nodeType === 11 && 'host' in root ? (root as ShadowRoot) : doc;
-  };
-  const sheetFor = (root: Document | ShadowRoot) => {
-    if (sheets.has(root)) return;
-    const style = doc.createElement('style');
-    style.setAttribute('data-native-ui-snapshot-base', '');
-    style.textContent = snapshotStyles + (root.nodeType === 11 ? snapshotShadowStyles : '');
-    (root.nodeType === 11 ? root : (root as Document).head).append(style);
-    sheets.set(root, style);
-  };
-  // Each shadow tree is a separate style scope. Keep these rules alongside the
-  // prepared image; only the marker changes during the handoff.
-  const finishVisibilityTransitions = (target: HTMLElement) => {
-    // A visibility transition can keep the old content painted over the image.
-    // Do not stop layout, transform or opacity transitions owned by the renderer.
-    const animations = [
-      ...target.getAnimations({ subtree: true }),
-      ...[...(shadowHosts.get(target) ?? [])].flatMap((host) => host.shadowRoot?.getAnimations() ?? []),
-    ];
-    for (const animation of animations)
-      if ('transitionProperty' in animation && animation.transitionProperty === 'visibility') animation.cancel();
-  };
-  const shadowHosts = new Map<HTMLElement, Set<HTMLElement>>();
-  const syncShadowContent = (target: HTMLElement) => {
-    const hosts = shadowHosts.get(target) ?? new Set<HTMLElement>();
-    shadowHosts.set(target, hosts);
-    const hidden = target.hasAttribute('data-native-ui-snapshot-source') || target.hasAttribute('data-native-ui-snapshot-prepared');
-    const visit = (element: HTMLElement) => {
-      if (element.hasAttribute('data-native-ui-projection-node')) return;
-      if (element.shadowRoot) {
-        hosts.add(element);
-        sheetFor(element.shadowRoot);
-        for (const child of element.shadowRoot.children) visit(child as HTMLElement);
-      }
-      for (const child of element.children) visit(child as HTMLElement);
-    };
-    visit(target);
-    for (const host of hosts) host.toggleAttribute('data-native-ui-snapshot-content', hidden);
-    finishVisibilityTransitions(target);
-  };
+  const styling = createSnapshotStyles(doc);
   const viewport = () => `${win.innerWidth}:${win.innerHeight}:${win.devicePixelRatio}`;
   let handoffPending = false;
   let paintFrame = 0;
@@ -247,18 +205,12 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
       if (retained.length) imagePool.set(target, retained);
       else imagePool.delete(target);
     }
-    const liveRoots = new Set<Node>([
+    styling.pruneSheets([
       ...(latest?.candidates.map((candidate) => candidate.scope.element.getRootNode()) ?? []),
       ...(handoff?.image.scopes.map((scope) => scope.element.getRootNode()) ?? []),
       ...(cached?.scopes.map((scope) => scope.element.getRootNode()) ?? []),
       ...[...leasedImages].map((image) => image.getRootNode()),
-      ...[...shadowHosts.values()].flatMap((hosts) => [...hosts].map((host) => host.shadowRoot!)),
     ]);
-    for (const [root, pair] of sheets)
-      if (root.nodeType === 11 && !liveRoots.has(root)) {
-        pair.remove();
-        sheets.delete(root);
-      }
   };
   const pendingCleanup = new Set<() => void>();
   const cleanup = (action: 'release' | 'restored', token: string, afterPaint: boolean) => {
@@ -349,35 +301,9 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
         expired = true;
       }
       if (!result.token || !result.parts?.length) return;
-      const ids = new Set(selected.map((candidate) => candidate.control.id));
-      if (
-        result.parts.some(
-          (part) =>
-            (!part.url.startsWith('file:') &&
-              !/^\/__native_ui_engine__\/nativeUI[a-fA-F0-9]+\/[a-fA-F0-9-]+-[0-9]+\.png$/.test(part.url)) ||
-            !part.ids.length ||
-            part.ids.some((id) => !ids.has(id)) ||
-            ![part.x, part.y, part.width, part.height].every(Number.isFinite) ||
-            part.width <= 0 ||
-            part.height <= 0 ||
-            (part.anchorBounds !== undefined &&
-              (!part.anchorBounds ||
-                ![part.anchorBounds.x, part.anchorBounds.y, part.anchorBounds.width, part.anchorBounds.height].every(Number.isFinite) ||
-                part.anchorBounds.width <= 0 ||
-                part.anchorBounds.height <= 0)),
-        )
-      )
-        return;
-      if (new Set(result.parts.flatMap((part) => part.ids)).size !== ids.size) return;
-      // One crop may cover a button group, but must have one fixed fallback destination.
-      if (
-        result.parts.some(
-          (part) => new Set(part.ids.map((id) => selected.find((candidate) => candidate.control.id === id)!.scope)).size !== 1,
-        )
-      )
-        return;
+      const partSources = sourcesForCapture(result.parts, selected);
+      if (!partSources) return;
       const decodeAt = performance.now();
-      const partSources = result.parts.map((part) => selected.find((candidate) => part.ids.includes(candidate.control.id))!);
       await bounded(
         Promise.all(
           result.parts.map(async (part, index) => {
@@ -603,16 +529,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
   doc.addEventListener('load', backgroundChanged, true);
 
   const preparedTargets = new Set<HTMLElement>();
-  const clearTarget = (target: HTMLElement) => {
-    shadowHosts.get(target)?.forEach((host) => host.removeAttribute('data-native-ui-snapshot-content'));
-    if (preparedTargets.delete(target)) target.removeAttribute('data-native-ui-snapshot-prepared');
-    target.removeAttribute('data-native-ui-snapshot-visible');
-    target.removeAttribute(imageMarker);
-    target.removeAttribute('data-native-ui-snapshot-positioned');
-    target.removeAttribute('data-native-ui-snapshot-source');
-    finishVisibilityTransitions(target);
-    shadowHosts.delete(target);
-  };
+  const clearTarget = (target: HTMLElement) => styling.clearTarget(target, preparedTargets.delete(target));
   // Every new presentation or retirement cancels the previous asynchronous work.
   const resetPresentation = () => {
     win.cancelAnimationFrame(paintFrame);
@@ -630,12 +547,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     handoff = undefined;
     rendered.forEach(clearTarget);
     rendered.clear();
-    sheets.forEach((style, root) => {
-      if (stopped || (root.nodeType === 11 && !(root as ShadowRoot).host.isConnected)) {
-        style.remove();
-        sheets.delete(root);
-      }
-    });
+    styling.retireSheets(stopped);
   };
   const abandon = (expected = handoff?.image, afterPaint = restoring()) => {
     if (handoff?.image !== expected) return;
@@ -684,7 +596,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
   const showImages = (image: Prepared, visible: boolean) => {
     for (const target of rendered) {
       target.toggleAttribute('data-native-ui-snapshot-visible', visible);
-      syncShadowContent(target);
+      styling.syncContent(target);
     }
     image.images.forEach((element) => element.style.setProperty('opacity', visible ? '1' : '0', 'important'));
   };
@@ -751,7 +663,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     }
     const targets = targetsFor(image);
     if (handoff) {
-      if (targets.some((target) => !target?.isConnected || !sheets.has(rootFor(target)))) {
+      if (targets.some((target) => !target?.isConnected || !styling.hasSheet(target))) {
         abandon(handoff.image, false);
         return false;
       }
@@ -785,7 +697,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     for (const target of new Set(targets)) {
       if (!target) continue;
       rendered.add(target);
-      sheetFor(rootFor(target));
+      styling.ensureSheet(target);
       const indices = targets.flatMap((owner, index) => (owner === target ? [index] : []));
       const key = `${imageIdentity}-${indices[0]}`;
       target.setAttribute(imageMarker, key);
@@ -794,7 +706,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
         preparedTargets.add(target);
       }
       target.toggleAttribute('data-native-ui-snapshot-visible', !!callbacks.opaqueUnderlay);
-      syncShadowContent(target);
+      styling.syncContent(target);
       const box = target.getBoundingClientRect();
       target.toggleAttribute('data-native-ui-snapshot-positioned', win.getComputedStyle(target).position === 'static');
       const parent = target.shadowRoot ?? target;
