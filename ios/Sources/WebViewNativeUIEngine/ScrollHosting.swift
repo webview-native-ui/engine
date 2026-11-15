@@ -30,6 +30,9 @@ public final class NativeUIScrollHosting {
                 }
             }
             guard let hit = super.hitTest(point, with: event), hit !== self else { return nil }
+            // A denied reveal leaves the SDK hidden inside its renderer's clip.
+            // That empty container must not intercept the Web overlay's input.
+            guard NativeUIScrollHosting.owner(of: hit)?.reveal == nil else { return nil }
             return hit
         }
 

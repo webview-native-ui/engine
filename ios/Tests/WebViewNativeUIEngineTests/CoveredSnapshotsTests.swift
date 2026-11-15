@@ -349,6 +349,37 @@ final class NativeUICoveredSnapshotsTests: XCTestCase {
         }
     }
 
+    @MainActor func testProjectedSDKInsideClipDoesNotBlockWebOverlayInput() async throws {
+        let window = SnapshotTestWindow(frame: UIScreen.main.bounds)
+        window.rootViewController = UIViewController(); window.makeKeyAndVisible()
+        let web = WKWebView(frame: window.rootViewController!.view.bounds)
+        window.rootViewController!.view.addSubview(web)
+        let scroll = UIScrollView(frame: CGRect(x: 0, y: 80, width: 320, height: 400))
+        scroll.contentSize = CGSize(width: 320, height: 2000); web.addSubview(scroll)
+        let host = try XCTUnwrap(NativeUIScrollHosting(webView: web, scrollView: scroll))
+        let clip = UIView()
+        clip.clipsToBounds = true
+        let sdk = UIButton(frame: CGRect(x: 0, y: 0, width: 120, height: 180))
+        clip.addSubview(sdk)
+        XCTAssertTrue(host.place(clip, frame: CGRect(x: 20, y: 100, width: 120, height: 180)))
+        let surface = try XCTUnwrap(clip.superview as? UIScrollView)
+        let snapshots = NativeUICoveredSnapshots()
+        defer { snapshots.reset(); window.isHidden = true; withExtendedLifetime(host) {} }
+        let result: [String: Any] = await withCheckedContinuation { continuation in
+            snapshots.prepare(frames: { ["sdk": sdk.convert(sdk.bounds, to: web)] },
+                              in: web, viewportWidth: web.bounds.width) { continuation.resume(returning: $0) }
+        }
+        let token = try XCTUnwrap(result["token"] as? String)
+        snapshots.nativeContact = { _ in false } // The Web overlay still owns presentation.
+        XCTAssertTrue(snapshots.cover(token, in: web, views: [sdk]))
+        XCTAssertTrue(sdk.isHidden)
+        XCTAssertFalse(clip.isHidden)
+        let point = sdk.convert(CGPoint(x: 60, y: 90), to: surface)
+        XCTAssertNil(surface.hitTest(point, with: HostedTouchEvent()), "An empty SDK clipping root must pass through to Web")
+        snapshots.restoreControls()
+        XCTAssertTrue(surface.hitTest(point, with: HostedTouchEvent()) === sdk)
+    }
+
     @MainActor func testHostedPhotoMovesWithScrollAndRevealsBeforeOriginalHitTest() async throws {
         let window = SnapshotTestWindow(frame: UIScreen.main.bounds)
         window.rootViewController = UIViewController(); window.makeKeyAndVisible()

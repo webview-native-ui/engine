@@ -23,6 +23,9 @@ class NativeUIScrollHosting(private val webView: WebView, content: View) :
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
         if (event.actionMasked == MotionEvent.ACTION_DOWN) {
             reset()
+            // A projected SDK leaves this input host attached. Empty hosts must
+            // let a Web overlay receive the new gesture.
+            if (getChildAt(0)?.isShown != true) return false
             NativeUIWindowInteraction.nativeTouch(this, true)
             if (
                 webView.isAttachedToWindow &&

@@ -399,6 +399,61 @@ class NativeUIScrollHostingTest {
     }
 
     @Test
+    fun overlayKeepsPhotoNonInteractiveUntilDismissed() {
+        projectedFixture()
+        js(
+            """
+            var overlayClicks=0;
+            document[Symbol.for('@webview-native-ui/engine/projection-pause/v1')].pause();
+            var overlay=document.createElement('button');
+            overlay.style.cssText='position:fixed;inset:0;z-index:9999;background:#ddf';
+            overlay.textContent='Overlay';overlay.onclick=()=>overlayClicks++;
+            document.body.append(overlay);
+            """
+                .trimIndent()
+        )
+        val coveredDeadline = SystemClock.uptimeMillis() + 3000
+        var covered = false
+        while (!covered && SystemClock.uptimeMillis() < coveredDeadline) {
+            main { covered = projection!!.isProjecting && button.visibility == View.INVISIBLE }
+            if (!covered) Thread.sleep(10)
+        }
+        assertTrue("Overlay must project the SDK before contact", covered)
+        touch(true, y = 120f)
+        val clickedDeadline = SystemClock.uptimeMillis() + 2000
+        while (js("overlayClicks") == "0" && SystemClock.uptimeMillis() < clickedDeadline) Thread
+            .sleep(10)
+        assertEquals(
+            "A hidden SDK host must let the overlay receive the first tap",
+            "1",
+            js("overlayClicks"),
+        )
+        main {
+            assertEquals(0, taps)
+            assertEquals(0, longs)
+            assertEquals(View.INVISIBLE, button.visibility)
+        }
+        js(
+            "overlay.remove();document[Symbol.for('@webview-native-ui/engine/projection-pause/v1')].resume()"
+        )
+        val revealDeadline = SystemClock.uptimeMillis() + 3000
+        var revealed = false
+        while (!revealed && SystemClock.uptimeMillis() < revealDeadline) {
+            main { revealed = !projection!!.isProjecting && button.visibility == View.VISIBLE }
+            if (!revealed) Thread.sleep(10)
+        }
+        assertTrue("Dismiss must restore SDK input", revealed)
+        touch(true, y = 120f)
+        val sdkDeadline = SystemClock.uptimeMillis() + 2000
+        var clicked = false
+        while (!clicked && SystemClock.uptimeMillis() < sdkDeadline) {
+            main { clicked = taps == 1 }
+            if (!clicked) Thread.sleep(10)
+        }
+        assertTrue(clicked)
+    }
+
+    @Test
     fun nativeTapAndLongPressNeverReachWeb() {
         load()
         touch(true)
