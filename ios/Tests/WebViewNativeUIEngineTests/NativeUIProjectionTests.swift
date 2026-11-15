@@ -278,7 +278,7 @@ final class NativeUIProjectionTests: XCTestCase {
         owner.view.addSubview(button)
         let registration = try NativeUIProjection(webView: web, plugin: "Fixture", projectionSelector: "#slot",
                                                   receiveListeners: .init(projection: .init(native: ["shown"], web: ["moving"])),
-                                                  // SnapshotTestWindow supplies deterministic pixels in hostless XCTest.
+                                                  // SnapshotTestWindow supplies deterministic pixels; WebKit still uses the hosted application.
                                                   // Capture, file transport and handoff use the production path.
                                                   snapshots: NativeUICoveredSnapshots(), view: { button })
         defer { registration.destroy(); window.isHidden = true }
@@ -417,12 +417,21 @@ final class NativeUIProjectionTests: XCTestCase {
 
     @MainActor private func wait(_ web: WKWebView, _ expression: String, timeout: TimeInterval = 8) async throws {
         let deadline = Date().addingTimeInterval(timeout)
+        var observation = "No JavaScript reply"
         while Date() < deadline {
-            if (try? await web.evaluateJavaScript(expression)) as? Bool == true { return }
+            do {
+                let value = try await web.evaluateJavaScript(expression)
+                if value as? Bool == true { return }
+                observation = "JavaScript returned \(String(describing: value))"
+            } catch {
+                observation = "JavaScript failed: \(error)"
+            }
             try await Task.sleep(nanoseconds: 20_000_000)
         }
-        XCTFail("Timed out: \(expression)")
-        throw NSError(domain: "ProjectionFixture", code: 1)
+        let message = "Timed out: \(expression); URL=\(web.url?.absoluteString ?? "<none>"), " +
+            "loading=\(web.isLoading), progress=\(web.estimatedProgress); \(observation)"
+        XCTFail(message)
+        throw NSError(domain: "ProjectionFixture", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
     }
 }
 private final class ProjectionFixture: NSObject, WKURLSchemeHandler {

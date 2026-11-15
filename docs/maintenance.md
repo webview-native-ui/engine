@@ -25,12 +25,20 @@ npm run build
 npm run lint
 npx playwright install chromium
 npm test
-xcodebuild -scheme WebViewNativeUIEngine -destination 'platform=iOS Simulator,id=<booted simulator UUID>' test
 ```
 
 Lint combines strict TypeScript checking, the standard ESLint/TypeScript recommended rules, and typed Promise checks for `src`. Scripts and tests receive syntax-level linting; Prettier owns formatting. `npm run format` applies formatting only. Bridge payloads and test doubles may use explicit `any`; production boundary validation remains necessary. An explicit `void` marks background work, but does not handle a rejected Promise.
 
 Native checks run in their platform CI jobs: `npm run lint:swift` uses node-swiftlint with the Capacitor configuration on macOS (`brew install swiftlint`); `npm run lint:android` runs Kotlin formatting checks and Android Lint with warnings treated as errors (JDK 21 and Android SDK 36). Use `npm run format:swift` and `npm run format:kotlin` to apply native formatting. Kotlin uses ktfmt because the Prettier Kotlin plugin cannot parse the existing native test fixture.
+
+Swift CI splits independent work between `swift-package`, `ios-integration` and `ios-consumers`; the existing `swift` check requires all three to succeed. Package tests cover deterministic native views, capture ownership and encoding contracts. Actual WKWebView navigation/scroll tracking and active UIKit presentations run in `NativeUIHostedTests` with a UIApplication, alongside the real-screen image pipeline. CocoaPod and Cordova consumer checks run independently in `ios-consumers`. Both native test selections execute their assigned suites, including the application-only cases. Simulator boot starts after Node.js setup and runtime generation to avoid competing with dependency setup, and each job tests serially on its selected device. Test execution is bounded to three minutes per suite and each macOS job to twelve minutes. Failed test runs retain their `.xcresult` bundles. `-collect-test-diagnostics never` avoids the slow post-failure system diagnostic collection, as [documented by Apple](https://developer.apple.com/forums/thread/698054); test failures, captured assertions and fixture state still appear in the result bundle. No automatic retry hides a failure.
+
+The exact Package exclusions live in `.github/workflows/native-ui-engine.yml`; the hosted selection lives in `ios/Tests/project.yml` using [XcodeGen's test selection](https://github.com/yonaskolb/XcodeGen/blob/master/Docs/ProjectSpec.md#test-target). When moving a test between environments, verify that their executed test sets remain disjoint and their union retains the complete suite. Run the hosted selection locally with:
+
+```sh
+xcodegen generate --spec ios/Tests/project.yml
+xcodebuild -project ios/Tests/NativeUIControlsHostedTests.xcodeproj -scheme NativeUIHostedTests -destination 'platform=iOS Simulator,id=<booted simulator UUID>' -parallel-testing-enabled NO test
+```
 
 These checks include native tests and Cordova fixtures. Swift API documentation uses `///`; implementation notes use `//`. Swift size/complexity heuristics do not force state-machine splits or public API changes; fixture-only force unwraps/casts are permitted, while production retains the checks. Swift is also compiled and tested on an iOS simulator.
 
