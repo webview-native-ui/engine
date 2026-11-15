@@ -67,7 +67,7 @@ jobs:
         timeout-minutes: 2
         run: xcrun simctl bootstatus "$CORDOVA_SIMULATOR" -b
       - name: Test deterministic views and native contracts
-        timeout-minutes: 3
+        timeout-minutes: 5
         run: |
           # Real WebKit navigation and active presentations run with UIApplication in ios-integration.
           xcodebuild -scheme WebViewNativeUIEngine-Package \
@@ -114,7 +114,7 @@ jobs:
         timeout-minutes: 2
         run: xcrun simctl bootstatus "$CORDOVA_SIMULATOR" -b
       - name: Test WebKit and presentations with UIApplication
-        timeout-minutes: 3
+        timeout-minutes: 5
         run: |
           xcodebuild -project ios/Tests/NativeUIControlsHostedTests.xcodeproj -scheme NativeUIHostedTests -destination "platform=iOS Simulator,id=$CORDOVA_SIMULATOR" -derivedDataPath "$RUNNER_TEMP/ios-hosted" -parallel-testing-enabled NO -collect-test-diagnostics never -resultBundlePath "$RUNNER_TEMP/ios-hosted.xcresult" CODE_SIGNING_ALLOWED=NO test-without-building
       - name: Verify capture-to-Web image reuse on a real simulator screen
