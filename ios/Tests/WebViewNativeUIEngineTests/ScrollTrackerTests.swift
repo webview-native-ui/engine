@@ -5,7 +5,7 @@ import WebKit
 @testable import WebViewNativeUIEngine
 
 final class NativeUIScrollTrackerTests: XCTestCase {
-    @MainActor func testTouchesResolveOnlyTheirNativeScrollOwner() throws {
+    @MainActor func testTouchesResolveOnlyTheirNativeAndWebScrollOwners() throws {
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 640))
         let web = WKWebView(frame: window.bounds)
         window.addSubview(web)
@@ -25,10 +25,10 @@ final class NativeUIScrollTrackerTests: XCTestCase {
         XCTAssertTrue(secondHost.place(otherAd, frame: CGRect(x: 160, y: 0, width: 160, height: 100)))
         let nativeScroll = try XCTUnwrap(advertisement.superview as? UIScrollView)
         let otherNativeScroll = try XCTUnwrap(otherAd.superview as? UIScrollView)
-        XCTAssertEqual(NativeUIScrollHosting.scrollViews(for: advertisement), [nativeScroll])
-        XCTAssertEqual(NativeUIScrollHosting.scrollViews(for: article), [nativeScroll])
-        XCTAssertEqual(NativeUIScrollHosting.scrollViews(for: first), [nativeScroll])
-        XCTAssertEqual(NativeUIScrollHosting.scrollViews(for: second), [otherNativeScroll])
+        XCTAssertEqual(NativeUIScrollHosting.scrollViews(for: advertisement), [nativeScroll, first])
+        XCTAssertEqual(NativeUIScrollHosting.scrollViews(for: article), [nativeScroll, first])
+        XCTAssertEqual(NativeUIScrollHosting.scrollViews(for: first), [nativeScroll, first])
+        XCTAssertEqual(NativeUIScrollHosting.scrollViews(for: second), [otherNativeScroll, second])
         XCTAssertTrue(NativeUIScrollHosting.scrollViews(for: unrelated).isEmpty)
         XCTAssertTrue(NativeUIScrollHosting.scrollViews(for: window).isEmpty)
         withExtendedLifetime([firstHost, secondHost]) {}

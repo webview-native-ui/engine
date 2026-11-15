@@ -131,7 +131,10 @@ public final class NativeUIScrollHosting {
             }
             view = current.superview
         }
-        return result
+        return result.flatMap { scroll -> [UIScrollView] in
+            guard let source = (scroll as? Surface)?.source else { return [scroll] }
+            return [scroll, source]
+        }
     }
 
     // Finish the touched scroll owner's native inertia before dispatching the

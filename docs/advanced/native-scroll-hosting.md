@@ -13,8 +13,8 @@ The Engine creates a transparent native scroll surface above the WebView. SDK
 views remain interactive children of this surface. UIKit handles taps, drags,
 touch cancellation and inertia. On a touch beginning inside a hosted SDK view
 or its matched Web overflow, the existing Window event interceptor ends the
-associated native surface’s deceleration before forwarding the original event
-to UIKit. SDK callbacks receive the real touch;
+associated native surface and Web scroller’s deceleration before forwarding
+the original event to UIKit. SDK callbacks receive the real touch;
 no tap or long-press event is synthesized. Content offsets are synchronized in both
 directions with the matched Web overflow. Unoccupied space passes touches to the
 WebView. Directly inserting SDK views into WebKit's private overflow hierarchy
