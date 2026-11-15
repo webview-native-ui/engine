@@ -2,6 +2,7 @@
 // swiftlint:disable force_unwrapping force_cast
 import XCTest
 import UIKit
+import WebKit
 @testable import WebViewNativeUIEngine
 
 final class NativeUICoveredSnapshotsTests: XCTestCase {
@@ -346,6 +347,83 @@ final class NativeUICoveredSnapshotsTests: XCTestCase {
             first(); second()
             XCTAssertTrue(view.layer.mask === mask)
         }
+    }
+
+    @MainActor func testProjectedSDKInsideClipDoesNotBlockWebOverlayInput() async throws {
+        let window = SnapshotTestWindow(frame: UIScreen.main.bounds)
+        window.rootViewController = UIViewController(); window.makeKeyAndVisible()
+        let web = WKWebView(frame: window.rootViewController!.view.bounds)
+        window.rootViewController!.view.addSubview(web)
+        let scroll = UIScrollView(frame: CGRect(x: 0, y: 80, width: 320, height: 400))
+        scroll.contentSize = CGSize(width: 320, height: 2000); web.addSubview(scroll)
+        let host = try XCTUnwrap(NativeUIScrollHosting(webView: web, scrollView: scroll))
+        let clip = UIView()
+        clip.clipsToBounds = true
+        let sdk = UIButton(frame: CGRect(x: 0, y: 0, width: 120, height: 180))
+        clip.addSubview(sdk)
+        XCTAssertTrue(host.place(clip, frame: CGRect(x: 20, y: 100, width: 120, height: 180)))
+        let surface = try XCTUnwrap(clip.superview as? UIScrollView)
+        let snapshots = NativeUICoveredSnapshots()
+        defer { snapshots.reset(); window.isHidden = true; withExtendedLifetime(host) {} }
+        let result: [String: Any] = await withCheckedContinuation { continuation in
+            snapshots.prepare(frames: { ["sdk": sdk.convert(sdk.bounds, to: web)] },
+                              in: web, viewportWidth: web.bounds.width) { continuation.resume(returning: $0) }
+        }
+        let token = try XCTUnwrap(result["token"] as? String)
+        snapshots.nativeContact = { _ in false } // The Web overlay still owns presentation.
+        XCTAssertTrue(snapshots.cover(token, in: web, views: [sdk]))
+        XCTAssertTrue(sdk.isHidden)
+        XCTAssertFalse(clip.isHidden)
+        let point = sdk.convert(CGPoint(x: 60, y: 90), to: surface)
+        XCTAssertNil(surface.hitTest(point, with: HostedTouchEvent()), "An empty SDK clipping root must pass through to Web")
+        snapshots.restoreControls()
+        XCTAssertTrue(surface.hitTest(point, with: HostedTouchEvent()) === sdk)
+    }
+
+    @MainActor func testHostedPhotoMovesWithScrollAndRevealsBeforeOriginalHitTest() async throws {
+        let window = SnapshotTestWindow(frame: UIScreen.main.bounds)
+        window.rootViewController = UIViewController(); window.makeKeyAndVisible()
+        let parent = window.rootViewController!.view!
+        let web = WKWebView(frame: parent.bounds)
+        parent.addSubview(web)
+        let scroll = UIScrollView(frame: CGRect(x: 0, y: 80, width: 320, height: 400))
+        scroll.contentSize = CGSize(width: 320, height: 2000)
+        web.addSubview(scroll)
+        let host = try XCTUnwrap(NativeUIScrollHosting(webView: web, scrollView: scroll))
+        let control = UIButton(frame: .zero)
+        control.backgroundColor = .red
+        XCTAssertTrue(host.place(control, frame: CGRect(x: 20, y: 100, width: 120, height: 180)))
+        let surface = try XCTUnwrap(control.superview as? UIScrollView)
+        let snapshots = NativeUICoveredSnapshots()
+        defer { snapshots.reset(); window.isHidden = true; withExtendedLifetime(host) {} }
+        let result: [String: Any] = await withCheckedContinuation { continuation in
+            snapshots.prepare(frames: { ["button": control.convert(control.bounds, to: web)] },
+                              in: web, viewportWidth: web.bounds.width) { continuation.resume(returning: $0) }
+        }
+        let token = try XCTUnwrap(result["token"] as? String)
+        var permitted = false
+        var contacts = 0
+        snapshots.nativeContact = { received in
+            XCTAssertEqual(received, token)
+            contacts += 1
+            return permitted
+        }
+        XCTAssertTrue(snapshots.cover(token, in: web, views: [control]))
+        let copy = try XCTUnwrap(surface.subviews.compactMap { $0 as? UIImageView }.first)
+        let before = copy.convert(copy.bounds, to: web).minY
+        scroll.contentOffset.y = 40
+        XCTAssertEqual(copy.convert(copy.bounds, to: web).minY, before - 40, accuracy: 0.1)
+        XCTAssertTrue(control.isHidden)
+        let point = control.convert(CGPoint(x: 60, y: 90), to: surface)
+        XCTAssertNil(surface.hitTest(point, with: HostedTouchEvent()), "A declined contact must retain the photo")
+        XCTAssertTrue(control.isHidden)
+        permitted = true
+        XCTAssertTrue(surface.hitTest(point, with: HostedTouchEvent()) === control,
+                      "Restore before UIKit chooses the target for the original touch")
+        XCTAssertFalse(control.isHidden)
+        XCTAssertNil(copy.superview)
+        _ = surface.hitTest(point, with: HostedTouchEvent())
+        XCTAssertEqual(contacts, 2, "The restoration lease must be retired exactly once")
     }
 
     @MainActor func testMovingSurfaceSharesEntryAndReturnCovers() async throws {
@@ -766,4 +844,8 @@ private final class CountingSnapshotView: UIView {
         UIRectFill(rect)
         return true
     }
+}
+
+private final class HostedTouchEvent: UIEvent {
+    override var type: UIEvent.EventType { .touches }
 }

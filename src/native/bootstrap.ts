@@ -1,9 +1,9 @@
 import { startNativeSession, type NativeSessionConfiguration } from './session.js';
 import type { ListenerHandle } from '../types.js';
 
-const sessions = new Map<string, { destroy(): Promise<void>; hide(): void; show(): void }>();
+const sessions = new Map<string, { destroy(): Promise<void>; hide(): void; show(): void; contact(token: string): boolean }>();
 const pending = new Map<string, { resolve(value: any): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> }>();
-const interactions = new Map<string, (event: { active: boolean; precovered?: string }) => void>();
+const interactions = new Map<string, (event: { active: boolean; precovered?: string; nativeContact?: string }) => void>();
 const documentID = Array.from(crypto.getRandomValues(new Uint32Array(4)), (part) => part.toString(16)).join('-');
 const notifications = new Map<string, Map<string, (event: unknown) => void>>();
 /** Cordova plugins forward their existing notifications through NativeUIProjection.receive. */
@@ -46,6 +46,7 @@ export const receive = (id: string, key: string | null, value: any, error?: stri
   if (error) item.reject(new Error(error));
   else item.resolve(value);
 };
+export const contact = (id: string, token: string) => sessions.get(id)?.contact(token) ?? false;
 export const show = (id: string) => {
   sessions.get(id)?.show();
 };
@@ -73,6 +74,7 @@ export const start = async (config: NativeSessionConfiguration) => {
   let cancelled = false;
   let pendingDestination: 'none' | 'native' | undefined;
   const reservation = {
+    contact: (token: string) => actual?.contact(token) ?? false,
     show: () => {
       pendingDestination = 'native';
       actual?.show();

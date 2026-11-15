@@ -36,6 +36,7 @@ public final class NativeUIScrollTracker {
     private var frames: [String: CGRect] = [:]
     var render: (String, CGRect, CGRect) -> Void
     private var observation: NSKeyValueObservation?
+    private var hosting: NativeUIScrollHosting?
 
     public init?(webView: WKWebView, nodes: [NativeUIScrollNode], scale: CGFloat,
                  render: @escaping (String, CGRect, CGRect) -> Void) {
@@ -54,7 +55,8 @@ public final class NativeUIScrollTracker {
                 abs(scroll.contentSize.width - placement.contentWidth * scale) < 3 &&
                 abs(scroll.contentSize.height - placement.contentHeight * scale) < 3
         }
-        guard candidates.count == 1, let scroll = candidates.first, !scroll.isDragging, !scroll.isDecelerating else { return nil }
+        guard candidates.count == 1, let scroll = candidates.first, !scroll.isDragging, !scroll.isDecelerating,
+              !NativeUIScrollHosting.isMoving(in: webView, source: scroll) else { return nil }
         self.webView = webView
         self.scrollView = scroll
         self.placement = placement
@@ -91,6 +93,17 @@ public final class NativeUIScrollTracker {
             ($0.id, $0.scroll!.frame.rect.applying(CGAffineTransform(scaleX: scale, y: scale))
                 .offsetBy(dx: contentOrigin.x, dy: contentOrigin.y))
         })
+    }
+
+    /// Place renderer-owned content in a native surface synchronized to the matched
+    /// overflow scroller, preserving both SDK hit testing and UIKit pan recognition.
+    /// `frame` uses WebView coordinates, like the renderer callback. The renderer
+    /// retains ownership and must remove the view when its surface is retired.
+    @discardableResult
+    public func host(_ view: UIView, frame: CGRect) -> Bool {
+        guard let webView, let scrollView else { return false }
+        if hosting == nil { hosting = NativeUIScrollHosting(webView: webView, scrollView: scrollView) }
+        return hosting?.place(view, frame: frame) ?? false
     }
 
     public func update() {

@@ -49,6 +49,7 @@ with tempfile.TemporaryDirectory(prefix='native-pipeline-') as folder:
         root / 'tests/integration/image-reuse/main.swift', folder / 'Capture.swift', folder / 'Encoder.swift',
         root / 'ios/Sources/WebViewNativeUIEngine/CapturePlanner.swift',
         root / 'ios/Sources/WebViewNativeUIEngine/SnapshotEventInterception.swift',
+        root / 'ios/Sources/WebViewNativeUIEngine/ScrollHosting.swift',
         folder / 'GlassCapture.o', library, '-lc++', '-o', app / 'Pipeline')
     plist = {'CFBundleIdentifier': 'local.native.pipeline', 'CFBundleExecutable': 'Pipeline', 'CFBundleName': 'Pipeline', 'CFBundlePackageType': 'APPL', 'MinimumOSVersion': '15.0', 'UILaunchScreen': {}, 'UIApplicationSceneManifest': {'UIApplicationSupportsMultipleScenes': False, 'UISceneConfigurations': {'UIWindowSceneSessionRoleApplication': [{'UISceneConfigurationName': 'Default', 'UISceneDelegateClassName': 'Pipeline.Scene'}]}}}
     (app / 'Info.plist').write_bytes(plistlib.dumps(plist))

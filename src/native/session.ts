@@ -33,9 +33,10 @@ export interface NativeSessionConfiguration {
 export interface NativeSessionBridge {
   send(
     request:
-      | WebProjectionRequest
+      | (WebProjectionRequest & { nativeContact?: boolean })
       | { action: 'resume'; token?: string }
       | { action: 'visibility'; visible: boolean }
+      | { action: 'contact'; enabled: boolean }
       | {
           action: 'track';
           viewportWidth: number;
@@ -46,7 +47,7 @@ export interface NativeSessionBridge {
       | { action: 'values' }
       | { action: 'destination'; destination: ProjectionDestination },
   ): Promise<any>;
-  listen(listener: (event: WebProjectionInteraction & { precovered?: string }) => void): Promise<ListenerHandle>;
+  listen(listener: (event: WebProjectionInteraction & { precovered?: string; nativeContact?: string }) => void): Promise<ListenerHandle>;
 }
 
 /** Native startup calls this; application code does not initialize or wrap the plugin. */
@@ -164,8 +165,10 @@ export const startNativeSession = async (
           endAutomaticMotionLater();
         }
         if (event.precovered) adoptNativeCover(event.precovered);
+        if (event.nativeContact) finishNativeContact(event.nativeContact);
       }),
     send: (request) => {
+      if (request.action === 'cover') request = { ...request, nativeContact: destination === 'native' };
       if (!config.placementHandoff) return nativeBridge.send(request);
       if (request.action === 'visibility' && !request.visible) cancelReleases();
       if (request.action === 'visibility' && request.visible && releases.size) {
@@ -269,6 +272,7 @@ export const startNativeSession = async (
   let contentRevision = 0;
   let generation = 0;
   let restoring: WebProjection | undefined;
+  let contactReturn: WebProjection | undefined;
   let initializing = false;
   let scheduled = false;
   let reconciling = false;
@@ -347,6 +351,7 @@ export const startNativeSession = async (
       })
       .finally(() => {
         if (restoring === current) restoring = undefined;
+        if (contactReturn === current) contactReturn = undefined;
         wake();
       });
   };
@@ -501,6 +506,9 @@ export const startNativeSession = async (
     )
       return;
     handledScrolls.add(event);
+    // A native contact has stopped motion, but WebKit/Chromium may still deliver
+    // queued scroll events. Keep the same return until its native draw ACK.
+    if (contactReturn === manager && manager?.restoring) return;
     if (nativeScroll && owner === scrollOwner) {
       manager?.changed(owner as EventTarget);
       return;
@@ -549,6 +557,18 @@ export const startNativeSession = async (
     }
     endAutomaticMotionLater();
   }
+  function finishNativeContact(token: string): boolean {
+    if (stopped || destination !== 'native' || effectiveDestination() !== 'native' || !target?.isConnected || !manager) return false;
+    if (manager.token && manager.token !== token) return false;
+    if (!manager.token && !manager.restoring) adoptNativeCover(token);
+    if (!manager.token && !manager.restoring) return false;
+    nativeDragging = false;
+    automaticMotion = false;
+    clearTimeout(scrollTimer);
+    contactReturn = manager;
+    manager.end();
+    return true;
+  }
   // Listen on composed-tree ancestors themselves: non-composed scroll events inside
   // Ionic's shadow tree never reach document, and Node.contains excludes slotted children.
   const refreshScrollListeners = () => {
@@ -591,6 +611,7 @@ export const startNativeSession = async (
     nativeDragging = false;
     clearTimeout(scrollTimer);
     destination = next;
+    void nativeBridge.send({ action: 'contact', enabled: next === 'native' }).catch(() => {});
     generation++;
     const version = generation;
     if (destination === 'none') {
@@ -685,6 +706,7 @@ export const startNativeSession = async (
     schedule();
     return {
       destroy,
+      contact: finishNativeContact,
       show: () => {
         placementPending = false;
         requestedDestination = 'native';

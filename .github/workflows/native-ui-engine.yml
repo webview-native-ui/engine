@@ -63,10 +63,12 @@ jobs:
           xcrun simctl boot "$DEVICE" || true
       - name: Build package tests
         run: xcodebuild -scheme WebViewNativeUIEngine-Package -destination "platform=iOS Simulator,id=$CORDOVA_SIMULATOR" -derivedDataPath "$RUNNER_TEMP/swift-package" CODE_SIGNING_ALLOWED=NO build-for-testing
+      - name: Wait for simulator readiness
+        timeout-minutes: 2
+        run: xcrun simctl bootstatus "$CORDOVA_SIMULATOR" -b
       - name: Test deterministic views and native contracts
-        timeout-minutes: 3
+        timeout-minutes: 5
         run: |
-          xcrun simctl bootstatus "$CORDOVA_SIMULATOR" -b
           # Real WebKit navigation and active presentations run with UIApplication in ios-integration.
           xcodebuild -scheme WebViewNativeUIEngine-Package \
             -destination "platform=iOS Simulator,id=$CORDOVA_SIMULATOR" \
@@ -108,10 +110,12 @@ jobs:
           brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
           xcodegen generate --spec ios/Tests/project.yml
           xcodebuild -project ios/Tests/NativeUIControlsHostedTests.xcodeproj -scheme NativeUIHostedTests -destination "platform=iOS Simulator,id=$CORDOVA_SIMULATOR" -derivedDataPath "$RUNNER_TEMP/ios-hosted" CODE_SIGNING_ALLOWED=NO build-for-testing
+      - name: Wait for simulator readiness
+        timeout-minutes: 2
+        run: xcrun simctl bootstatus "$CORDOVA_SIMULATOR" -b
       - name: Test WebKit and presentations with UIApplication
-        timeout-minutes: 3
+        timeout-minutes: 5
         run: |
-          xcrun simctl bootstatus "$CORDOVA_SIMULATOR" -b
           xcodebuild -project ios/Tests/NativeUIControlsHostedTests.xcodeproj -scheme NativeUIHostedTests -destination "platform=iOS Simulator,id=$CORDOVA_SIMULATOR" -derivedDataPath "$RUNNER_TEMP/ios-hosted" -parallel-testing-enabled NO -collect-test-diagnostics never -resultBundlePath "$RUNNER_TEMP/ios-hosted.xcresult" CODE_SIGNING_ALLOWED=NO test-without-building
       - name: Verify capture-to-Web image reuse on a real simulator screen
         run: python3 scripts/verify-image-reuse.py --device "$CORDOVA_SIMULATOR"
@@ -125,6 +129,10 @@ jobs:
   ios-consumers:
     runs-on: macos-26
     timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        consumer: [pods, cordova]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -134,13 +142,13 @@ jobs:
       - run: npm ci
       - run: npm run build
       - name: Start simulator after dependency setup
+        if: matrix.consumer == 'cordova'
         run: |
           DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; print(next(d["udid"] for devices in json.load(sys.stdin)["devices"].values() for d in devices if d["name"].startswith("iPhone")))')
           echo "CORDOVA_SIMULATOR=$DEVICE" >> "$GITHUB_ENV"
           xcrun simctl boot "$DEVICE" || true
-      - name: Wait for consumer simulator
-        run: xcrun simctl bootstatus "$CORDOVA_SIMULATOR" -b
       - name: Verify npm-distributed CocoaPod
+        if: matrix.consumer == 'pods'
         run: |
           set -euo pipefail
           ENGINE_PODS_TEMP=$(mktemp -d)
@@ -159,7 +167,11 @@ jobs:
           RUBY
           pod install --project-directory="$ENGINE_PODS_TEMP/app"
           xcodebuild -project "$ENGINE_PODS_TEMP/app/Pods/Pods.xcodeproj" -scheme WebViewNativeUIControls -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
+      - name: Wait for consumer simulator
+        if: matrix.consumer == 'cordova'
+        run: xcrun simctl bootstatus "$CORDOVA_SIMULATOR" -b
       - run: npm run test:cordova -- ios "$CORDOVA_SIMULATOR"
+        if: matrix.consumer == 'cordova'
   swift:
     # Keep the existing required check name, covering all parallel macOS jobs.
     if: always()

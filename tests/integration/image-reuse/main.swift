@@ -88,6 +88,19 @@ class Screen: UIViewController, WKScriptMessageHandler, WKNavigationDelegate {
             self.snapshots.reset()
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 30, execute: timeout)
+        // Warm UIKit's first configuration/glyph update before exercising the
+        // cache contract. A cold style update can occupy the simulator main run
+        // loop longer than the acquisition's intentional stability deadline.
+        let original = controls[0].configuration
+        var updated = original
+        updated?.title = "Updated"
+        controls[0].configuration = updated
+        controls[0].layoutIfNeeded()
+        _ = UIGraphicsImageRenderer(size: controls[0].bounds.size).image { _ in
+            controls[0].drawHierarchy(in: controls[0].bounds, afterScreenUpdates: true)
+        }
+        controls[0].configuration = original
+        controls[0].layoutIfNeeded()
         snapshots.prepare(frames: {
             Dictionary(uniqueKeysWithValues: self.controls.enumerated().map {
                 (String($0.offset), $0.element.convert($0.element.bounds, to: self.web))

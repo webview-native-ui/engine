@@ -234,6 +234,7 @@ constructor(
 
     // This path only starts from settled native ownership, never during a return.
     private fun coverBeforeScroll(drag: NativeUIWindowInteraction.Drag) {
+        if (drag.nativeWebView != null && drag.nativeWebView !== webView) return
         if (
             closed ||
                 suspended ||
@@ -306,13 +307,14 @@ constructor(
             return
         val location = IntArray(2)
         if (
-            selected.values.any { view ->
-                view.getLocationOnScreen(location)
-                drag.downX >= location[0] &&
-                    drag.downX < location[0] + view.width &&
-                    drag.downY >= location[1] &&
-                    drag.downY < location[1] + view.height
-            }
+            drag.nativeWebView == null &&
+                selected.values.any { view ->
+                    view.getLocationOnScreen(location)
+                    drag.downX >= location[0] &&
+                        drag.downX < location[0] + view.width &&
+                        drag.downY >= location[1] &&
+                        drag.downY < location[1] + view.height
+                }
         )
             return
         if (!snapshots.coverView(token, window, webView, selected.values.distinct())) return
@@ -336,6 +338,46 @@ constructor(
     private val script: ScriptHandler
     private val stopInteraction: () -> Unit
     private var windowInteracting = false
+    private var pendingContact: ((Boolean) -> Unit)? = null
+
+    private fun restoreForContact(
+        event: android.view.MotionEvent,
+        complete: (Boolean) -> Unit,
+    ): Boolean {
+        if (
+            closed ||
+                suspended ||
+                !visible ||
+                !isProjecting ||
+                destination != "native" ||
+                !views().values.all { NativeUIScrollHosting.owns(it, webView) }
+        )
+            return false
+        val origin = IntArray(2)
+        webView.getLocationOnScreen(origin)
+        if (
+            event.rawX < origin[0] ||
+                event.rawY < origin[1] ||
+                event.rawX >= origin[0] + webView.width ||
+                event.rawY >= origin[1] + webView.height
+        )
+            return false
+        val token = captured.keys.firstOrNull { snapshots.hidesNativeViews(it) } ?: return false
+        pendingContact = complete
+        webView.flingScroll(0, 0)
+        val args = JSONArray().put(id).put(token)
+        evaluate("globalThis.WebViewNativeUIEngineRuntime?.contact(...$args)") { claimed ->
+            if (claimed != "true" && pendingContact === complete) finishContact(true)
+        }
+        webView.postDelayed({ if (pendingContact === complete) finishContact(false) }, 900)
+        return true
+    }
+
+    private fun finishContact(ready: Boolean) {
+        val complete = pendingContact
+        pendingContact = null
+        complete?.invoke(ready)
+    }
 
     private fun resetSnapshots() {
         latestReadyToken = null
@@ -390,7 +432,11 @@ constructor(
             }
         } else throw UnsupportedOperationException("WebView document-start scripts are required")
         stopInteraction =
-            NativeUIWindowInteraction.observe(window, drag = ::coverBeforeScroll) { active ->
+            NativeUIWindowInteraction.observe(
+                window,
+                drag = ::coverBeforeScroll,
+                contact = ::restoreForContact,
+            ) { active ->
                 windowInteracting = active
                 snapshots.interaction(active)
                 reply(null, JSONObject().put("active", active))
@@ -776,6 +822,7 @@ constructor(
                 done = true
                 if (observer.isAlive) observer.removeOnDrawListener(listener)
                 complete()
+                if (!closed && visible && !suspended && !isProjecting) finishContact(true)
             }
         }
         listener =
@@ -790,6 +837,7 @@ constructor(
                     done = true
                     if (observer.isAlive) observer.removeOnDrawListener(listener)
                     failed()
+                    finishContact(false)
                 }
             },
             250,
@@ -861,6 +909,7 @@ constructor(
     // A ScriptHandler exists only after constructor validation of DOCUMENT_START_SCRIPT.
     @SuppressLint("RequiresFeature")
     override fun close() {
+        finishContact(false)
         if (closed) return
         closed = true
         isProjecting = false

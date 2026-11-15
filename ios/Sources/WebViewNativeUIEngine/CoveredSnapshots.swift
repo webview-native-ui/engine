@@ -346,14 +346,14 @@ public final class NativeUICoveredSnapshots {
     private static func isScrolling(in view: UIView) -> Bool {
         if let scroll = view as? UIScrollView,
            scroll.isTracking || scroll.isDragging || scroll.isDecelerating { return true }
-        return view.subviews.contains { isScrolling(in: $0) }
+        return (view.subviews + NativeUIScrollHosting.hostedScrollViews(in: view)).contains { isScrolling(in: $0) }
     }
 
     private static func stopMomentum(in view: UIView) {
         if let scroll = view as? UIScrollView {
             scroll.setContentOffset(scroll.contentOffset, animated: false)
         }
-        view.subviews.forEach { stopMomentum(in: $0) }
+        (view.subviews + NativeUIScrollHosting.hostedScrollViews(in: view)).forEach { stopMomentum(in: $0) }
     }
 
     private func capture(frames: [String: CGRect], anchorFrames: [String: CGRect], in webView: UIView, viewportWidth: CGFloat,
@@ -619,13 +619,30 @@ public final class NativeUICoveredSnapshots {
     /// Install prepared pixels before hiding live views, within the same main-thread turn.
     /// A transient (moving) surface does not replace background covering ownership.
     @discardableResult public func cover(_ token: String, in webView: UIView, views: [UIView], transient: Bool = false, frames: [String: CGRect]? = nil) -> Bool {
-        if !restore(in: webView, token: token, frames: frames, entry: true) { return false }
+        if views.count == 1, let view = views.first, NativeUIScrollHosting.hosts(view),
+           let capture = captures[token], let part = capture.parts.first, capture.parts.count == 1,
+           let window = webView.window, capture.window === window, capture.size == window.bounds.size,
+           capture.webFrame == webView.convert(webView.bounds, to: window), let parent = view.superview,
+           abs(view.bounds.width - part.anchorFrame.width) < 0.1,
+           abs(view.bounds.height - part.anchorFrame.height) < 0.1 {
+            clearRestoration()
+            let copy = UIImageView(image: part.image)
+            let local = CGRect(x: view.bounds.minX + part.frame.minX - part.anchorFrame.minX,
+                               y: view.bounds.minY + part.frame.minY - part.anchorFrame.minY,
+                               width: part.frame.width, height: part.frame.height)
+            copy.frame = view.convert(local, to: parent)
+            copy.isUserInteractionEnabled = false
+            copy.isAccessibilityElement = false
+            parent.insertSubview(copy, aboveSubview: view)
+            restoration = (token, [copy], true)
+        } else if !restore(in: webView, token: token, frames: frames, entry: true) { return false }
         if !transient { coveringToken = token }
         hide(views, for: token)
         return true
     }
 
     public var hidesNativeControls: Bool { hiddenControls != nil }
+    var nativeContact: ((String) -> Bool)?
 
     /// Conceal only presentation pixels; keep layout and hosted renderer lifetimes intact.
     /// The owner restores this lease before applying its next presentation policy.
@@ -653,10 +670,19 @@ public final class NativeUICoveredSnapshots {
         generation += 1
         restoreControls()
         hiddenControls = (token, views.map { view in
-            if captures[token]?.preservesLayout == true { return Self.concealPixels(in: view) }
-            let hidden = view.isHidden
-            view.isHidden = true
-            return { [weak view] in view?.isHidden = hidden }
+            let restore: () -> Void
+            if captures[token]?.preservesLayout == true { restore = Self.concealPixels(in: view) } else {
+                let hidden = view.isHidden
+                view.isHidden = true
+                restore = { [weak view] in view?.isHidden = hidden }
+            }
+            let forget = NativeUIScrollHosting.revealOnContact(view) { [weak self] in
+                guard let self, self.nativeContact?(token) == true else { return }
+                self.restoreControls()
+                self.retireCopy(token)
+                self.retireCopy(token, entry: false)
+            }
+            return { forget(); restore() }
         })
     }
 
