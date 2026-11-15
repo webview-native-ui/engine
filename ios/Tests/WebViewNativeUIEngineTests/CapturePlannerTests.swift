@@ -22,11 +22,15 @@ final class NativeUICapturePlannerTests: XCTestCase {
     }
 
     func testKeepsNarrowRegionsNarrowAndVerticalOverlapTogether() {
+        let model = NativeUICaptureCostModel(drawMilliseconds: 10, megapixelMilliseconds: 10)
         let narrow = [CGRect(x: 100, y: 60, width: 80, height: 44), CGRect(x: 100, y: 600, width: 80, height: 44)]
-        XCTAssertEqual(NativeUICapturePlanner.plan(narrow, scale: 3).count, 1)
+        XCTAssertEqual(NativeUICapturePlanner.plan(narrow, scale: 3, model: model).count, 1)
         let wide = [CGRect(x: 0, y: 60, width: 466, height: 44), CGRect(x: 0, y: 600, width: 466, height: 44)]
         let vertical = CGRect(x: 10, y: 60, width: 60, height: 584)
-        XCTAssertEqual(NativeUICapturePlanner.plan(wide + [vertical], scale: 3), [wide[0].union(wide[1])])
+        XCTAssertEqual(NativeUICapturePlanner.plan(wide + [vertical], scale: 3, model: model), [wide[0].union(wide[1])])
+        let contained = CGRect(x: 10, y: 70, width: 30, height: 20)
+        XCTAssertEqual(NativeUICapturePlanner.plan([wide[1], contained, wide[0]], scale: 3, model: model), wide,
+                       "Input order and a contained region must not change the selected bands")
         XCTAssertEqual(NativeUICapturePlanner.plan([], scale: 3), [])
     }
 
