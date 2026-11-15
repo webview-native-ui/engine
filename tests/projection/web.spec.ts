@@ -311,19 +311,31 @@ test('interaction keeps the completed pre-interaction image', async ({ page }) =
   expect(await page.evaluate(() => (window as any).calls.filter((c: any) => c.action === 'prepare').length)).toBe(1);
 });
 for (const rtl of [false, true])
-  test(`fractional layout and direction remain intact (${rtl ? 'RTL' : 'LTR'})`, async ({ page }) => {
+  test(`scroll placement reports fractional geometry and signed offsets (${rtl ? 'RTL' : 'LTR'})`, async ({ page }) => {
     await boot(page);
-    const result = await page.evaluate((rtl) => {
+    const placement = await page.evaluate((rtl) => {
       const w = window as any,
         owner = document.querySelector('#scroll') as HTMLElement,
         source = document.querySelector('#source') as HTMLElement;
-      owner.style.cssText = 'width:300.5px;height:300px;overflow:auto;border:0.5px solid;direction:' + (rtl ? 'rtl' : 'ltr');
-      source.parentElement!.firstElementChild!.setAttribute('style', 'width:1200px;height:100px');
-      const p = w.engine.readScrollPlacement(source, owner, () => 'owner');
-      const r = source.getBoundingClientRect();
-      return { actual: p.frame.x + p.viewport.x - owner.scrollLeft, expected: r.x };
+      document.body.style.margin = '0';
+      owner.style.cssText =
+        'position:absolute;left:20.25px;top:30.5px;width:300.5px;height:300px;overflow:auto;border:1px solid;direction:' +
+        (rtl ? 'rtl' : 'ltr');
+      owner.firstElementChild!.setAttribute('style', 'width:1200px;height:100px');
+      owner.scrollLeft = rtl ? -40 : 40;
+      owner.scrollTop = 50;
+      return w.engine.readScrollPlacement(source, owner, () => 'owner');
     }, rtl);
-    expect(result.actual).toBeCloseTo(result.expected, 5);
+    // Independent fixture coordinates: reconstructing a DOM rect from frame + viewport
+    // would also pass if both fields carried the same incorrect border offset.
+    expect(placement).toMatchObject({
+      id: 'owner',
+      offsetX: rtl ? -40 : 40,
+      offsetY: 50,
+      viewport: { x: 21.25, y: 31.5, width: 300.5, height: 300 },
+      clip: { x: 21.25, y: 31.5, width: 300.5, height: 300 },
+      frame: { x: rtl ? 180.5 : 0, y: 100, width: 120, height: 40 },
+    });
   });
 test('unsupported transforms keep the Web layout intact', async ({ page }) => {
   await boot(page);
@@ -558,10 +570,14 @@ test('existing fallback DOM, listeners, values and application updates survive h
     input.value = 'before';
     host.append(input);
     w.originalInput = input;
+    host.style.opacity = '0.25';
+    host.style.overflow = 'hidden';
     w.originalStyle = host.getAttribute('style');
     w.manager.begin();
   });
   await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
+  await expect(page.locator('#source')).toHaveCSS('opacity', '0.25');
+  await expect(page.locator('#source')).toHaveCSS('overflow', 'hidden');
   expect(
     await page.locator('img[data-native-ui-projection-image]').evaluate((image: HTMLImageElement) => ({
       inert: image.inert,
@@ -1444,18 +1460,6 @@ test('an expired native entry retires the delayed Web image', async ({ page }) =
   await page.evaluate(() => (window as any).painted({ shown: false }));
   await expect(page.locator('#source')).not.toHaveAttribute('data-native-ui-snapshot-visible', '');
   await expect(page.locator('#source > button')).toBeVisible();
-});
-
-test('projection preserves host opacity and clipping', async ({ page }) => {
-  await prepare(page);
-  await page.locator('#source').evaluate((host) => {
-    host.style.opacity = '0.25';
-    host.style.overflow = 'hidden';
-  });
-  await page.evaluate(() => (window as any).manager.begin());
-  await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
-  await expect(page.locator('#source')).toHaveCSS('opacity', '0.25');
-  await expect(page.locator('#source')).toHaveCSS('overflow', 'hidden');
 });
 
 test('pause covers a standalone renderer and local end cannot release it', async ({ page }) => {

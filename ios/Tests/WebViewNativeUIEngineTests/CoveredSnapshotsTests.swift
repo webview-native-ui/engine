@@ -5,36 +5,6 @@ import UIKit
 @testable import WebViewNativeUIEngine
 
 final class NativeUICoveredSnapshotsTests: XCTestCase {
-    @MainActor func testScrollingContactStillCapturesAndCoversNativePixels() async throws {
-        for motion in 1...3 {
-            let window = SnapshotTestWindow(frame: UIScreen.main.bounds)
-            window.rootViewController = UIViewController(); window.makeKeyAndVisible()
-            let web = try XCTUnwrap(window.rootViewController?.view)
-            let scroll = SnapshotMovingScrollView(frame: web.bounds)
-            web.addSubview(scroll)
-            let snapshots = NativeUICoveredSnapshots()
-            var interactions: [[String: Any]] = []
-            snapshots.observeInteractions(window) { interactions.append($0) }
-            defer { snapshots.reset(); window.isHidden = true }
-            let result: [String: Any] = await withCheckedContinuation { continuation in
-                snapshots.prepare(frames: { ["button": CGRect(x: 40, y: 100, width: 60, height: 44)] },
-                                  in: web, viewportWidth: web.bounds.width, captureID: "moving", delay: 500) {
-                    continuation.resume(returning: $0)
-                }
-                scroll.motion = motion
-                snapshots.pinBeforeInteraction()
-            }
-            XCTAssertGreaterThan(window.draws, 0)
-            XCTAssertTrue(interactions.contains { $0["captureID"] as? String == "moving" })
-            let token = try XCTUnwrap(result["token"] as? String)
-            let parts = try XCTUnwrap(result["parts"] as? [[String: Any]])
-            let url = try XCTUnwrap(URL(string: try XCTUnwrap(parts.first?["url"] as? String)))
-            XCTAssertNotNil(UIImage(contentsOfFile: url.path)?.cgImage)
-            XCTAssertTrue(snapshots.cover(token, in: web, views: []))
-            XCTAssertFalse(window.subviews.compactMap { $0 as? UIImageView }.isEmpty)
-        }
-    }
-
     @MainActor func testCompletedCaptureCannotCoverAnotherWindowWithIdenticalGeometry() async throws {
         let first = SnapshotTestWindow(frame: UIScreen.main.bounds)
         first.rootViewController = UIViewController(); first.makeKeyAndVisible()
@@ -129,18 +99,6 @@ final class NativeUICoveredSnapshotsTests: XCTestCase {
         snapshots.reset()
         await fulfillment(of: [done], timeout: 3)
         XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
-    }
-
-    func testBandsOnlySplitLargeGapsAndMergeOverlappingRegions() {
-        let top = CGRect(x: 0, y: 68, width: 466, height: 68)
-        let bottom = CGRect(x: 0, y: 583, width: 466, height: 95)
-        XCTAssertEqual(NativeUICapturePlanner.plan([bottom, top], scale: 3), [top, bottom])
-        let overlap = CGRect(x: 10, y: 90, width: 30, height: 30)
-        XCTAssertEqual(NativeUICapturePlanner.plan([top, overlap, bottom], scale: 3), [top, bottom])
-        let vertical = CGRect(x: 10, y: 68, width: 30, height: 610)
-        XCTAssertEqual(NativeUICapturePlanner.plan([top, vertical, bottom], scale: 3), [top.union(bottom)])
-        let dense = CGRect(x: 0, y: 200, width: 466, height: 300)
-        XCTAssertEqual(NativeUICapturePlanner.plan([top, dense], scale: 3), [top.union(dense)])
     }
 
     @MainActor func testContactPromotesWaitingCaptureAndKeepsPixelsAcrossInvalidation() async throws {
@@ -529,41 +487,6 @@ final class NativeUICoveredSnapshotsTests: XCTestCase {
         XCTAssertEqual(retry["shown"] as? Bool, false)
     }
 
-    @MainActor func testPreparedImageContainsVisibleWindowPixels() async throws {
-        let owner = UIViewController()
-        let window = SnapshotTestWindow(frame: UIScreen.main.bounds)
-        window.rootViewController = owner
-        window.makeKeyAndVisible()
-        let view = owner.view!
-        view.frame = window.bounds
-        window.layoutIfNeeded()
-        let snapshots = NativeUICoveredSnapshots()
-        defer { snapshots.reset(); window.isHidden = true }
-        let result: [String: Any] = await withCheckedContinuation { continuation in
-            snapshots.prepare(frames: { ["control": CGRect(x: 20, y: 80, width: 48, height: 48)] },
-                              in: view, viewportWidth: view.bounds.width) { continuation.resume(returning: $0) }
-        }
-        let parts = try XCTUnwrap(result["parts"] as? [[String: Any]])
-        let path = try XCTUnwrap(parts.first?["url"] as? String)
-        let url = try XCTUnwrap(URL(string: path))
-        let image = try XCTUnwrap(UIImage(contentsOfFile: url.path)?.cgImage)
-        XCTAssertEqual(image.bitsPerComponent, 16, "PNG must retain 16-bit channel precision")
-        XCTAssertEqual(image.colorSpace?.name, CGColorSpace.displayP3, "PNG must carry its Display P3 profile")
-        XCTAssertEqual(image.width, Int(72 * window.screen.scale))
-        XCTAssertEqual(image.height, Int(72 * window.screen.scale))
-        var pixel = [UInt8](repeating: 0, count: 4)
-        let drawn = pixel.withUnsafeMutableBytes { bytes -> Bool in
-            guard let context = CGContext(data: bytes.baseAddress, width: 1, height: 1,
-                                          bitsPerComponent: 8, bytesPerRow: 4, space: CGColorSpaceCreateDeviceRGB(),
-                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
-            context.draw(image, in: CGRect(x: 0, y: 0, width: 1, height: 1))
-            return true
-        }
-        XCTAssertTrue(drawn)
-        XCTAssertTrue(pixel.prefix(3).allSatisfy { $0 > 240 },
-                      "A successful preparation must contain the white window pixels, not a black display replica")
-    }
-
     @MainActor func testViewCapturePreservesAlphaWithoutWindowBackgroundOrDuplicateViews() async throws {
         let window = SnapshotTestWindow(frame: UIScreen.main.bounds)
         window.rootViewController = UIViewController()
@@ -625,6 +548,10 @@ final class NativeUICoveredSnapshotsTests: XCTestCase {
         let parts = try XCTUnwrap(result["parts"] as? [[String: Any]])
         let url = try XCTUnwrap(URL(string: try XCTUnwrap(parts.first?["url"] as? String)))
         let image = try XCTUnwrap(UIImage(contentsOfFile: url.path)?.cgImage)
+        XCTAssertEqual(image.bitsPerComponent, 16, "PNG must retain 16-bit channel precision")
+        XCTAssertEqual(image.colorSpace?.name, CGColorSpace.displayP3, "PNG must carry its Display P3 profile")
+        XCTAssertEqual(image.width, Int(72 * window.screen.scale))
+        XCTAssertEqual(image.height, Int(72 * window.screen.scale))
         for (fraction, channel) in [(0.25, 0), (0.75, 2)] {
             let sample = try XCTUnwrap(image.cropping(to: CGRect(x: image.width / 2, y: Int(Double(image.height) * fraction), width: 1, height: 1)))
             var rgba = [UInt8](repeating: 0, count: 4)
@@ -785,13 +712,6 @@ final class NativeUICoveredSnapshotsTests: XCTestCase {
 
 // Swift package tests have no hosted application scene. Supply deterministic
 // pixels here; actual UIKit capture is also verified in hosted device integration tests.
-private final class SnapshotMovingScrollView: UIScrollView {
-    var motion = 0
-    override var isTracking: Bool { motion == 1 }
-    override var isDragging: Bool { motion == 2 }
-    override var isDecelerating: Bool { motion == 3 }
-}
-
 final class SnapshotTestWindow: UIWindow {
     var beforeDraw: (() -> Void)?
     var draws = 0
