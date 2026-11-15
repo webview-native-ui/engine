@@ -165,19 +165,6 @@ test('geometry invalidation releases files and prevents stale image reuse', asyn
   expect(f.manager.begin()).toBeUndefined();
   expect(f.bridge).toHaveBeenCalledWith({ action: 'release', token: 'image-1' });
 });
-test('entry returns without waiting but keeps Web pixels hidden until the native cover notification', async () => {
-  const f = await fixture();
-  f.manager.consider(1, [f.candidate]);
-  await drain();
-  f.bridge.mockClear();
-  f.bridge.mockImplementation(() => new Promise(() => {}));
-  expect(f.manager.begin()).toBeUndefined();
-  expect(projectionState.owns(f.button)).toBe(true);
-  expect(f.bridge).toHaveBeenCalledWith({ action: 'cover', token: 'image-1' });
-  expect(f.button.hasAttribute('data-native-ui-snapshot-visible')).toBe(false);
-  // Cleanup is not the subject of the stalled-bridge test.
-  f.bridge.mockResolvedValue({ shown: true });
-});
 test('newer revision during capture is prepared after the old capture settles', async () => {
   const f = await fixture();
   let finish!: (value: ReturnType<typeof f.capture>) => void;
@@ -228,16 +215,25 @@ test('incomplete image coverage keeps Web projection and releases the capture', 
   expect(f.bridge).toHaveBeenCalledWith({ action: 'release', token: 'image-1' });
 });
 
-test('horizontal and vertical tabs share the prepared image path', async () => {
+test.each([undefined, 'vertical-bars'] as const)('tab bars prepare and present pixels with placement %s', async (placement) => {
   const f = await fixture();
-  f.candidate.control.kind = 'tab-bar';
-  f.manager.consider(1, [f.candidate]);
+  const tabs = document.createElement('ion-tab-bar');
+  f.button.replaceWith(tabs);
+  const candidate = createCandidate(tabs, 'tab-bar', () => 'button');
+  candidate.control.placement = placement;
+  const target = placement ? document.createElement('div') : tabs;
+  if (placement) {
+    document.body.append(target);
+    projectionState.setTarget(tabs, target);
+  }
+  f.manager.consider(1, [candidate]);
   await drain();
-  expect(f.bridge).toHaveBeenCalledWith(expect.objectContaining({ action: 'prepare', ids: ['button'] }));
-  f.candidate.control.placement = 'vertical-bars';
-  f.manager.consider(2, [f.candidate]);
+  expect(f.bridge).toHaveBeenCalledWith(expect.objectContaining({ action: 'prepare', ids: ['button'], revision: 1 }));
+  expect(target.hasAttribute('data-native-ui-snapshot')).toBe(true);
+  f.manager.begin();
   await drain();
-  expect(f.bridge).toHaveBeenCalledWith(expect.objectContaining({ action: 'prepare', ids: ['button'] }));
+  expect(projectionState.owns(tabs)).toBe(true);
+  expect(target.hasAttribute('data-native-ui-snapshot-visible')).toBe(true);
 });
 
 test('layout or appearance changes block presentation but retain the completed baseline', async () => {
@@ -379,6 +375,8 @@ test('handoff uses the prepared capture without waiting for the native reply', a
   await drain();
   f.bridge.mockImplementation(async (args) => (args.action === 'cover' ? new Promise(() => {}) : { shown: true }));
   expect(f.manager.begin()).toBeUndefined();
+  expect(projectionState.owns(f.button)).toBe(true);
+  expect(f.bridge).toHaveBeenCalledWith({ action: 'cover', token: 'image-1' });
   expect(f.manager.handoffPending).toBe(true);
   expect(f.button.hasAttribute('data-native-ui-snapshot-visible')).toBe(false);
   await vi.advanceTimersByTimeAsync(20);

@@ -59,7 +59,8 @@ test('one shared handshake restores lost subscriptions without replaying actions
 
 test('a timed-out connection check retries without accepting the stale response', async () => {
   const f = fixture();
-  f.read.mockImplementationOnce(() => new Promise(() => {}));
+  let staleReply!: (state: NativeUIConnectionState) => void;
+  f.read.mockImplementationOnce(() => new Promise((resolve) => (staleReply = resolve)));
   const reconcile = vi.fn();
   connection.observe(reconcile);
   connection.start();
@@ -68,7 +69,16 @@ test('a timed-out connection check retries without accepting the stale response'
   expect(reconcile).not.toHaveBeenCalled();
   await vi.advanceTimersByTimeAsync(2000);
   expect(f.read).toHaveBeenCalledTimes(2);
-  expect(reconcile.mock.calls.at(-1)?.[1]).toBe(true);
+  expect(reconcile).toHaveBeenCalledTimes(1);
+  expect(reconcile.mock.calls[0][0].session).toBe('original');
+  expect(reconcile.mock.calls[0][1]).toBe(true);
+  staleReply({ ...f.state, session: 'expired-session', listeners: [] });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(reconcile).toHaveBeenCalledTimes(1);
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(reconcile).toHaveBeenCalledTimes(2);
+  expect(reconcile.mock.calls[1][0].session).toBe('original');
+  expect(reconcile.mock.calls[1][1]).toBe(false);
 });
 
 test('a late response after stop cannot resubscribe or synchronize', async () => {

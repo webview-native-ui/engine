@@ -23,7 +23,10 @@ class NativeUIEngineTest {
                 """{"server":{"androidScheme":"https","hostname":"app.example","url":"http://user:password@DEV.example:8080/path?query=1#fragment","allowNavigation":["untrusted.example","*"]}}"""
             )
         assertEquals(setOf("http://dev.example:8080"), ProjectionOrigins.configured(config))
-        assertEquals(ProjectionOrigins.defaults, ProjectionOrigins.configured(JSONObject()))
+        assertEquals(
+            setOf("https://localhost", "http://localhost"),
+            ProjectionOrigins.configured(JSONObject()),
+        )
         assertEquals(
             setOf("https://localhost"),
             ProjectionOrigins.configured(JSONObject("""{"server":{}}""")),
