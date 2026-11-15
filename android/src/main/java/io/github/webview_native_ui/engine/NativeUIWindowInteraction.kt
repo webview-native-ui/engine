@@ -34,7 +34,6 @@ private constructor(
     private class InputReplay(event: MotionEvent) {
         val events = ArrayDeque<MotionEvent>().apply { add(MotionEvent.obtain(event)) }
         var shift = 0L
-        var waiting = false
         var contactResolved = false
         var task: Runnable? = null
         var timeout: Runnable? = null
@@ -59,7 +58,6 @@ private constructor(
     // Resolve each DOWN independently, including gestures queued behind another return.
     private fun resolveContact(input: InputReplay): Boolean {
         val event = input.events.first
-        input.waiting = true
         val expired = Runnable { cancelInput(input) }
         input.timeout = expired
         root.postDelayed(expired, 1000)
@@ -72,7 +70,6 @@ private constructor(
             if (remaining != 0) return
             root.removeCallbacks(expired)
             input.timeout = null
-            input.waiting = false
             if (!accepted) {
                 cancelInput(input)
                 return
@@ -91,7 +88,6 @@ private constructor(
         if (!claimed) {
             root.removeCallbacks(expired)
             input.timeout = null
-            input.waiting = false
             input.contactResolved = true
             return false
         }
@@ -100,7 +96,7 @@ private constructor(
     }
 
     private fun replay(input: InputReplay) {
-        if (pendingInput !== input || input.waiting || input.task != null) return
+        if (pendingInput !== input || input.timeout != null || input.task != null) return
         val event = input.events.peekFirst() ?: return
         if (event.actionMasked == MotionEvent.ACTION_DOWN && !input.contactResolved) {
             if (resolveContact(input)) return

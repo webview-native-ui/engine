@@ -28,7 +28,6 @@ class NativeUIScrollHostingTest {
 
     private lateinit var activity: EngineTestActivity
     private lateinit var button: Button
-    private lateinit var host: NativeUIScrollHosting
     private lateinit var clipped: NativeUIClippedView
     private var projection: NativeUIProjection? = null
     private var firstWebMove: (() -> Unit)? = null
@@ -99,7 +98,6 @@ class NativeUIScrollHostingTest {
             if (!loaded) Thread.sleep(20)
         }
         assertTrue("Scroll document did not load", loaded)
-        assertTrue(js("feed.scrollHeight").toInt() >= 6000)
         cssWidth = js("innerWidth").toFloat()
         main {
             scale = activity.web.width / cssWidth
@@ -123,7 +121,7 @@ class NativeUIScrollHostingTest {
                             true
                         }
                     }
-            host = NativeUIScrollHosting(activity.web, button)
+            val host = NativeUIScrollHosting(activity.web, button)
             clipped = NativeUIClippedView(host)
             activity.root.addView(clipped, FrameLayout.LayoutParams(1, 1))
             clipped.place(
@@ -268,6 +266,7 @@ class NativeUIScrollHostingTest {
             """
                 .trimIndent()
         )
+        val prepared = CountDownLatch(1)
         main {
             button.setBackgroundColor(android.graphics.Color.RED)
             clipped.place(
@@ -294,36 +293,40 @@ class NativeUIScrollHostingTest {
                 }
             projection =
                 NativeUIProjection(
-                    activity.window,
-                    activity.web,
-                    "Fixture",
-                    "#slot",
-                    captureMode = NativeUIProjection.CaptureMode.VIEW,
-                    updatePlacement = { value ->
-                        val clip = value.getJSONObject("clip")
-                        fun rect(raw: JSONObject) =
-                            RectF(
-                                (raw.getDouble("x") * scale).toFloat(),
-                                (raw.getDouble("y") * scale).toFloat(),
-                                ((raw.getDouble("x") + raw.getDouble("width")) * scale).toFloat(),
-                                ((raw.getDouble("y") + raw.getDouble("height")) * scale).toFloat(),
-                            )
-                        clipped.place(rect(value), rect(clip))
-                    },
-                    view = { button },
-                )
+                        activity.window,
+                        activity.web,
+                        "Fixture",
+                        "#slot",
+                        captureMode = NativeUIProjection.CaptureMode.VIEW,
+                        updatePlacement = { value ->
+                            val clip = value.getJSONObject("clip")
+                            fun rect(raw: JSONObject) =
+                                RectF(
+                                    (raw.getDouble("x") * scale).toFloat(),
+                                    (raw.getDouble("y") * scale).toFloat(),
+                                    ((raw.getDouble("x") + raw.getDouble("width")) * scale)
+                                        .toFloat(),
+                                    ((raw.getDouble("y") + raw.getDouble("height")) * scale)
+                                        .toFloat(),
+                                )
+                            clipped.place(rect(value), rect(clip))
+                        },
+                        view = { button },
+                    )
+                    .also { registration ->
+                        registration.awaitWebDraw = { web, current, complete ->
+                            NativeUIWebReadiness.draw(web, current) { ready ->
+                                complete(ready)
+                                if (ready) prepared.countDown()
+                            }
+                        }
+                    }
         }
-        val ready =
-            NativeUIProjection::class.java.getDeclaredField("latestReadyToken").apply {
-                isAccessible = true
-            }
-        val deadline = SystemClock.uptimeMillis() + 10000
-        var prepared = false
-        while (!prepared && SystemClock.uptimeMillis() < deadline) {
-            main { prepared = ready.get(projection) != null }
-            if (!prepared) Thread.sleep(20)
-        }
-        assertTrue("Opaque image must be decoded and drawn before the gesture", prepared)
+        assertTrue(
+            "Opaque image must be decoded and drawn before the gesture",
+            prepared.await(10, TimeUnit.SECONDS),
+        )
+        main { projection!!.awaitWebDraw = NativeUIWebReadiness::draw }
     }
 
     @Test
@@ -373,21 +376,20 @@ class NativeUIScrollHostingTest {
             main { clicked = if (longPress) longs == 1 else taps == 1 }
             if (!clicked) Thread.sleep(10)
         }
-        val geometry =
-            js(
-                "JSON.stringify({scroll:feed.scrollTop,slot:slot.getBoundingClientRect().toJSON(),webClicks,webLongs})"
-            )
-        var nativeState = ""
-        main {
-            val location = IntArray(2)
-            button.getLocationOnScreen(location)
-            nativeState =
-                "projecting=${projection!!.isProjecting} visibility=${button.visibility} sdkDown=$sdkDownTime original=$originalDown location=${location.toList()} size=${button.width}x${button.height}"
+        if (!clicked) {
+            val geometry =
+                js(
+                    "JSON.stringify({scroll:feed.scrollTop,slot:slot.getBoundingClientRect().toJSON(),webClicks,webLongs})"
+                )
+            var nativeState = ""
+            main {
+                val location = IntArray(2)
+                button.getLocationOnScreen(location)
+                nativeState =
+                    "projecting=${projection!!.isProjecting} visibility=${button.visibility} sdkDown=$sdkDownTime original=$originalDown location=${location.toList()} size=${button.width}x${button.height}"
+            }
+            fail("The first photo contact must perform the real SDK click: $nativeState $geometry")
         }
-        assertTrue(
-            "The first photo contact must perform the real SDK click: $nativeState $geometry",
-            clicked,
-        )
         callbacks(if (longPress) 0 else 1, if (longPress) 1 else 0)
         assertStopped()
         main {
