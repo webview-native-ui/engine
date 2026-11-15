@@ -346,14 +346,14 @@ public final class NativeUICoveredSnapshots {
     private static func isScrolling(in view: UIView) -> Bool {
         if let scroll = view as? UIScrollView,
            scroll.isTracking || scroll.isDragging || scroll.isDecelerating { return true }
-        return view.subviews.contains { isScrolling(in: $0) }
+        return (view.subviews + NativeUIScrollHosting.scrollViews(in: view)).contains { isScrolling(in: $0) }
     }
 
     private static func stopMomentum(in view: UIView) {
         if let scroll = view as? UIScrollView {
             scroll.setContentOffset(scroll.contentOffset, animated: false)
         }
-        view.subviews.forEach { stopMomentum(in: $0) }
+        (view.subviews + NativeUIScrollHosting.scrollViews(in: view)).forEach { stopMomentum(in: $0) }
     }
 
     private func capture(frames: [String: CGRect], anchorFrames: [String: CGRect], in webView: UIView, viewportWidth: CGFloat,

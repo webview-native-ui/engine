@@ -55,7 +55,8 @@ public final class NativeUIScrollTracker {
                 abs(scroll.contentSize.width - placement.contentWidth * scale) < 3 &&
                 abs(scroll.contentSize.height - placement.contentHeight * scale) < 3
         }
-        guard candidates.count == 1, let scroll = candidates.first, !scroll.isDragging, !scroll.isDecelerating else { return nil }
+        guard candidates.count == 1, let scroll = candidates.first, !scroll.isDragging, !scroll.isDecelerating,
+              !NativeUIScrollHosting.isMoving(in: webView, source: scroll) else { return nil }
         self.webView = webView
         self.scrollView = scroll
         self.placement = placement

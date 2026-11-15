@@ -6,6 +6,9 @@ import WebKit
 /// Positions are mirrored to the real overflow scroller without synthetic touches.
 public final class NativeUIScrollHosting {
     private final class Surface: UIScrollView {
+        var owners: [ObjectIdentifier: Owner] = [:]
+        weak var source: UIScrollView?
+        weak var webView: WKWebView?
         override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
             guard let hit = super.hitTest(point, with: event), hit !== self else { return nil }
             return hit
@@ -14,14 +17,13 @@ public final class NativeUIScrollHosting {
         override func touchesShouldCancel(in view: UIView) -> Bool { true }
     }
 
-    private weak var webView: WKWebView?
-    private weak var scrollView: UIScrollView?
+    private var webView: WKWebView? { surface.webView }
+    private var scrollView: UIScrollView? { surface.source }
     private final class Owner {
         weak var view: UIView?
         weak var parent: UIView?
         init(view: UIView, parent: UIView) { self.view = view; self.parent = parent }
     }
-    private var owners: [ObjectIdentifier: Owner] = [:]
     private let surface = Surface()
     private var sourceObservation: NSKeyValueObservation?
     private var surfaceObservation: NSKeyValueObservation?
@@ -30,8 +32,8 @@ public final class NativeUIScrollHosting {
     public init?(webView: WKWebView, scrollView: UIScrollView) {
         guard scrollView.isDescendant(of: webView), scrollView.window != nil, webView.superview != nil,
               abs(scrollView.zoomScale - 1) < 0.001 else { return nil }
-        self.webView = webView
-        self.scrollView = scrollView
+        surface.source = scrollView
+        surface.webView = webView
         surface.showsHorizontalScrollIndicator = false
         surface.showsVerticalScrollIndicator = false
         surface.contentInsetAdjustmentBehavior = .never
@@ -54,13 +56,14 @@ public final class NativeUIScrollHosting {
     @discardableResult
     public func place(_ view: UIView, frame: CGRect) -> Bool {
         guard let webView, let scrollView, let parent = webView.superview,
-              scrollView.isDescendant(of: webView), !scrollView.isHidden, scrollView.window != nil,
+              scrollView.isDescendant(of: webView), !scrollView.isHidden, let window = scrollView.window,
               abs(scrollView.zoomScale - 1) < 0.001,
               view !== surface, !surface.isDescendant(of: view), view !== scrollView,
               view !== webView, !webView.isDescendant(of: view),
               !frame.isNull, !frame.isInfinite,
               [frame.minX, frame.minY, frame.width, frame.height].allSatisfy({ $0.isFinite }),
               frame.width >= 0, frame.height >= 0 else { return false }
+        guard NativeUISnapshotEventInterception.install(in: window) else { return false }
         let wasSynchronizing = synchronizing
         synchronizing = true
         defer { synchronizing = wasSynchronizing }
@@ -77,8 +80,9 @@ public final class NativeUIScrollHosting {
         if surface.isScrollEnabled != scrollView.isScrollEnabled { surface.isScrollEnabled = scrollView.isScrollEnabled }
         if surface.contentOffset != scrollView.contentOffset { surface.contentOffset = scrollView.contentOffset }
         if view.superview !== surface {
-            let originalParent = view.superview is Surface ? parent : view.superview ?? parent
-            owners[ObjectIdentifier(view)] = Owner(view: view, parent: originalParent)
+            let identifier = ObjectIdentifier(view)
+            let previous = (view.superview as? Surface)?.owners.removeValue(forKey: identifier)
+            surface.owners[identifier] = previous ?? Owner(view: view, parent: view.superview is Surface ? parent : view.superview ?? parent)
             surface.addSubview(view)
         }
         view.frame = surface.convert(frame, from: webView)
@@ -98,11 +102,44 @@ public final class NativeUIScrollHosting {
         }
     }
 
+    // These surfaces are WebView siblings so WebKit cannot intercept SDK input.
+    // Include them explicitly in the Engine's existing motion and capture handling.
+    static func scrollViews(in webView: UIView) -> [UIScrollView] {
+        guard webView is WKWebView else { return [] }
+        return webView.superview?.subviews.compactMap {
+            guard let surface = $0 as? Surface, surface.webView === webView else { return nil }
+            return surface
+        } ?? []
+    }
+
+    static func isMoving(in webView: UIView, source: UIScrollView) -> Bool {
+        scrollViews(in: webView).contains {
+            ($0 as? Surface)?.source === source && ($0.isDragging || $0.isDecelerating)
+        }
+    }
+
+    // Finish native inertia before UIKit dispatches a fresh SDK touch. Otherwise
+    // UIScrollView can consume that touch only to stop deceleration.
+    static func willSendEvent(_ event: UIEvent) {
+        for touch in event.allTouches ?? [] where touch.phase == .began {
+            var view = touch.view
+            while let current = view {
+                if let surface = current as? Surface, surface.isDecelerating {
+                    surface.setContentOffset(surface.contentOffset, animated: false)
+                }
+                view = current.superview
+            }
+        }
+    }
+
     deinit {
         // A placement tracker may be retired on pause or remapping while the SDK
         // view remains alive. Return those views to their renderer, preserving
         // visibility and current geometry; never retire another host's content.
-        for owner in owners.values {
+        sourceObservation?.invalidate()
+        surfaceObservation?.invalidate()
+        surface.setContentOffset(surface.contentOffset, animated: false)
+        for owner in surface.owners.values {
             guard let view = owner.view, let parent = owner.parent, view.superview === surface else { continue }
             let frame = view.convert(view.bounds, to: parent)
             parent.addSubview(view)

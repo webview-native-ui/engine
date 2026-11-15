@@ -24,6 +24,7 @@ enum NativeUISnapshotEventInterception {
                 return
             }
             defer { dispatching.remove(identity) }
+            NativeUIScrollHosting.willSendEvent(event)
             if NativeUICoveredSnapshots.automaticallyInterceptsEvents {
                 NativeUICoveredSnapshots.willSendEvent(event, in: window)
             }

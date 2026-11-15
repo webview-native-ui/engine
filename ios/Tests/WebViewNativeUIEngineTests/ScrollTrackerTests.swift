@@ -5,6 +5,35 @@ import WebKit
 @testable import WebViewNativeUIEngine
 
 final class NativeUIScrollTrackerTests: XCTestCase {
+    @MainActor func testRehostingRestoresOriginalRendererParent() throws {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 640))
+        let owner = UIViewController()
+        window.rootViewController = owner
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        let web = WKWebView(frame: window.bounds)
+        owner.view.addSubview(web)
+        let rendererParent = UIView(frame: owner.view.bounds)
+        owner.view.addSubview(rendererParent)
+        let first = UIScrollView(frame: CGRect(x: 0, y: 0, width: 320, height: 300))
+        let second = UIScrollView(frame: CGRect(x: 0, y: 300, width: 320, height: 300))
+        for scroll in [first, second] {
+            scroll.contentSize = CGSize(width: 320, height: 1200)
+            web.addSubview(scroll)
+        }
+        let sdk = UIView(frame: CGRect(x: 10, y: 20, width: 100, height: 60))
+        rendererParent.addSubview(sdk)
+        var a: NativeUIScrollHosting? = try XCTUnwrap(NativeUIScrollHosting(webView: web, scrollView: first))
+        var b: NativeUIScrollHosting? = try XCTUnwrap(NativeUIScrollHosting(webView: web, scrollView: second))
+        XCTAssertTrue(a!.place(sdk, frame: CGRect(x: 10, y: 20, width: 100, height: 60)))
+        XCTAssertTrue(b!.place(sdk, frame: CGRect(x: 10, y: 320, width: 100, height: 60)))
+        let currentParent = sdk.superview
+        a = nil
+        XCTAssertTrue(sdk.superview === currentParent)
+        b = nil
+        XCTAssertTrue(sdk.superview === rendererParent, "Rebinding must preserve the original renderer parent")
+    }
+
     @MainActor func testRetiringHostReturnsRendererViewsWithoutShowingHiddenContent() throws {
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 640))
         let web = WKWebView(frame: window.bounds)
@@ -20,6 +49,7 @@ final class NativeUIScrollTrackerTests: XCTestCase {
         let frame = view.convert(view.bounds, to: window)
         view.isHidden = true
         host = nil
+        XCTAssertTrue(NativeUIScrollHosting.scrollViews(in: web).isEmpty)
         XCTAssertTrue(view.superview === window)
         XCTAssertEqual(view.frame, frame)
         XCTAssertTrue(view.isHidden)
@@ -45,6 +75,9 @@ final class NativeUIScrollTrackerTests: XCTestCase {
         XCTAssertTrue(tracker.host(surface, frame: frame))
         let nativeScroll = try XCTUnwrap(surface.superview as? UIScrollView)
         XCTAssertFalse(nativeScroll === scroll)
+        XCTAssertFalse(nativeScroll.isDescendant(of: web), "WebKit must not intercept native SDK touches")
+        XCTAssertTrue(NativeUIScrollHosting.scrollViews(in: web).contains { $0 === nativeScroll },
+                      "Snapshot motion checks and cancellation must include the sibling surface")
         XCTAssertEqual(surface.convert(surface.bounds, to: web), frame)
         XCTAssertTrue(surface.hitTest(CGPoint(x: 20, y: 20), with: nil) === control, "SDK controls must retain tap ownership")
         XCTAssertTrue(owner.view.hitTest(CGPoint(x: 20, y: 210), with: nil) === control)

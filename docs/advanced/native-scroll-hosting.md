@@ -11,7 +11,10 @@ tracker owns the complete binding lifetime.
 
 The Engine creates a transparent native scroll surface above the WebView. SDK
 views remain interactive children of this surface. UIKit handles taps, drags,
-touch cancellation and inertia; content offsets are synchronized in both
+touch cancellation and inertia. On a touch beginning inside a hosted SDK view,
+the existing Window event interceptor ends that surface’s deceleration before
+forwarding the original event to UIKit. SDK callbacks receive the real touch;
+no tap or long-press event is synthesized. Content offsets are synchronized in both
 directions with the matched Web overflow. Unoccupied space passes touches to the
 WebView. Directly inserting SDK views into WebKit's private overflow hierarchy
 is insufficient: WebKit's hit testing can exclude those inserted views.
@@ -27,6 +30,11 @@ coverage and teardown. Remove a retired view from its superview and release the
 host when the scroll owner is destroyed. A hidden surface must have hidden or
 removed children. Releasing the host returns any surviving views to their
 renderer parents at the current position without changing their visibility.
-Reconcile content-size and viewport changes through `place`.
+Reconcile content-size and viewport changes through `place`. Moving a view to
+another host preserves its original renderer parent. Engine snapshot preparation
+includes the native surfaces when checking motion and, with
+`stopScrollBeforeCapture: true`, when stopping momentum on native contact. Idle
+preparation waits for motion to settle. This does not make a traversal of only
+the WebView’s descendants sufficient to stop its sibling native surfaces.
 This API is opt-in, iOS-only, and does not change Android registrations or add
 scroll handling to arbitrary third-party views automatically.
