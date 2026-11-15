@@ -5,6 +5,64 @@ import WebKit
 @testable import WebViewNativeUIEngine
 
 final class NativeUIScrollTrackerTests: XCTestCase {
+    @MainActor func testRetiringHostReturnsRendererViewsWithoutShowingHiddenContent() throws {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 640))
+        let web = WKWebView(frame: window.bounds)
+        window.addSubview(web)
+        let scroll = UIScrollView(frame: CGRect(x: 0, y: 80, width: 320, height: 500))
+        scroll.contentSize = CGSize(width: 320, height: 1200)
+        web.addSubview(scroll)
+        let view = UIView()
+        window.addSubview(view)
+        var host = try XCTUnwrap(NativeUIScrollHosting(webView: web, scrollView: scroll)) as NativeUIScrollHosting?
+        XCTAssertTrue(host!.place(view, frame: CGRect(x: 10, y: 200, width: 240, height: 100)))
+        scroll.contentOffset.y = 50
+        let frame = view.convert(view.bounds, to: window)
+        view.isHidden = true
+        host = nil
+        XCTAssertTrue(view.superview === window)
+        XCTAssertEqual(view.frame, frame)
+        XCTAssertTrue(view.isHidden)
+    }
+
+    @MainActor func testHostingPreservesContentCoordinatesAndTouchAncestry() throws {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 640))
+        let owner = UIViewController()
+        window.rootViewController = owner
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        let web = WKWebView(frame: window.bounds)
+        owner.view.addSubview(web)
+        let scroll = UIScrollView(frame: CGRect(x: 0, y: 80, width: 320, height: 500))
+        scroll.contentSize = CGSize(width: 320, height: 1200)
+        web.addSubview(scroll)
+        let surface = UIView()
+        let control = UIButton(frame: CGRect(x: 0, y: 0, width: 100, height: 40))
+        surface.addSubview(control)
+        owner.view.addSubview(surface)
+        let tracker = try XCTUnwrap(NativeUIScrollTracker(webView: web, nodes: [node()], scale: 1) { _, _, _ in })
+        let frame = CGRect(x: 10, y: 200, width: 240, height: 100)
+        XCTAssertTrue(tracker.host(surface, frame: frame))
+        let nativeScroll = try XCTUnwrap(surface.superview as? UIScrollView)
+        XCTAssertFalse(nativeScroll === scroll)
+        XCTAssertEqual(surface.convert(surface.bounds, to: web), frame)
+        XCTAssertTrue(surface.hitTest(CGPoint(x: 20, y: 20), with: nil) === control, "SDK controls must retain tap ownership")
+        XCTAssertTrue(owner.view.hitTest(CGPoint(x: 20, y: 210), with: nil) === control)
+        XCTAssertNil(nativeScroll.hitTest(CGPoint(x: 300, y: 10), with: nil), "Empty overlay space must pass through")
+        let contentFrame = surface.frame
+        scroll.contentOffset.y = 100
+        XCTAssertTrue(tracker.host(surface, frame: frame.offsetBy(dx: 0, dy: -100)))
+        XCTAssertEqual(surface.frame, contentFrame, "Scrolling must keep the view in content coordinates")
+        nativeScroll.contentOffset.y = 200
+        XCTAssertEqual(scroll.contentOffset.y, 200, "Native pans must scroll the real overflow owner")
+        XCTAssertFalse(tracker.host(web, frame: frame), "Never create a view ancestry cycle")
+        XCTAssertFalse(tracker.host(owner.view, frame: frame))
+        XCTAssertFalse(tracker.host(scroll, frame: frame))
+        XCTAssertFalse(tracker.host(surface, frame: .null))
+        scroll.removeFromSuperview()
+        XCTAssertFalse(tracker.host(surface, frame: frame), "Detached scrollers cannot host new placements")
+    }
+
     private func node(_ id: String = "counter", y: Double = 400, reuse: Bool = false) throws -> NativeUIScrollNode {
         let value: [String: Any] = ["id": id,
                                     "scroll": ["id": "scroll", "reuse": reuse, "offsetX": 0, "offsetY": 0,
@@ -111,12 +169,30 @@ final class NativeUIScrollTrackerTests: XCTestCase {
         }
         let bound = try XCTUnwrap(tracker, "Must bind to actual WebKit overflow")
         bound.update()
+        let surface = UIView()
+        let button = UIButton(frame: CGRect(x: 0, y: 0, width: 100, height: 40))
+        surface.addSubview(button)
+        XCTAssertTrue(bound.host(surface, frame: try XCTUnwrap(actual)))
+        XCTAssertTrue(owner.view.hitTest(CGPoint(x: 20, y: 490), with: nil) === button,
+                      "A real overflow scroller must preserve native control hit testing")
         _ = try await web.evaluateJavaScript("document.getElementById('scroll').scrollTop = 150")
         for _ in 0..<40 {
             if actual?.minY == 330 { break }
             try await Task.sleep(nanoseconds: 25_000_000)
         }
         XCTAssertEqual(try XCTUnwrap(actual).minY, 330, accuracy: 0.5)
+        XCTAssertEqual(surface.convert(surface.bounds, to: web).minY, 330, accuracy: 0.5)
+        let nativeScroll = try XCTUnwrap(surface.superview as? UIScrollView)
+        nativeScroll.contentOffset.y = 250
+        var domOffset: Double?
+        for _ in 0..<40 {
+            domOffset = (try await web.evaluateJavaScript("document.getElementById('scroll').scrollTop") as? NSNumber)?.doubleValue
+            if domOffset == 250 { break }
+            try await Task.sleep(nanoseconds: 25_000_000)
+        }
+        XCTAssertEqual(try XCTUnwrap(domOffset), 250, accuracy: 0.5,
+                       "Dragging native content must update the actual DOM scroll position")
+        surface.removeFromSuperview()
     }
     @MainActor func testActualHorizontalScrollDirections() async throws {
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 640))
