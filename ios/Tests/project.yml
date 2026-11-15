@@ -76,3 +76,19 @@ schemes:
         WebViewNativeUIControlsTests: [test]
     test:
       targets: [WebViewNativeUIControlsTests]
+
+  NativeUIHostedTests:
+    build:
+      targets:
+        TestHost: all
+        WebViewNativeUIEngineTests: [test]
+        WebViewNativeUIControlsTests: [test]
+    test:
+      targets:
+        - name: WebViewNativeUIEngineTests
+          selectedTests: [NativeUIProjectionTests, NativeUIScrollTrackerTests]
+        - name: WebViewNativeUIControlsTests
+          selectedTests:
+            - NativeUISnapshotTests/testNativePopoverClosureNotifiesWebBeforeReopening()
+            - NativeUISnapshotTests/testPopoverReopensAfterPresentationIdentityKeepsReplacedSource()
+            - NativeUISnapshotTests/testViewCapturePreservesNativeSourceOrder()
