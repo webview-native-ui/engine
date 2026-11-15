@@ -50,17 +50,17 @@ jobs:
     timeout-minutes: 12
     steps:
       - uses: actions/checkout@v5
-      - name: Start simulator while dependencies build
-        run: |
-          DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; print(next(d["udid"] for devices in json.load(sys.stdin)["devices"].values() for d in devices if d["name"].startswith("iPhone")))')
-          echo "CORDOVA_SIMULATOR=$DEVICE" >> "$GITHUB_ENV"
-          xcrun simctl boot "$DEVICE" || true
       - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: npm
       - run: npm ci
       - run: npm run build
+      - name: Start simulator after dependency setup
+        run: |
+          DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; print(next(d["udid"] for devices in json.load(sys.stdin)["devices"].values() for d in devices if d["name"].startswith("iPhone")))')
+          echo "CORDOVA_SIMULATOR=$DEVICE" >> "$GITHUB_ENV"
+          xcrun simctl boot "$DEVICE" || true
       - name: Build package tests
         run: xcodebuild -scheme WebViewNativeUIEngine-Package -destination "platform=iOS Simulator,id=$CORDOVA_SIMULATOR" -derivedDataPath "$RUNNER_TEMP/swift-package" CODE_SIGNING_ALLOWED=NO build-for-testing
       - name: Test deterministic views and native contracts
@@ -92,17 +92,17 @@ jobs:
     timeout-minutes: 12
     steps:
       - uses: actions/checkout@v5
-      - name: Start simulator while dependencies build
-        run: |
-          DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; print(next(d["udid"] for devices in json.load(sys.stdin)["devices"].values() for d in devices if d["name"].startswith("iPhone")))')
-          echo "CORDOVA_SIMULATOR=$DEVICE" >> "$GITHUB_ENV"
-          xcrun simctl boot "$DEVICE" || true
       - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: npm
       - run: npm ci
       - run: npm run build
+      - name: Start simulator after dependency setup
+        run: |
+          DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; print(next(d["udid"] for devices in json.load(sys.stdin)["devices"].values() for d in devices if d["name"].startswith("iPhone")))')
+          echo "CORDOVA_SIMULATOR=$DEVICE" >> "$GITHUB_ENV"
+          xcrun simctl boot "$DEVICE" || true
       - name: Build hosted WebKit and presentation tests
         run: |
           brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
