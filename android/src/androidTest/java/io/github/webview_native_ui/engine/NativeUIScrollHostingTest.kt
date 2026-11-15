@@ -391,7 +391,8 @@ class NativeUIScrollHostingTest {
         callbacks(if (longPress) 0 else 1, if (longPress) 1 else 0)
         assertStopped()
         main {
-            assertEquals(originalDown, sdkDownTime)
+            assertTrue("Deferred input rebases the gesture clock", sdkDownTime >= originalDown)
+            assertTrue("The initial restore is bounded", sdkDownTime - originalDown < 1000)
             assertFalse(projection!!.isProjecting)
             assertEquals(View.VISIBLE, button.visibility)
         }

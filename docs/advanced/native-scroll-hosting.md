@@ -70,7 +70,9 @@ prepared image owns pixels before the first forwarded Web movement. No capture
 is started on that scroll path. During image presentation, the Window observer
 retains original input while the existing placement/resume handshake measures
 the current frame and waits for native drawing. It then dispatches those same
-events, with their original timestamps, through normal native hit testing. This
+events through normal native hit testing, shifting their timestamps and delivery
+together to preserve gesture durations. Each following gesture resolves its own
+contact; focus loss or teardown cancels a partially delivered gesture. This
 allows the first photo tap or long press to operate the SDK. A failed or timed-out
 restore cancels that contact instead of delivering it to stale geometry.
 
