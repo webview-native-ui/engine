@@ -357,6 +357,8 @@ test('shared overlays temporarily cover native sessions without changing the exp
     alert.dispatchEvent(new CustomEvent('ionAlertWillPresent', { bubbles: true }));
   });
   await expect(page.locator('#slot')).toHaveAttribute('data-native-ui-snapshot-visible', '');
+  expect(await page.evaluate(() => (window as any).session.contact('pixels'))).toBe(false);
+  expect(await page.evaluate(() => (window as any).calls.filter((c: any) => c.action === 'contact').at(-1)?.enabled)).toBe(false);
   await page.evaluate(() => document.querySelector('ion-modal')!.dispatchEvent(new CustomEvent('ionModalDidDismiss', { bubbles: true })));
   await expect(page.locator('#slot')).toHaveAttribute('data-native-ui-snapshot-visible', '');
   await page.evaluate(() => (window as any).events.hidden({ slot: 1 }));
@@ -1289,3 +1291,32 @@ test('pause re-covers native show without releasing placement ownership', async 
   await expect(page.locator('#slot')).toHaveAttribute('data-native-ui-session-surface', 'native');
   await expect.poll(() => page.evaluate(() => (window as any).binding.projected)).toBe(false);
 });
+
+for (const path of ['direct contact', 'window notification']) {
+  test(`first photo ${path} restores current placement and retains pixels until native draw`, async ({ page }) => {
+    await bindPlacement(page, true, true);
+    await page.evaluate(() => {
+      const w = window as any;
+      w.interaction({ active: true, precovered: 'pixels' });
+    });
+    await expect.poll(() => page.evaluate(() => (window as any).binding.projected)).toBe(true);
+    await page.evaluate((path) => {
+      const w = window as any;
+      w.calls = [];
+      w.holdResume = true;
+      w.latestPlacement = { sequence: 12, x: 10, y: 180 };
+      if (path === 'direct contact') {
+        if (w.session.contact('stale-token')) throw new Error('Stale contact must not retire current pixels');
+        if (!w.session.contact('pixels')) throw new Error('Current photo contact must be accepted');
+      } else w.interaction({ active: true, nativeContact: 'pixels' });
+    }, path);
+    await expect.poll(() => page.evaluate(() => (window as any).pendingResume.length)).toBe(1);
+    expect(await page.evaluate(() => (window as any).binding.projected)).toBe(true);
+    expect(
+      await page.evaluate(() => (window as any).calls.filter((c: any) => c.action === 'restore').map((c: any) => c.placement)),
+    ).toEqual([{ sequence: 12, x: 10, y: 180 }]);
+    expect(await page.evaluate(() => (window as any).calls.filter((c: any) => c.action === 'prepare'))).toHaveLength(0);
+    await page.evaluate(() => (window as any).pendingResume.shift()({}));
+    await expect.poll(() => page.evaluate(() => (window as any).binding.projected)).toBe(false);
+  });
+}

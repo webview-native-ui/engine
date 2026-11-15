@@ -12,6 +12,7 @@ android {
     compileSdk 36
     sourceSets.main.jniLibs.srcDir('../native/artifacts/android')
     lint { warningsAsErrors = true }
+    testOptions { targetSdk = 36 }
     defaultConfig {
         minSdk 23
         consumerProguardFiles 'consumer-rules.pro'

@@ -70,6 +70,7 @@ public final class NativeUIProjection: NSObject, WKScriptMessageHandler {
     private var destination = "native"
     private var connected = false
     private var restoreAccepted = true
+    private var nativeContactAllowed = false
     private var hiddenByProjection: [UIView] = []
     private var visible = true
     private var closed = false
@@ -110,6 +111,14 @@ public final class NativeUIProjection: NSObject, WKScriptMessageHandler {
         self.webView = webView; self.views = { view().map { ["view": $0] } ?? [:] }; self.origins = allowedOrigins; self.canCapture = canCapture
         super.init()
         precondition(Thread.isMainThread)
+        snapshots.nativeContact = { [weak self] token in
+            guard let self, !self.closed, self.visible, self.nativeContactAllowed, self.destination == "native",
+                  self.recordedDestination.map({ $0 == "native" }) ?? true,
+                  let selected = self.captured[token], !selected.isEmpty,
+                  selected.allSatisfy({ self.views()[$0.key] === $0.value && NativeUIScrollHosting.hosts($0.value) }) else { return false }
+            self.reply(nil, ["active": true, "nativeContact": token])
+            return true
+        }
         guard captureDelayMs.isFinite, captureDelayMs >= 0, captureDelayMs <= 2147483647,
               !projectionSelector.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw ProjectionError.invalidConfiguration }
         var config: [String: Any] = ["id": id, "plugin": plugin, "projectionSelector": projectionSelector,
@@ -205,7 +214,7 @@ public final class NativeUIProjection: NSObject, WKScriptMessageHandler {
             }
             let scale = webView.bounds.width / width
             let current = views()
-            guard !current.isEmpty, current.values.allSatisfy({ $0.layer.mask == nil }) else { complete(["tracked": false]); return }
+            guard !current.isEmpty, current.values.allSatisfy({ $0.layer.mask == nil && !NativeUIScrollHosting.hosts($0) }) else { complete(["tracked": false]); return }
             let nodes = current.map { id, view -> NativeUIScrollNode in
                 let frame = view.convert(view.bounds, to: webView)
                 return NativeUIScrollNode(
@@ -270,7 +279,11 @@ public final class NativeUIProjection: NSObject, WKScriptMessageHandler {
                 }
                 complete(result)
             }
+        case "contact":
+            nativeContactAllowed = request["enabled"] as? Bool == true
+            complete([:])
         case "cover":
+            nativeContactAllowed = request["nativeContact"] as? Bool == true
             let selected = captured[token] ?? [:], current = views()
             let valid = visible && canCapture() && !selected.isEmpty && selected.allSatisfy { current[$0.key] === $0.value }
             let frames = request["parts"] == nil ? nil : snapshots.projectionFrames(request, in: webView)
@@ -293,6 +306,14 @@ public final class NativeUIProjection: NSObject, WKScriptMessageHandler {
                 guard abs(old.width-anchor.native.width) < 0.1, abs(old.height-anchor.native.height) < 0.1,
                       abs(frame.width-anchor.image.width) < 0.1, abs(frame.height-anchor.image.height) < 0.1
                 else { complete(["shown": false]); return }
+            }
+            // Hosting already owns position, including while pixels are projected.
+            // Keep the Web image until resume acknowledges native drawing; a second
+            // transform or window copy would duplicate that geometry ownership.
+            if !current.isEmpty && current.values.allSatisfy({ NativeUIScrollHosting.hosts($0) }) {
+                restoreAccepted = true
+                complete(["shown": true])
+                return
             }
             for (id, frame) in frames {
                 guard let view = current[id], let parent = view.superview, let anchor = anchors[token]?[id] else { continue }

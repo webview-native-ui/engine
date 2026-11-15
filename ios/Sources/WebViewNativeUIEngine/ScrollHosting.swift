@@ -16,6 +16,17 @@ public final class NativeUIScrollHosting {
             return [self, source]
         }
         override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+            // UIKit can hit-test before attaching the new UITouch to UIEvent.allTouches.
+            if bounds.contains(point), event?.type == .touches {
+                for owner in owners.values {
+                    guard let view = owner.view, let reveal = owner.reveal,
+                          view.bounds.contains(view.convert(point, from: self)) else { continue }
+                    for scroll in scrollViews where scroll.isDecelerating {
+                        scroll.setContentOffset(scroll.contentOffset, animated: false)
+                    }
+                    reveal()
+                }
+            }
             guard let hit = super.hitTest(point, with: event), hit !== self else { return nil }
             return hit
         }
@@ -28,6 +39,7 @@ public final class NativeUIScrollHosting {
     private final class Owner {
         weak var view: UIView?
         weak var parent: UIView?
+        var reveal: (() -> Void)?
         init(view: UIView, parent: UIView) { self.view = view; self.parent = parent }
     }
     private let surface = Surface()
@@ -106,6 +118,26 @@ public final class NativeUIScrollHosting {
         } else if surface.contentOffset != scrollView.contentOffset {
             surface.contentOffset = scrollView.contentOffset
         }
+    }
+
+    private static func owner(of view: UIView) -> Owner? {
+        var current = view
+        while let parent = current.superview {
+            if let surface = parent as? Surface {
+                guard let webView = surface.webView, let source = surface.source, source.isDescendant(of: webView) else { return nil }
+                return surface.owners[ObjectIdentifier(current)]
+            }
+            current = parent
+        }
+        return nil
+    }
+
+    static func hosts(_ view: UIView) -> Bool { owner(of: view) != nil }
+
+    static func revealOnContact(_ view: UIView, reveal: @escaping () -> Void) -> () -> Void {
+        guard let owner = owner(of: view) else { return {} }
+        owner.reveal = reveal
+        return { [weak owner] in owner?.reveal = nil }
     }
 
     // These surfaces are WebView siblings so WebKit cannot intercept SDK input.

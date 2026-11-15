@@ -1,4 +1,4 @@
-# Native surfaces in an iOS scrolling feed
+# Native surfaces in a scrolling feed
 
 A native SDK view over a WebView receives its own touches. Moving its pixels when
 the Web content scrolls does not let a drag starting on that view scroll the feed.
@@ -38,5 +38,48 @@ includes the native surfaces when checking motion and, with
 `stopScrollBeforeCapture: true`, when stopping momentum on native contact. Idle
 preparation waits for motion to settle. This does not make a traversal of only
 the WebView’s descendants sufficient to stop its sibling native surfaces.
-This API is opt-in, iOS-only, and does not change Android registrations or add
-scroll handling to arbitrary third-party views automatically.
+A hosted view already has native geometry ownership. Engine projection therefore
+uses its prepared image during scrolling instead of adding a second native
+geometry tracker. The entry image belongs to the same scroll surface, so it
+inherits the viewport's motion and clipping. On contact, the host stops the
+paired scrollers and reveals the SDK before UIKit chooses the original touch's
+target. Taps and long presses therefore reach the SDK on the first contact.
+
+## Android
+
+Wrap the SDK view once in `NativeUIScrollHosting(webView, sdkView)` and give that
+wrapper to the renderer's existing `NativeUIClippedView`. Keep the SDK view as the
+projection capture source. The renderer continues to own placement and clipping:
+
+```kotlin
+val input = NativeUIScrollHosting(webView, sdkView)
+val clipped = NativeUIClippedView(input)
+// Add clipped to the renderer parent, and update clipped.place(...) as usual.
+```
+
+The wrapper preserves native taps, long presses and child interception vetoes.
+A single-pointer movement beyond touch slop, before long press recognition,
+cancels the SDK gesture and forwards the original gesture to WebView. Chromium
+owns DOM hit testing, body or overflow scrolling, and inertia. The wrapper does
+not maintain another scroll offset or fling animator. SDK contact also settles
+WebView inertia before the SDK receives the contact. Multi-touch gestures and
+SDK gestures that disallow interception retain their native ownership.
+
+With `NativeUIProjection` in `VIEW` mode and the existing placement binding, the
+prepared image owns pixels before the first forwarded Web movement. No capture
+is started on that scroll path. During image presentation, the Window observer
+retains original input while the existing placement/resume handshake measures
+the current frame and waits for native drawing. It then dispatches those same
+events, with their original timestamps, through normal native hit testing. This
+allows the first photo tap or long press to operate the SDK. A failed or timed-out
+restore cancels that contact instead of delivering it to stale geometry.
+
+Gesture forwarding requires an attached WebView in the same Window and
+translation-only ancestors. Projection retains its existing document-start
+WebView support requirement; the scroll wrapper itself supports API 23. Remove
+the wrapper with the renderer's SDK view on teardown; detaching cancels a
+forwarded gesture.
+
+These APIs are opt-in. They do not add scroll handling to arbitrary SDK views
+automatically. Validate the integration with the actual SDK: it may reserve
+its own drag gesture or disallow parent interception.
