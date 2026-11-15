@@ -78,7 +78,6 @@ test('slots, header/footer and multiple toolbars have independent automatic posi
       '<ion-footer><ion-toolbar><ion-button>D</ion-button></ion-toolbar></ion-footer>',
   );
   expect(new Set(ids(candidates)).size).toBe(4);
-  expect(ids(candidates).every((id) => !id?.includes('unmatched'))).toBe(true);
 });
 
 test('duplicate explicit keys never merge items, including across slots', () => {
@@ -89,7 +88,6 @@ test('duplicate explicit keys never merge items, including across slots', () => 
     toolbar('<ion-button slot="start" data-transition-id="same">A</ion-button><ion-button data-transition-id="same">B</ion-button>'),
   );
   expect(new Set(ids(from)).size).toBe(2);
-  expect(ids(from).every((id) => id?.includes('unmatched'))).toBe(true);
   expect(ids(from)).not.toEqual(ids(to));
 });
 

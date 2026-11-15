@@ -522,21 +522,36 @@ test('native fallback also recovers failed native restoration', async ({ page })
 test('moving a host between scroll roots refreshes the binding even without a size change', async ({ page }) => {
   await boot(page);
   await page.evaluate(() => {
-    for (const id of ['one', 'two']) {
+    for (const [id, x, y] of [
+      ['one', 10, 100],
+      ['two', 260, 200],
+    ] as const) {
       const owner = document.createElement('div');
       owner.id = id;
-      owner.style.cssText = 'width:160px;height:80px;overflow:auto';
+      owner.style.cssText = `position:absolute;left:${x}px;top:${y}px;width:160px;height:80px;overflow:auto`;
       owner.innerHTML = '<div style="height:800px"></div>';
       document.body.append(owner);
     }
     document.querySelector('#one > div')!.prepend(document.querySelector('#slot')!);
   });
   await expect.poll(() => page.evaluate(() => (window as any).calls.filter((r: any) => r.action === 'track').length)).toBeGreaterThan(1);
+  expect(await page.evaluate(() => (window as any).calls.filter((r: any) => r.action === 'track').at(-1)?.scroll?.viewport)).toEqual({
+    x: 10,
+    y: 100,
+    width: 160,
+    height: 80,
+  });
   await page.evaluate(() => {
     (window as any).calls = [];
     document.querySelector('#two > div')!.prepend(document.querySelector('#slot')!);
+    document.querySelector('#two')!.scrollTop = 40;
   });
   await expect.poll(() => page.evaluate(() => (window as any).calls.filter((r: any) => r.action === 'track').length)).toBeGreaterThan(0);
+  expect(await page.evaluate(() => (window as any).calls.filter((r: any) => r.action === 'track').at(-1)?.scroll)).toMatchObject({
+    viewport: { x: 260, y: 200, width: 160, height: 80 },
+    offsetY: 40,
+    frame: { x: 0, y: 0 },
+  });
 });
 
 test('late reconciliation failure after destroy cannot restore native visibility', async ({ page }) => {

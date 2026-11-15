@@ -13,7 +13,7 @@ final class NativeUIProjectionTests: XCTestCase {
         ]])
         XCTAssertEqual(origins, ["https://dev.example"])
         XCTAssertEqual(try ProjectionOrigins.configured(["server": ["iosScheme": "myapp", "hostname": "app.example"]]), ["myapp://app.example"])
-        XCTAssertEqual(try ProjectionOrigins.configured([:]), ProjectionOrigins.defaults)
+        XCTAssertEqual(try ProjectionOrigins.configured([:]), ["capacitor://localhost", "app://localhost", "https://localhost", "http://localhost"])
         XCTAssertEqual(try ProjectionOrigins.configured(["server": [:]]), ["capacitor://localhost"])
     }
 

@@ -4,7 +4,8 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
-import { runtimeFiles } from './release-tag.mjs';
+// Release policy must be independent of the implementation's allowlist.
+const runtimeFiles = ['ios/Sources/WebViewNativeUIEngine/Resources/native-ui-engine.js', 'runtime/native-ui-engine.js'];
 
 const verify = new URL('./release-tag.mjs', import.meta.url).href;
 

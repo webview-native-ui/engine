@@ -48,12 +48,13 @@ for (const accepted of ['PUBLISHING', 'PUBLISHED']) {
 
 test('failed validation stops without retrying upload or exposing server responses', async () => {
   let uploads = 0;
+  const records = [];
   await assert.rejects(
     publishBundle({
       bundle: new Uint8Array(),
       name: 'release',
       token: 'secret',
-      record: async () => {},
+      record: async (message) => records.push(message),
       fetcher: async (url) => {
         if (url.includes('/upload?')) {
           uploads++;
@@ -65,9 +66,14 @@ test('failed validation stops without retrying upload or exposing server respons
         });
       },
     }),
-    /FAILED; inspect the Portal/,
+    (error) => {
+      assert.match(error.message, /FAILED; inspect the Portal/);
+      assert.doesNotMatch(error.message, /private server detail|secret/);
+      return true;
+    },
   );
   assert.equal(uploads, 1);
+  assert.doesNotMatch(records.join('\n'), /private server detail|secret/);
 });
 
 test('upload failure is not retried and polling is bounded', async () => {
@@ -82,7 +88,11 @@ test('upload failure is not retried and polling is bounded', async () => {
         return new Response('secret', { status: 401 });
       },
     }),
-    /HTTP 401/,
+    (error) => {
+      assert.match(error.message, /HTTP 401/);
+      assert.doesNotMatch(error.message, /secret/);
+      return true;
+    },
   );
   assert.equal(calls, 1);
   calls = 0;
