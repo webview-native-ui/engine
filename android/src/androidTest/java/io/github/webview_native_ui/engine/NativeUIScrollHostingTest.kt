@@ -67,7 +67,6 @@ class NativeUIScrollHostingTest {
                 Intent(instrumentation.targetContext, EngineTestActivity::class.java)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             ) as EngineTestActivity
-        val loaded = CountDownLatch(1)
         val feed =
             when (kind) {
                 "body" ->
@@ -81,12 +80,6 @@ class NativeUIScrollHostingTest {
                     """<div id="feed" style="position:absolute;left:20px;top:80px;width:calc(100% - 40px);height:500px;overflow:auto"><div style="height:6000px;background:linear-gradient(white,blue)">Article</div></div><script>var feed=document.getElementById('feed');</script>"""
             }
         main {
-            activity.web.webViewClient =
-                object : WebViewClient() {
-                    override fun onPageFinished(view: WebView, url: String) {
-                        if (url == "https://localhost/scroll-host") loaded.countDown()
-                    }
-                }
             activity.web.loadDataWithBaseURL(
                 "https://localhost/scroll-host",
                 """
@@ -99,7 +92,13 @@ class NativeUIScrollHostingTest {
                 null,
             )
         }
-        assertTrue("Scroll document did not load", loaded.await(20, TimeUnit.SECONDS))
+        val loadedDeadline = SystemClock.uptimeMillis() + 20000
+        var loaded = false
+        while (!loaded && SystemClock.uptimeMillis() < loadedDeadline) {
+            loaded = js("typeof feed !== 'undefined' && feed.scrollHeight >= 6000") == "true"
+            if (!loaded) Thread.sleep(20)
+        }
+        assertTrue("Scroll document did not load", loaded)
         assertTrue(js("feed.scrollHeight").toInt() >= 6000)
         cssWidth = js("innerWidth").toFloat()
         main {

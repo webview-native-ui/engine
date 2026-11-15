@@ -272,6 +272,7 @@ export const startNativeSession = async (
   let contentRevision = 0;
   let generation = 0;
   let restoring: WebProjection | undefined;
+  let contactReturn: WebProjection | undefined;
   let initializing = false;
   let scheduled = false;
   let reconciling = false;
@@ -350,6 +351,7 @@ export const startNativeSession = async (
       })
       .finally(() => {
         if (restoring === current) restoring = undefined;
+        if (contactReturn === current) contactReturn = undefined;
         wake();
       });
   };
@@ -504,6 +506,9 @@ export const startNativeSession = async (
     )
       return;
     handledScrolls.add(event);
+    // A native contact has stopped motion, but WebKit/Chromium may still deliver
+    // queued scroll events. Keep the same return until its native draw ACK.
+    if (contactReturn === manager && manager?.restoring) return;
     if (nativeScroll && owner === scrollOwner) {
       manager?.changed(owner as EventTarget);
       return;
@@ -560,6 +565,7 @@ export const startNativeSession = async (
     nativeDragging = false;
     automaticMotion = false;
     clearTimeout(scrollTimer);
+    contactReturn = manager;
     manager.end();
     return true;
   }

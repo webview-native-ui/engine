@@ -17,7 +17,9 @@ public final class NativeUIScrollHosting {
         }
         override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
             // UIKit can hit-test before attaching the new UITouch to UIEvent.allTouches.
-            if bounds.contains(point), event?.type == .touches {
+            let contacts = event?.allTouches ?? []
+            if bounds.contains(point), event?.type == .touches,
+               contacts.isEmpty || contacts.contains(where: { $0.phase == .began }) {
                 for owner in owners.values {
                     guard let view = owner.view, let reveal = owner.reveal,
                           view.bounds.contains(view.convert(point, from: self)) else { continue }

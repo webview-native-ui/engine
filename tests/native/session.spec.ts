@@ -1309,12 +1309,15 @@ for (const path of ['direct contact', 'window notification']) {
         if (w.session.contact('stale-token')) throw new Error('Stale contact must not retire current pixels');
         if (!w.session.contact('pixels')) throw new Error('Current photo contact must be accepted');
       } else w.interaction({ active: true, nativeContact: 'pixels' });
+      // A final compositor scroll notification can arrive after contact stopped inertia.
+      document.dispatchEvent(new Event('scroll'));
     }, path);
     await expect.poll(() => page.evaluate(() => (window as any).pendingResume.length)).toBe(1);
     expect(await page.evaluate(() => (window as any).binding.projected)).toBe(true);
     expect(
       await page.evaluate(() => (window as any).calls.filter((c: any) => c.action === 'restore').map((c: any) => c.placement)),
     ).toEqual([{ sequence: 12, x: 10, y: 180 }]);
+    expect(await page.evaluate(() => (window as any).calls.filter((c: any) => c.action === 'cover'))).toHaveLength(0);
     expect(await page.evaluate(() => (window as any).calls.filter((c: any) => c.action === 'prepare'))).toHaveLength(0);
     await page.evaluate(() => (window as any).pendingResume.shift()({}));
     await expect.poll(() => page.evaluate(() => (window as any).binding.projected)).toBe(false);
