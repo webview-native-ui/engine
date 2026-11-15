@@ -114,6 +114,43 @@ final class CaptureOrderTests: XCTestCase {
         XCTAssertEqual(scroll.stops, 0)
     }
 
+    func testStableGeometryWaitsForScrollingToSettleWithoutContact() async throws {
+        let window = SnapshotTestWindow(frame: UIScreen.main.bounds)
+        window.rootViewController = UIViewController()
+        window.makeKeyAndVisible()
+        let web = try XCTUnwrap(window.rootViewController?.view)
+        let scroll = MovingScroll(frame: web.bounds)
+        web.addSubview(scroll)
+        scroll.moving = true
+        scroll.stops = 0
+        let snapshots = NativeUICoveredSnapshots()
+        snapshots.observeInteractions(window) { _ in }
+        defer { snapshots.reset(); window.isHidden = true }
+        window.beforeDraw = { XCTAssertFalse(scroll.moving) }
+        var measurements = 0
+        let result: [String: Any] = await withCheckedContinuation { continuation in
+            snapshots.handle(["action": "prepare", "ids": ["button"], "revision": 1,
+                              "viewportWidth": Double(web.bounds.width), "captureID": "settling",
+                              "stopScrollBeforeCapture": true], in: web,
+                             frames: { _, _ in
+                measurements += 1
+                // The first read precedes sampling. Keep identical geometry moving
+                // through five subsequent samples, beyond the three stable reads.
+                if measurements == 7 {
+                    XCTAssertEqual(window.draws, 0)
+                    XCTAssertTrue(scroll.moving)
+                    scroll.moving = false
+                }
+                return ["button": CGRect(x: 0, y: 0, width: 60, height: 44)]
+            }, views: { _ in [scroll] }) { continuation.resume(returning: $0) }
+        }
+        XCTAssertGreaterThanOrEqual(measurements, 7)
+        XCTAssertNotNil(result["token"])
+        XCTAssertGreaterThan(window.draws, 0)
+        XCTAssertEqual(scroll.stops, 0)
+        XCTAssertTrue(scroll.isScrollEnabled)
+    }
+
     func testStopRequestWithoutRegisteredPreinteractionWindowFailsWithoutStopping() {
         let web = UIView(frame: CGRect(x: 0, y: 0, width: 200, height: 300))
         let scroll = MovingScroll(frame: web.bounds)
