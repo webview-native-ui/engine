@@ -78,7 +78,7 @@ final class NativeUIScrollTrackerTests: XCTestCase {
         let frame = view.convert(view.bounds, to: window)
         view.isHidden = true
         host = nil
-        XCTAssertTrue(NativeUIScrollHosting.scrollViews(in: web).isEmpty)
+        XCTAssertTrue(NativeUIScrollHosting.hostedScrollViews(in: web).isEmpty)
         XCTAssertTrue(view.superview === window)
         XCTAssertEqual(view.frame, frame)
         XCTAssertTrue(view.isHidden)
@@ -105,7 +105,7 @@ final class NativeUIScrollTrackerTests: XCTestCase {
         let nativeScroll = try XCTUnwrap(surface.superview as? UIScrollView)
         XCTAssertFalse(nativeScroll === scroll)
         XCTAssertFalse(nativeScroll.isDescendant(of: web), "WebKit must not intercept native SDK touches")
-        XCTAssertTrue(NativeUIScrollHosting.scrollViews(in: web).contains { $0 === nativeScroll },
+        XCTAssertTrue(NativeUIScrollHosting.hostedScrollViews(in: web).contains { $0 === nativeScroll },
                       "Snapshot motion checks and cancellation must include the sibling surface")
         XCTAssertEqual(surface.convert(surface.bounds, to: web), frame)
         XCTAssertTrue(surface.hitTest(CGPoint(x: 20, y: 20), with: nil) === control, "SDK controls must retain tap ownership")

@@ -10,15 +10,16 @@ Call `host.place(view, frame: frameInWebView)` from the renderer's placement pat
 tracker owns the complete binding lifetime.
 
 The Engine creates a transparent native scroll surface above the WebView. SDK
-views remain interactive children of this surface. UIKit handles taps, drags,
-touch cancellation and inertia. On a touch beginning inside a hosted SDK view
-or its matched Web overflow, the existing Window event interceptor ends the
-associated native surface and Web scroller’s deceleration before forwarding
-the original event to UIKit. SDK callbacks receive the real touch;
-no tap or long-press event is synthesized. Content offsets are synchronized in both
-directions with the matched Web overflow. Unoccupied space passes touches to the
-WebView. Directly inserting SDK views into WebKit's private overflow hierarchy
-is insufficient: WebKit's hit testing can exclude those inserted views.
+views remain interactive children of this surface. Each host represents one
+logical scroll owner: the native surface and its matched Web overflow scroller.
+UIKit owns hit testing, pan recognition and inertia. Offsets are mirrored in both
+directions; momentum stays with whichever scroller received the gesture.
+
+When contact begins on either side, the existing Window event interceptor stops
+both scrollers before forwarding the original event to UIKit. SDK taps and long
+presses retain their native handlers; no synthetic touch is sent. Unoccupied space
+passes touches to the WebView. Inserting SDK views into WebKit's private overflow
+hierarchy is insufficient because WebKit's hit testing can exclude those views.
 
 Keep the host stable while dragging or decelerating. A renderer that replaces its
 geometry tracker for each batch can retain the host separately and use

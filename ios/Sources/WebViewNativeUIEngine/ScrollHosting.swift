@@ -3,12 +3,18 @@ import WebKit
 
 /// A native scroll surface for renderer-owned views above a matched WebKit overflow.
 /// Native SDK views retain normal hit testing; UIKit owns pan recognition and inertia.
-/// Positions are mirrored to the real overflow scroller without synthetic touches.
+/// Each host pairs this native surface with one Web overflow scroller. Offsets
+/// are mirrored; inertia remains with the scroller that received the gesture.
+/// New contact stops both scrollers before forwarding the original touch.
 public final class NativeUIScrollHosting {
     private final class Surface: UIScrollView {
         var owners: [ObjectIdentifier: Owner] = [:]
         weak var source: UIScrollView?
         weak var webView: WKWebView?
+        var scrollViews: [UIScrollView] {
+            guard let source else { return [self] }
+            return [self, source]
+        }
         override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
             guard let hit = super.hitTest(point, with: event), hit !== self else { return nil }
             return hit
@@ -104,7 +110,9 @@ public final class NativeUIScrollHosting {
 
     // These surfaces are WebView siblings so WebKit cannot intercept SDK input.
     // Include them explicitly in the Engine's existing motion and capture handling.
-    static func scrollViews(in webView: UIView) -> [UIScrollView] {
+    static func hostedScrollViews(in webView: UIView) -> [UIScrollView] { surfaces(in: webView) }
+
+    private static func surfaces(in webView: UIView) -> [Surface] {
         guard webView is WKWebView else { return [] }
         return webView.superview?.subviews.compactMap {
             guard let surface = $0 as? Surface, surface.webView === webView else { return nil }
@@ -113,28 +121,25 @@ public final class NativeUIScrollHosting {
     }
 
     static func isMoving(in webView: UIView, source: UIScrollView) -> Bool {
-        scrollViews(in: webView).contains {
-            ($0 as? Surface)?.source === source && ($0.isDragging || $0.isDecelerating)
+        surfaces(in: webView).contains {
+            $0.source === source && ($0.isDragging || $0.isDecelerating)
         }
     }
 
     static func scrollViews(for touchedView: UIView) -> [UIScrollView] {
-        var result: [UIScrollView] = []
+        var result: [Surface] = []
         var view: UIView? = touchedView
         while let current = view {
             if let surface = current as? Surface { result.append(surface) }
             if current is WKWebView {
-                result += scrollViews(in: current).filter {
-                    guard let source = ($0 as? Surface)?.source else { return false }
+                result += surfaces(in: current).filter {
+                    guard let source = $0.source else { return false }
                     return touchedView.isDescendant(of: source)
                 }
             }
             view = current.superview
         }
-        return result.flatMap { scroll -> [UIScrollView] in
-            guard let source = (scroll as? Surface)?.source else { return [scroll] }
-            return [scroll, source]
-        }
+        return result.flatMap(\.scrollViews)
     }
 
     // Finish the touched scroll owner's native inertia before dispatching the
