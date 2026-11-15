@@ -115,6 +115,31 @@ jobs:
           xcodebuild -project ios/Tests/NativeUIControlsHostedTests.xcodeproj -scheme NativeUIHostedTests -destination "platform=iOS Simulator,id=$CORDOVA_SIMULATOR" -derivedDataPath "$RUNNER_TEMP/ios-hosted" -parallel-testing-enabled NO -collect-test-diagnostics never -resultBundlePath "$RUNNER_TEMP/ios-hosted.xcresult" CODE_SIGNING_ALLOWED=NO test-without-building
       - name: Verify capture-to-Web image reuse on a real simulator screen
         run: python3 scripts/verify-image-reuse.py --device "$CORDOVA_SIMULATOR"
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: ios-hosted-failure
+          path: ${{ runner.temp }}/ios-hosted.xcresult
+          if-no-files-found: ignore
+          retention-days: 7
+  ios-consumers:
+    runs-on: macos-26
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Start simulator after dependency setup
+        run: |
+          DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; print(next(d["udid"] for devices in json.load(sys.stdin)["devices"].values() for d in devices if d["name"].startswith("iPhone")))')
+          echo "CORDOVA_SIMULATOR=$DEVICE" >> "$GITHUB_ENV"
+          xcrun simctl boot "$DEVICE" || true
+      - name: Wait for consumer simulator
+        run: xcrun simctl bootstatus "$CORDOVA_SIMULATOR" -b
       - name: Verify npm-distributed CocoaPod
         run: |
           set -euo pipefail
@@ -135,25 +160,19 @@ jobs:
           pod install --project-directory="$ENGINE_PODS_TEMP/app"
           xcodebuild -project "$ENGINE_PODS_TEMP/app/Pods/Pods.xcodeproj" -scheme WebViewNativeUIControls -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
       - run: npm run test:cordova -- ios "$CORDOVA_SIMULATOR"
-      - uses: actions/upload-artifact@v7
-        if: failure()
-        with:
-          name: ios-hosted-failure
-          path: ${{ runner.temp }}/ios-hosted.xcresult
-          if-no-files-found: ignore
-          retention-days: 7
   swift:
-    # Keep the existing required check name, covering both parallel macOS jobs.
+    # Keep the existing required check name, covering all parallel macOS jobs.
     if: always()
-    needs: [swift-package, ios-integration]
+    needs: [swift-package, ios-integration, ios-consumers]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
-      - name: Require both Swift suites
+      - name: Require all iOS checks
         env:
           PACKAGE_RESULT: ${{ needs.swift-package.result }}
           INTEGRATION_RESULT: ${{ needs.ios-integration.result }}
-        run: test "$PACKAGE_RESULT" = success && test "$INTEGRATION_RESULT" = success
+          CONSUMERS_RESULT: ${{ needs.ios-consumers.result }}
+        run: test "$PACKAGE_RESULT" = success && test "$INTEGRATION_RESULT" = success && test "$CONSUMERS_RESULT" = success
   android:
     runs-on: ubuntu-latest
     steps:
