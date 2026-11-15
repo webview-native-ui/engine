@@ -118,16 +118,29 @@ public final class NativeUIScrollHosting {
         }
     }
 
-    // Finish native inertia before UIKit dispatches a fresh SDK touch. Otherwise
-    // UIScrollView can consume that touch only to stop deceleration.
+    static func scrollViews(for touchedView: UIView) -> [UIScrollView] {
+        var result: [UIScrollView] = []
+        var view: UIView? = touchedView
+        while let current = view {
+            if let surface = current as? Surface { result.append(surface) }
+            if current is WKWebView {
+                result += scrollViews(in: current).filter {
+                    guard let source = ($0 as? Surface)?.source else { return false }
+                    return touchedView.isDescendant(of: source)
+                }
+            }
+            view = current.superview
+        }
+        return result
+    }
+
+    // Finish the touched scroll owner's native inertia before dispatching the
+    // original event, whether contact starts on its SDK view or Web content.
     static func willSendEvent(_ event: UIEvent) {
         for touch in event.allTouches ?? [] where touch.phase == .began {
-            var view = touch.view
-            while let current = view {
-                if let surface = current as? Surface, surface.isDecelerating {
-                    surface.setContentOffset(surface.contentOffset, animated: false)
-                }
-                view = current.superview
+            guard let view = touch.view else { continue }
+            for scroll in scrollViews(for: view) where scroll.isDecelerating {
+                scroll.setContentOffset(scroll.contentOffset, animated: false)
             }
         }
     }

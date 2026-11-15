@@ -5,6 +5,35 @@ import WebKit
 @testable import WebViewNativeUIEngine
 
 final class NativeUIScrollTrackerTests: XCTestCase {
+    @MainActor func testTouchesResolveOnlyTheirNativeScrollOwner() throws {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 640))
+        let web = WKWebView(frame: window.bounds)
+        window.addSubview(web)
+        let first = UIScrollView(frame: CGRect(x: 0, y: 0, width: 160, height: 300))
+        let second = UIScrollView(frame: CGRect(x: 160, y: 0, width: 160, height: 300))
+        let article = UIView()
+        let unrelated = UIView()
+        web.addSubview(first)
+        web.addSubview(second)
+        first.addSubview(article)
+        web.addSubview(unrelated)
+        let firstHost = try XCTUnwrap(NativeUIScrollHosting(webView: web, scrollView: first))
+        let secondHost = try XCTUnwrap(NativeUIScrollHosting(webView: web, scrollView: second))
+        let advertisement = UIView()
+        let otherAd = UIView()
+        XCTAssertTrue(firstHost.place(advertisement, frame: CGRect(x: 0, y: 0, width: 160, height: 100)))
+        XCTAssertTrue(secondHost.place(otherAd, frame: CGRect(x: 160, y: 0, width: 160, height: 100)))
+        let nativeScroll = try XCTUnwrap(advertisement.superview as? UIScrollView)
+        let otherNativeScroll = try XCTUnwrap(otherAd.superview as? UIScrollView)
+        XCTAssertEqual(NativeUIScrollHosting.scrollViews(for: advertisement), [nativeScroll])
+        XCTAssertEqual(NativeUIScrollHosting.scrollViews(for: article), [nativeScroll])
+        XCTAssertEqual(NativeUIScrollHosting.scrollViews(for: first), [nativeScroll])
+        XCTAssertEqual(NativeUIScrollHosting.scrollViews(for: second), [otherNativeScroll])
+        XCTAssertTrue(NativeUIScrollHosting.scrollViews(for: unrelated).isEmpty)
+        XCTAssertTrue(NativeUIScrollHosting.scrollViews(for: window).isEmpty)
+        withExtendedLifetime([firstHost, secondHost]) {}
+    }
+
     @MainActor func testRehostingRestoresOriginalRendererParent() throws {
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 640))
         let owner = UIViewController()
