@@ -22,6 +22,28 @@ Custom transports should use `observeInteractions(_:changed:)`, forward the enti
 
 Apple documents [Window event dispatch](https://developer.apple.com/documentation/uikit/uiwindow/sendevent%28_%3A%29) and [adding an inherited-method override](https://developer.apple.com/documentation/objectivec/class_addmethod%28_%3A_%3A_%3A_%3A%29). A [gesture recognizer receives touches before its attached view](https://developer.apple.com/documentation/uikit/uigesturerecognizer/touchesbegan%28_%3Awith%3A%29); that does not establish its ordering relative to other recognizers implementing press appearance, so it is not used as the pre-dispatch guarantee.
 
+## Scrolling, image handoff and native activation
+
+Scroll observation remains necessary for SDK views such as AdMob. Offset tracking and image handoff let the Web image follow scrolling without taking taps or long presses away from the native view. A scroll can also change the backdrop behind fixed translucent controls, so completed composited pixels must lose next-contact eligibility even when the control's own frame is unchanged.
+
+These responsibilities are distinct:
+
+| Signal or operation                               | Responsibility                                                                                  |
+| ------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Native scroll hosting / placement tracking        | Synchronize the native view and Web scroller while preserving native input                      |
+| Scroll and renderer motion notifications          | Update image placement and invalidate pixels whose background or layout changed                 |
+| Scroll-origin `change` with `retainPending`       | Retire completed pixels, but preserve a live request that has not read pixels yet               |
+| Source/content invalidation, reset or replacement | Cancel obsolete requests using the normal invalidation path                                     |
+| Pre-dispatch native contact                       | Stop configured momentum, apply layout, measure current frames and acquire pixels in that order |
+
+Stopping is not a new scroll notification or a request to wait for another idle period. When contact promotes a pending request, native runs its existing callback immediately after cancellation and layout, before forwarding input. PNG conversion, delivery and Web decoding remain asynchronous. Idle preparation still waits for stable geometry, and a completed valid image still needs no new acquisition.
+
+Do not cancel an unacquired request just because scrolling changed its geometry. Its frame callback reads current geometry at acquisition; the replacement `prepare` atomically retires the older request. Cancelling it earlier creates a gap between `change` and the next bridge request, exactly when another native contact may arrive.
+
+The document scroll listener covers standalone Engine integrations and background motion. A renderer's explicit `changed(owner)` also covers scrolls within Shadow DOM and other events that never reach the document. Both entry points are required. Light DOM integrations can report the same event through both paths. This is redundant work, but does not justify removing either path. Time-window/position deduplication must also respect capture-generation boundaries; the same coordinate after a new acquisition is not the same invalidation. Event-origin deduplication can be evaluated separately if bridge cost warrants it.
+
+This capture fix retains the required scroll notifications and removes only their unnecessary cancellation of live, unacquired requests. It does not replace native scroll tracking, remove SDK image switching, or change tap/long-press ownership.
+
 ## State and ownership
 
 A capture has an owner, request ID and lifecycle epoch. Initial DOM construction and subsequent changes use the same invalidation path.
