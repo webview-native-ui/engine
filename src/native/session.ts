@@ -463,6 +463,8 @@ export const startNativeSession = async (
       nativeScroll = tracking?.tracked === true;
       manager.consider(config.captureMode === 'view' ? contentRevision : ++revision, sources());
     } else {
+      // Once a token exists, cover owns hiding native and preserves its entry copy until painted.
+      // A separate visibility:false would tear down that handoff; pending contact gets the same guard.
       if (destination !== 'web' || (!manager.token && !manager.capturingContact))
         await bridge.send({ action: 'visibility', visible: false });
       setVisibility();
