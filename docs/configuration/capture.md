@@ -1,27 +1,23 @@
 # Configure capture timing
 
-Use this when a successful state change is reported before its visual animation
-ends. For example, a tab-selection event can arrive while the highlight is still
-enlarged; capturing immediately would preserve that intermediate shape beneath
-the next Web overlay. Delay background preparation until the control settles.
-Keep the default when the measured appearance is already settled; a longer delay
-also keeps the previous image available for longer.
+Use `captureDelayMs` when a native update is reported before its appearance settles,
+such as a tab-selection highlight. It is an optional registration setting shared
+by Capacitor and Cordova and the lower-level `createWebProjection` options. The
+default is **50 milliseconds**; values must be finite, nonnegative and no greater
+than the browser timer limit of 2,147,483,647 ms.
 
-`captureDelayMs` is an optional registration setting shared by Capacitor and Cordova.
-It defaults to **50 milliseconds** on iOS, Android and the lower-level `createWebProjection`
-options. Values must be finite and nonnegative. It uses the existing debounce: a new
-update or interaction restarts preparation after activity settles. It does not add a
-second timer or delay the overlay's presentation.
+On contact-capable native hosts, the request is armed immediately and native
+geometry sampling runs during the configured wait. Contact can promote that
+request before the wait ends. Other hosts debounce preparation on Web. A stable
+rectangle does not prove that a visual animation has ended.
 
-Until replacement pixels are ready, the last completed image remains available. If
-there is no completed image, normal Web fallback applies. Opening an overlay during
-the debounce does not wait for a new capture. Consequently, increasing the delay also
-increases the period in which the previous appearance may be used after an update.
+Until replacement pixels are ready, the previous completed image may remain
+available subject to source ownership and layout validity. Opening an overlay
+uses an eligible image or Web fallback; it does not wait for the idle debounce.
+A longer delay can therefore preserve an earlier appearance for longer.
 
-A starting recommendation for **UITabBar Liquid Glass selection animations is 600 ms**.
-In iOS 27.0 iPhone and iOS 27.1 Duo simulator comparisons, 50 ms captured an enlarged
-selection, 300 ms still retained a small residual change, and 600 ms matched the settled
-appearance observed at 1000 ms. This is a recommendation for that interaction, not an
-Apple timing contract or a universal Liquid Glass duration. Measure your control's
-selection, reselection and successive updates before choosing a value. Continuously
-changing content has no guaranteed settled snapshot.
+Choose a delay from the control's selection, reselection and successive-update
+behavior. There is no universal Liquid Glass animation duration, and continuously
+changing content has no guaranteed settled image. The acquisition order,
+interaction policy and timing events are documented once in
+[pre-interaction capture](../advanced/preinteraction-capture.md).

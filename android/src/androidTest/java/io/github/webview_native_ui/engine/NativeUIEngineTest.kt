@@ -1989,24 +1989,17 @@ class NativeUIEngineTest {
                 val cssWidth = js("innerWidth").toFloat()
                 main {
                     assertEquals(View.VISIBLE, native.visibility)
-                    if (mode == NativeUIProjection.CaptureMode.COMPOSITED)
-                        assertEquals(
-                            (20 + iteration * 20) * activity.web.width / cssWidth,
-                            native.translationY,
-                            0.05f,
-                        ) // CSS layout quantization stays below 0.05 physical px.
-                    else {
-                        val location = IntArray(2)
-                        val origin = IntArray(2)
-                        native.getLocationInWindow(location)
-                        activity.web.getLocationInWindow(origin)
-                        assertEquals(
-                            (120 + iteration * 20 + (if (authoritativePlacement) 20 else 0)) *
-                                activity.web.width / cssWidth,
-                            (location[1] - origin[1]).toFloat(),
-                            1f,
-                        )
-                    }
+                    val location = IntArray(2)
+                    val origin = IntArray(2)
+                    native.getLocationInWindow(location)
+                    activity.web.getLocationInWindow(origin)
+                    assertEquals(
+                        "Restored view must match the DOM host within one physical pixel",
+                        (120 + iteration * 20 + (if (authoritativePlacement) 20 else 0)) *
+                            activity.web.width / cssWidth,
+                        (location[1] - origin[1]).toFloat(),
+                        1f,
+                    )
                 }
             }
             if (auditReuse) {

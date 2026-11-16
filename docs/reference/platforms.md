@@ -52,15 +52,14 @@ Android uses a Gradle Android library, distributed as an AAR through Maven rathe
 android/gradlew -p android testDebugUnitTest assembleRelease connectedDebugAndroidTest publishReleasePublicationToVerificationRepository
 ```
 
-`NativeUIClippedView` is a low-level helper that applies caller-supplied position and clipping without resetting unchanged dimensions. `NativeUIProjection` manages image handoff and restoration; it does not use this helper to lay out the renderer. The consuming plugin owns normal native placement and size updates. Android does not claim WKWebView-style native overflow binding. High-level registrations share a non-consuming window touch observer: down cancels in-flight capture adoption, up/cancel/focus loss permits preparation again, and teardown removes only that registration. Existing callback dispatch and return values are preserved.
+`NativeUIClippedView` is a low-level helper that applies caller-supplied position and clipping without resetting unchanged dimensions. `NativeUIProjection` manages image handoff and restoration; it does not use this helper to lay out the renderer. The consuming plugin owns normal native placement and size updates. Android does not claim WKWebView-style native overflow binding. High-level registrations share a Window observer that preserves original SDK input and removes only that registration on teardown.
 
 `NativeUISnapshots` prepares composited PixelCopy images and local PNG files, then covers/restores from that cache. Encoding runs off the UI thread; only one preparation runs per owner. Notify it of visual changes and interaction, and release tokens on teardown. All view/lifecycle calls run on the UI thread. The plugin retains revision, eligibility and fallback policy.
 
-SDK registrations and custom hosts share the same contact acquisition. A Web fallback waits for the selected contact request to settle before hiding its native source; failures and explicit hide still use the normal fallback.
-
-Custom snapshot hosts can call `observeInteractions(window, changed)` and forward the complete event dictionary to their Web transport. The `prepareDuringInteraction` capability keeps a request armed during a Web gesture without acquiring idle pixels while input is active. This enables contact capture: visual changes retain an unacquired request, while renderer revision changes and reset retire obsolete work. Native contact remeasures current frames and acquires PixelCopy pixels before delivering the original SDK input. `stopScrollBeforeCapture` also cancels WebView momentum for that native contact; disabling the flag preserves scrolling. Completed pixels can be selected without another copy. PNG encoding and Web decoding remain asynchronous.
-
-PixelCopy is asynchronous, so the existing window input replay preserves the original event sequence and gesture duration while acquisition completes. An optional capture deadline releases input before the window return deadline; a failed capture uses the normal Web fallback and must not consume the SDK tap. Retain the returned cleanup function and remove the observation on teardown. Do not also forward `NativeUIClippedView.interaction` for the same window, since the window observer already reports that input.
+For SDK input ordering, custom Window observation, pending visual invalidation
+and cleanup, see [pre-interaction capture](../advanced/preinteraction-capture.md).
+That contract is shared with SDK registrations; custom hosts forward its complete
+event dictionary rather than maintaining a second touch observer.
 
 After prepared Web pixels are shown or retired, `NativeUIWebReadiness.prepare` checks readiness for a subsequent WebView draw. Its `current` predicate must validate the owning session, source generation and image revision. The temporary native copy covers this asynchronous handoff; overlay startup itself does not wait. Neither bridge acknowledgement nor this callback proves physical display presentation.
 
@@ -72,11 +71,11 @@ integration. Never synthesize clicks through a projected image.
 
 ### Translucent Android surfaces
 
-Capture the composited window pixels, including the background, instead of drawing the translucent view onto an empty bitmap. Keep the prepared Web image decoded but hidden. At handoff, `cover(token, window, reference, views)` installs a temporary opaque image copy before hiding those native views in the same UI turn. Reveal the Web image, confirm Web drawing readiness, then retire the entry copy. The overlay starts immediately; image encoding is never on this path.
-
-For return, install the prepared return copy with `restore`, restore the native views underneath it, hide the Web image, and retire the return copy after Web drawing readiness. This avoids compositing live translucent native pixels over their own snapshot. Validate the token and current surface generation at every asynchronous callback. The temporary copy is noninteractive and bounded; teardown releases both copies and cached resources.
-
-This preserves the captured background, not a continuously changing scene behind the image. Background changes must invalidate the cache through the same visual-change notifications as content updates. Video and unsupported capture surfaces retain the consumer's fallback policy.
+Use COMPOSITED for translucent surfaces and invalidate it when the background
+changes. Entry copies prevent the live control from compositing over its own Web
+image; return copies cover native restoration. The ordered calls and cleanup are
+specified in [native handoff](../advanced/native-handoff.md). These images preserve
+the captured background, not live video or a continuously changing scene.
 
 Consumer integration tests belong to their respective repositories. Engine CI exercises its browser, Swift and Android contracts without requiring a sibling renderer checkout.
 

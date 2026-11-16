@@ -1,94 +1,144 @@
-# Pre-interaction capture on iOS
+# Pre-interaction capture
 
-Engine automatically acquires composited pixels before UIKit dispatches the first contact when the latest image has not yet been acquired. It preserves the appearance before the button's press highlight or Liquid Glass response begins. Conversion, PNG encoding, file delivery and Web decoding continue asynchronously.
+Select or acquire immutable pixels before a native control handles contact, so
+its pressed appearance is not captured. PNG encoding, file delivery and Web
+decoding remain asynchronous. This is the same handoff described in
+[native handoff](native-handoff.md), with an earlier acquisition point.
 
 ## Window integration
 
-**Application code does not need a WindowHook or a special UIWindow subclass.** `observeInteractions` installs automatic interception when the renderer first registers its existing Window. `NativeUIProjection` and Controls' `NativeUIController` already use that API.
+`NativeUIProjection` registers its Window automatically, as does the iOS Controls
+controller. Custom snapshot renderers must call `observeInteractions`, forward
+the **entire event dictionary** to Web, and pass requests through `handle` on the
+main/UI thread. Window acquisition requires this native integration; enabling a
+Web adapter alone is insufficient. No application Window subclass or second
+input dispatcher is needed.
 
-The implementation uses the public Objective-C runtime to wrap the concrete Window class's `sendEvent` implementation. It preserves the original implementation and forwards each event exactly once, including subclass calls through an already wrapped superclass. Acquisition runs before the original method. It does not change the Window object's class or replace its instance. Unregistered windows are forwarded without acquisition.
+### iOS
 
-Wrappers remain installed for the process lifetime so later wrappers from other libraries never call a removed IMP. Weak registrations and capture ownership are cleared on teardown. Other libraries that replace the same method must preserve the implementation chain; arbitrary non-chaining replacements cannot be made interoperable by Engine.
+`NativeUICoveredSnapshots.observeInteractions(_:changed:)` wraps the concrete
+Window class's `sendEvent` implementation using the public Objective-C runtime.
+Acquisition precedes the original method; each event is forwarded once, including
+subclasses that call an intercepted superclass. Unregistered windows are unaffected.
 
-To disable pre-interaction acquisition, set this on main **before registration**:
+Wrappers stay installed so other libraries cannot call a removed implementation.
+Registrations are weak and teardown clears ownership. Other interceptors must
+preserve the implementation chain. A gesture recognizer alone does not guarantee
+ordering before another recognizer's pressed appearance.
+
+To retain idle-only acquisition, set this on main **before registration**:
 
 ```swift
 NativeUICoveredSnapshots.automaticallyInterceptsEvents = false
 ```
 
-With interception disabled, Engine retains its existing idle capture behavior.
+### Android
 
-Custom transports should use `observeInteractions(_:changed:)`, forward the entire dictionary to the Web listener, and pass requests through `handle`. Android hosts use the [snapshot window integration](../reference/platforms.md#android-library) with asynchronous PixelCopy acquisition and preserved native input.
+`NativeUISnapshots.observeInteractions(window, changed)` returns a cleanup function;
+call it on teardown. Do not also forward `NativeUIClippedView.interaction` for the
+same Window. The Window observer already reports that input.
 
-Apple documents [Window event dispatch](https://developer.apple.com/documentation/uikit/uiwindow/sendevent%28_%3A%29) and [adding an inherited-method override](https://developer.apple.com/documentation/objectivec/class_addmethod%28_%3A_%3A_%3A_%3A%29). A [gesture recognizer receives touches before its attached view](https://developer.apple.com/documentation/uikit/uigesturerecognizer/touchesbegan%28_%3Awith%3A%29); that does not establish its ordering relative to other recognizers implementing press appearance, so it is not used as the pre-dispatch guarantee.
+PixelCopy is asynchronous. Only requests that still need pixels defer original
+SDK input through the existing Window replay, preserving event order and gesture
+duration. Ready pixels keep normal synchronous dispatch. Optional acquisition
+has a deadline before the input replay deadline, so capture failure does not
+consume the SDK tap. Returning a projected SDK to valid native geometry is a
+separate handshake; see [native scroll hosting](native-scroll-hosting.md#android).
+
+Android advertises `prepareDuringInteraction` to keep a request armed during a
+Web gesture. Idle acquisition waits for input to end; native contact can promote
+that request immediately. Hosts without this capability retain their existing
+interaction policy.
 
 ## State and ownership
 
-A capture has an owner, request ID and lifecycle epoch. Initial DOM construction and subsequent changes use the same invalidation path.
+| State at contact                                 | Action before native input                                  |
+| ------------------------------------------------ | ----------------------------------------------------------- |
+| Image decoded and installed in Web               | Select it without another capture.                          |
+| Immutable pixels acquired, processing incomplete | Pin that request and let processing finish.                 |
+| Request armed, pixels not acquired               | Measure current frames and acquire before delivering input. |
 
-| State at first contact                                              | Action before normal input dispatch                              |
-| ------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| Latest image decoded and installed in Web                           | Select that image; no new acquisition                            |
-| Latest immutable pixels acquired; processing or delivery incomplete | Pin that request and continue its existing processing            |
-| Latest request still waiting for acquisition                        | Promote it to synchronous acquisition, then forward normal input |
+A request must already have reached native with eligible sources. Owner IDs and
+lifecycle epochs isolate surfaces. Visual changes retire next-use eligibility
+without cancelling a selected capture; source replacement, revision changes,
+navigation, viewport changes and teardown still reject obsolete results. Releasing
+a token also retires its acquisition.
 
-Selection precedes touch invalidation. Later content changes retire the next-use cache eligibility, while an explicitly selected request can finish the current handoff. Source invalidation, navigation, Window replacement, viewport changes and teardown still reject invalid results. Owner IDs isolate independent surfaces; old results cannot overwrite newer cache entries.
-
-A request must already have reached native with eligible sources. Before the first registration, after source removal, or on acquisition failure, Engine uses the configured fallback. It cannot reconstruct a missed pre-contact frame after UIKit has dispatched the input.
+A Web fallback does not hide the native source while its selected contact request
+is still being processed or decoded. Success transfers visibility through `cover`;
+failure or the Web request deadline resumes fallback. Explicit `none` does not
+wait. There is no guarantee of a pre-contact image before registration or after
+source removal.
 
 ## Stop before measuring a native contact
 
-An iOS host can set `stopScrollBeforeCapture: true` on `prepare` requests to use the same policy as its native activation setting. The default is `false` for existing hosts. While this policy is enabled, idle acquisition waits while any descendant scroll view is tracking, dragging or decelerating; it does not stop a user's scroll in the background. The existing preparation deadline and Web fallback remain in effect.
+Custom hosts may set `stopScrollBeforeCapture: true` on `prepare`; it defaults to
+`false`. Apply the integrating plugin's opt-out when forwarding this flag.
+Only contact within the supplied native views invokes this cancellation. It stops
+the current fling, remeasures frames, and acquires pixels before SDK input; it does
+not disable scrolling or stop an unrelated Web contact.
 
-At the next contact, Engine checks the hit view against the native views supplied for the requested IDs. Only contact inside those native views cancels momentum. All registered owners stop that motion and apply layout before any owner pins pixels. Each promoted capture then remeasures current frames and acquires pixels instead of using the pre-stop validation geometry. Contact promotion does not wait for another idle period. Acquisition still precedes UIKit's highlight and gesture dispatch. Contact in Web content does not invoke this cancellation, and an unregistered window rejects this policy without stopping anything.
+On iOS, idle acquisition also waits while relevant scroll views are tracking,
+dragging or decelerating. Registered owners settle motion and layout before
+pinning. Android sends the stop contact to WebView before PixelCopy. Hosted SDK
+registrations move their existing inertia cancellation before acquisition; they
+do not add another scroll offset or fling animator.
 
-This cancels the current fling without disabling scrolling. PNG encoding and decoding remain asynchronous, so stopping momentum is not a guarantee that every capture succeeds. Empty, stale or failed captures retain the normal Web fallback. Hosts should retain their activation-time cancellation for actions without a prepared capture. Disable this request flag when the application's `stopScrollOnActivate` setting is `false`.
+Stopping is not proof of successful capture. Failed or stale acquisitions use the
+normal fallback. Keep activation-time cancellation for actions without an armed
+capture when the integrating plugin requires it.
 
 ## Scroll invalidation
 
-Scroll tracking and notifications remain necessary for SDK views such as AdMob: they keep image placement synchronized during scrolling and invalidate composited pixels when the backdrop changes, including behind fixed translucent controls. Taps and long presses remain native input.
+Scroll notifications remain necessary for image placement and composited backdrop
+changes, including behind fixed translucent controls. Visual changes, including
+virtual row recycling, use `change` with `retainPending: true`: retire completed
+next-use pixels while keeping an unacquired request available. Its frame callback
+reads current geometry; the next `prepare` replaces it atomically. Source/revision
+invalidation and reset still cancel obsolete work.
 
-A scroll-origin `change` uses `retainPending: true` to retire completed pixels from next-contact selection while preserving a live request that has not acquired pixels. Its frame callback reads current geometry when acquisition runs; a replacement `prepare` atomically retires the older request. This keeps a request available for contact promotion between the scroll notification and the next `prepare`. Source/content invalidation, reset and replacement retain their normal cancellation behavior.
-
-The document scroll listener covers standalone Engine integrations and background motion; renderer-provided `changed(owner)` also covers scrolling within Shadow DOM that does not reach the document. Both entry points are needed, although Light DOM integrations can report the same event through both paths.
+The document listener covers ordinary background motion. Renderer-provided
+`changed(owner)` also handles scroll events inside Shadow DOM that do not reach
+the document. Taps and long presses remain native input.
 
 ## Idle capture
 
-The Web manager observes document DOM changes, scrolling and resource loads in addition to renderer updates. Engine-owned projection nodes, attributes and image loads are excluded. The native request is armed immediately after coalescing notifications, rather than waiting for the entire debounce on the Web side.
+The Web manager observes DOM changes, scrolling and resource loads as well as
+renderer updates, excluding Engine-owned nodes and mutations. On contact-capable
+hosts it arms native immediately after coalescing notifications; native geometry
+sampling and the configured wait run together. Contact may promote a request
+before settling finishes. See [capture timing](../configuration/capture.md) for
+`captureDelayMs` and its default.
 
-`captureDelayMs` defaults to 50 ms. Native geometry sampling runs during that interval, requiring three consecutive unchanged samples; it does not add another fixed 50 ms after the debounce. This is a settling policy, not proof that every Glass or CSS animation has finished. Contacts can promote the request before settling finishes.
-
-All iOS acquisitions—idle, promoted at contact, composited Window and explicit View capture—use `NativeUICapturePlanner`. Conversion, PNG and cropping semantics remain shared.
-
-Capture regions retain 12-point padding and pixel alignment. Overlapping vertical intervals merge, including transitive overlaps; their rectangles stay tight horizontally. Dynamic programming compares every contiguous grouping of the remaining bands, including one union rectangle. It selects the lowest estimated cost; there is no fixed two-band limit or percentage threshold.
-
-The Window estimate is:
-
-`milliseconds = 7 × draws + 5 × rowMegapixels + 2.5 × outputMegapixels`
-
-`rowMegapixels` is the sum of captured heights times Window width times native display scale squared, divided by one million. It is an empirical proxy: smaller output buffers did not proportionally reduce hierarchy rendering time. `outputMegapixels` uses each actual capture rectangle and output scale. This is a measured predictor, not a claim about UIKit internals.
-
-For full-width regions at native scale, one additional draw needs to save approximately **0.933 megapixels** to pay off. Narrow rectangles use both area terms, rather than treating the output buffer size as the only work.
-
-Explicit View capture uses the same planner with a separate conservative estimate: `7 × root draws + 2.5 × outputMegapixels`. Each pass preserves every root's original draw order. The measured View fixtures both select one pass. The internal cost estimates are based on Device Hub measurements. Acquisition stays serial on main.
-
-Composited captures on the enabled path use Float16 extended Display P3 and `afterScreenUpdates: false`. Background conversion retains the existing PNG16 Display P3 encoder and two-worker limit. Direct 8-bit display capture and the experimental C encoder are not adopted.
-
-After acquisition, Engine compares the valid Float16 crop pixels with the last comparable capture for the same owner and geometry, on a background queue. Exact equality reuses the existing PNG files, native images and decoded Web images; PNG conversion, native decoding and file writes are skipped. Content notifications retain the previous completed capture until its replacement is ready. Appearance, layout and scroll changes can make that image ineligible for ordinary presentation without releasing its pixels or cancelling a pre-contact selection. Failed replacement captures retain the baseline. Source ownership changes and explicit lifecycle invalidation still release it. Comparison buffers are limited to 32 MB per owner; unsupported or larger captures use normal processing. In-flight comparisons retain their source files through token release, while lifecycle invalidation still rejects stale completion.
+The iOS capture planner groups regions to reduce acquisition work. Its cost model
+is an internal tuning detail, not a capture-timing contract; see
+[CapturePlanner.swift](../../ios/Sources/WebViewNativeUIEngine/CapturePlanner.swift).
+Composited capture retains Float16 Display P3 before background PNG conversion.
+Equal crops may reuse immutable files and decoded images, but ownership changes
+still retire them. See [encoding and reuse](native-handoff.md#image-encoding-and-reuse).
 
 ## Timing
 
-Listen for `${namespace}:capture-timing` on `window`. No telemetry is sent externally.
+Listen for `${namespace}:capture-timing` on `window`. Nothing is sent externally.
+Fields depend on the native host:
 
-- `stage: idle` or `processing`: `native.waitMs`, `native.acquisitionMs`, `native.processingMs`, `requestToReadyMs`, and `decodeAndInstallMs`. Native processing includes conversion, encoding, native decode and file writing.
-- Contact selection: `stage: ready`, `waiting` or `processing`, with `mainThreadMs`. This measures the acquisition hook itself, not every UIKit or bridge cost in the event dispatch.
-- `stage: acknowledged`: `acquisitionToReadyMs` and, when contact preceded readiness, `contactToReadyMs`. These use one native clock through the Web decode/install acknowledgement, including the return bridge. They are upper bounds on Web usability, not proof of a displayed compositor frame.
-- `notificationToReadyMs` starts when Web receives the native contact notification; it excludes the preceding synchronous acquisition. Do not use it as total contact latency.
+- `idle` / `processing`: request-to-ready and decode/install time; iOS also reports
+  native wait, acquisition and processing times.
+- `ready` / `waiting` / `processing` at contact: selection state and, when supplied,
+  `mainThreadMs` for the acquisition hook.
+- `acknowledged`: iOS acquisition-to-Web-acknowledgement time and, if applicable,
+  contact-to-acknowledgement time, measured on one native clock.
+- `notificationToReadyMs`: time since Web received selection, excluding preceding
+  native acquisition. It is not total contact latency.
+
+These acknowledgements do not prove physical display presentation.
 
 ## Limits
 
-Acquisition still blocks the main thread. A 25–30 ms capture is not a guaranteed single frame at 60 or 120 Hz. Ready and processing cases avoid this acquisition cost at contact.
-
-DOM notifications do not observe all visual changes: Canvas, video, ongoing CSS animation, compositor-only updates and unobserved shadow-root changes need renderer-provided invalidation. Resource loads and known native updates improve coverage but are not a universal paint observer. Unknown changes can leave a supposedly current cache stale. Native geometry stability also does not guarantee settled Glass brightness.
-
-The validation uses Device Hub's iPhone Duo iOS 27.2 runtime. Performance on physical devices and other layouts must be measured separately; exact idle/pre-contact PNG equality is demonstrated for the static striped toolbar/tab-bar fixture, not all Glass scenes.
+Acquisition uses the main/UI thread; even a short acquisition can exceed a display
+frame. The existing capture and handoff deadlines may fall back under load.
+DOM notifications do not observe every Canvas, video, CSS/compositor animation or
+shadow-root update; supply renderer invalidation for those changes. Stable bounds
+do not prove settled materials. See [platform limits](../reference/platforms.md)
+for unsupported surfaces and Liquid Glass differences, and validate the actual
+SDK and backgrounds used by the integration.

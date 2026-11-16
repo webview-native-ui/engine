@@ -43,7 +43,7 @@ success. `frames` may run repeatedly while geometry settles; it must
 recheck the requested revision and capture eligibility. It must not mutate layout.
 If multiple controls share a native container, `views` must reject a partial set
 that would hide uncaptured controls. The Engine cannot infer that relationship.
-The renderer also keeps its existing native interaction notifications.
+Register the snapshot manager's Window observer and forward its complete events; see [pre-interaction capture](preinteraction-capture.md#window-integration). Do not add duplicate clip-level touch notifications.
 
 `cover` installs prepared pixels before hiding those views. Destination parts are
 validated against the cached token and used for both cover and restore, so moving
@@ -70,7 +70,10 @@ Use these only when your integration owns native placement during handoff. `Nati
 
 Missing captures or placement use the renderer's ordinary fallback. See the [Web request contract](web-projection.md#multiple-fallbacks-in-one-native-transaction) for payloads.
 
-Use `NativeUICoveredSnapshots.observe` to notify the JS listener when interaction starts/ends. On iOS, captures rasterize the visible window with `drawHierarchy(in:afterScreenUpdates:)`, including the background under the clipped native component. Screen snapshot views are display replicas and are not used as bitmap sources. UIKit rasterization can differ from the live compositor for materials such as Liquid Glass; validate the appearance on physical devices with the backgrounds your plugin supports. Cache validity therefore includes layout and the plugin's visual-change notifications. The engine does not capture continuously or guarantee every possible renderer can be captured.
+For acquisition before native input, stop-before-measure ordering, invalidation
+and timing events, use [pre-interaction capture](preinteraction-capture.md).
+Capture limitations, including backdrop-dependent materials, are documented in
+[platform limits](../reference/platforms.md).
 
 ## Native scroll tracking
 
@@ -86,7 +89,7 @@ On iOS, `NativeUIScrollBindings.replace` groups sources by owner and binds only 
 
 An established binding rejected by native loses ownership and may be freshly acquired through the **same** update/ACK path. A failed fresh acquisition stays on the fallback until a relevant layout/scroll-end event. Never add an immediate retry loop or replay user actions. A frame/props change does not recalibrate an established coordinate origin.
 
-This uses WKWebView's internal overflow hierarchy without private class names. Missing/ambiguous views, nested scrolling, document scrolling, unsupported transforms, shaped clipping, or a moving unconfirmed owner cannot be bound. Do not claim support solely because a `UIScrollView` exists. A native view may intercept gestures that begin inside it; routing those gestures and SDK accessibility behavior remain renderer-specific.
+This uses WKWebView's internal overflow hierarchy without private class names. Missing/ambiguous views, nested scrolling, document scrolling, unsupported transforms, shaped clipping, or a moving unconfirmed owner cannot be bound. Do not claim support solely because a `UIScrollView` exists. For gestures starting inside SDK views, opt into [native scroll hosting](native-scroll-hosting.md) rather than adding another gesture-forwarding implementation. SDK accessibility behavior remains renderer-specific.
 
 ### Renderer-only capture on iOS
 
@@ -94,7 +97,13 @@ A `prepare` request may specify `captureMode: 'view'` to draw only the renderer 
 
 Moving DOM surfaces can provide a fixed viewport transfer layer through `WebProjectionOptions.imageSurface` (`HTMLElement`). The Web projection marks its prepare requests with `imageSurface: 'web'` so Native concealment preserves renderer layout. This changes placement, not the handoff protocol: every surface uses the same temporary Native entry and return copies. During motion, the decoded DOM images live on their source surface so its transform carries them. Translation does not invalidate their reusable capture; dimensions are compared at display-pixel resolution, while actual size and source changes still invalidate it. On iOS, each image part includes optional `anchorBounds` relative to the image crop, in viewport units. Renderers can supply `anchorFrames` for composite controls, such as the first actual toolbar item in a group. Moving targets use these bounds to retain capture padding without mixing capture-time Native coordinates with later DOM placement.
 
-Keep the Native renderer and source ownership alive while DOM images own the pixels. For entry, the common handoff installs prepared Native pixels and conceals the live renderer in the same Native turn, then displays the DOM images on their source surface. During that transfer the DOM image shares the temporary Native copy’s viewport coordinates. After Web painting, the Engine retires the Native copy and returns the DOM image to its source surface. Live translucent controls never sample their own Web image during entry. The optional `layoutFrame(target, part, parts)` adapter supplies current Native anchor placement from the captured cohort; it does not own visibility or handoff timing. Return uses that placement to freeze both prepared copies at the same destination until the accepted Native update. The renderer applies its ordinary Native layout and calls `updated(token, ids, revision)` on the accepted acknowledgement. Only a revision newer than the return request can retire the DOM images. The displayed image remains leased until the reveal acknowledgement or explicit retirement, independently of whether its cached capture is still reusable. No snapshot is captured during either transfer.
+Keep renderer and source ownership alive during projection. The common entry and
+return protocol above still applies; `imageSurface` changes placement, not image
+lifetime. `layoutFrame(target, part, parts)` supplies current anchor placement
+from the captured cohort and does not own visibility. Call
+`updated(token, ids, revision)` only for the accepted native update; a revision
+newer than the return request retires the displayed image. Cache reuse eligibility
+and the currently displayed image lease remain separate.
 
 On iOS, use `NativeUICoveredSnapshots.concealPixels(in:)` on the main thread when layout must remain measurable. It masks pixels and disables interaction/accessibility without changing `isHidden` or geometry. Its returned restoration closure is idempotent; overlapping leases restore the original mask and flags only after the last lease ends. Both composited and renderer-only capture use the same Native copy and drawing-completion contract.
 

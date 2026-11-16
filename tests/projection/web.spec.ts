@@ -28,13 +28,23 @@ const boot = async (page: Page) => {
 };
 const prepare = async (
   page: Page,
-  shadow = false,
-  proxy = false,
-  shared = false,
-  events = false,
-  captureDelayMs?: number,
-  transient = false,
-  webSurface = false,
+  {
+    shadow = false,
+    proxy = false,
+    shared = false,
+    events = false,
+    captureDelayMs,
+    transient = false,
+    webSurface = false,
+  }: {
+    shadow?: boolean;
+    proxy?: boolean;
+    shared?: boolean;
+    events?: boolean;
+    captureDelayMs?: number;
+    transient?: boolean;
+    webSurface?: boolean;
+  } = {},
 ) => {
   await boot(page);
   if (shadow)
@@ -254,7 +264,7 @@ test('returning images follow host motion until native acknowledges restoration'
 
 for (const moving of [false, true]) {
   test(`prepared pixels persist until matching restore ACK (moving surface: ${moving})`, async ({ page }) => {
-    await prepare(page, false, false, false, false, 50, moving, moving);
+    await prepare(page, { captureDelayMs: 50, transient: moving, webSurface: moving });
     const ownership = () =>
       page.evaluate(() => {
         const manager = (window as any).manager;
@@ -370,7 +380,7 @@ test('ACK during motion never establishes a stale origin; content resize require
 });
 
 test('image presentation works inside a shadow tree and restores Web', async ({ page }) => {
-  await prepare(page, true);
+  await prepare(page, { shadow: true });
   await page.evaluate(() => (window as any).manager.begin());
   await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
   expect(await page.evaluate(() => getComputedStyle((window as any).source.element.querySelector('img')).opacity)).toBe('1');
@@ -380,7 +390,7 @@ test('image presentation works inside a shadow tree and restores Web', async ({ 
 });
 
 test('identical native tokens stay isolated across plugin scopes and teardown', async ({ page }) => {
-  await prepare(page, false, true);
+  await prepare(page, { proxy: true });
   await page.evaluate(async () => {
     const w = window as any,
       element = document.createElement('div');
@@ -459,7 +469,7 @@ test('identical native tokens stay isolated across plugin scopes and teardown', 
 for (const surface of ['element', 'shared', 'moving'] as const)
   test(`delayed cover never exposes pixels before Native is hidden (${surface})`, async ({ page }) => {
     const shared = surface === 'shared';
-    await prepare(page, false, false, shared, false, 50, surface === 'moving', surface === 'moving');
+    await prepare(page, { shared, captureDelayMs: 50, transient: surface === 'moving', webSurface: surface === 'moving' });
     const host = page.locator(shared ? '#projection-host' : '#source');
     await page.evaluate(() => {
       const w = window as any;
@@ -616,7 +626,7 @@ test('existing fallback DOM, listeners, values and application updates survive h
 });
 
 test('fixed fallback follows its renderer-owned parent without recapturing', async ({ page }) => {
-  await prepare(page, false, true);
+  await prepare(page, { proxy: true });
   await page.evaluate(() => {
     const w = window as any,
       surface = document.querySelector<HTMLElement>('#surface')!;
@@ -645,7 +655,7 @@ test('fixed fallback follows its renderer-owned parent without recapturing', asy
 });
 
 test('detached fallback cannot be replaced by an unrelated DOM', async ({ page }) => {
-  await prepare(page, false, true);
+  await prepare(page, { proxy: true });
   await page.evaluate(() => {
     const w = window as any;
     w.scope.element.remove();
@@ -655,7 +665,7 @@ test('detached fallback cannot be replaced by an unrelated DOM', async ({ page }
 });
 
 test('fallback adopted into another document is rejected on return', async ({ page }) => {
-  await prepare(page, false, true);
+  await prepare(page, { proxy: true });
   await page.evaluate(() => (window as any).manager.begin());
   await expect(page.locator('#proxy')).toHaveAttribute('data-native-ui-snapshot-visible', '');
   expect(
@@ -922,7 +932,7 @@ test('unsupported fallback nodes are rejected before native ownership can change
 });
 
 test('plugin events preserve web projection through updates and ignore other surfaces', async ({ page }) => {
-  await prepare(page, false, false, false, true);
+  await prepare(page, { events: true });
   await page.evaluate(() => (window as any).eventListeners.transitionStarted({ id: 'other' }));
   await expect(page.locator('#source')).not.toHaveAttribute('data-native-ui-snapshot-visible');
   await page.evaluate(() => (window as any).eventListeners.transitionStarted({ id: 'counter' }));
@@ -942,7 +952,7 @@ test('plugin events preserve web projection through updates and ignore other sur
 });
 
 test('hidden notification invalidates delayed cover and updates cannot resurrect it', async ({ page }) => {
-  await prepare(page, false, false, false, true);
+  await prepare(page, { events: true });
   await page.evaluate(() => {
     const w = window as any;
     w.holdCover = true;
@@ -990,7 +1000,7 @@ test('renderer visibility excludes Engine hiding without changing authored visib
 
 for (const delay of [undefined, 300]) {
   test(`capture delay ${delay ?? 'default 50'} debounces updates without blocking prepared handoff`, async ({ page }) => {
-    await prepare(page, false, false, false, false, delay);
+    await prepare(page, { captureDelayMs: delay });
     const now = new Date('2026-01-01T00:00:00Z');
     await page.clock.install({ time: now });
     await page.clock.pauseAt(now);
@@ -1105,7 +1115,7 @@ for (const scenario of ['fractional-rtl', 'nested-scroll', 'parent-scale', 'host
 
 for (const transient of [false, true]) {
   test(`handoff retains prepared DOM through ${transient ? 'a moved native return' : 'repeated switches'}`, async ({ page }) => {
-    await prepare(page, false, false, false, false, 0, transient);
+    await prepare(page, { captureDelayMs: 0, transient });
     await page.evaluate(() => {
       const w = window as any;
       w.treeChanges = 0;
@@ -1138,7 +1148,7 @@ for (const transient of [false, true]) {
 
 for (const rectNoise of [0, 0.00001525878906])
   test(`translated transient pixels survive immediate redrag with DOMRect noise ${rectNoise}`, async ({ page }) => {
-    await prepare(page, false, false, false, false, 50, true);
+    await prepare(page, { captureDelayMs: 50, transient: true });
     const result = await page.evaluate(async (rectNoise) => {
       const w = window as any;
       const imageNode = document.querySelector<HTMLImageElement>('img[data-native-ui-projection-image]')!;
@@ -1185,7 +1195,7 @@ for (const rectNoise of [0, 0.00001525878906])
   });
 
 test('moving a source within a fixed transient scope invalidates its old image layout', async ({ page }) => {
-  await prepare(page, false, false, true, false, 50, true);
+  await prepare(page, { shared: true, captureDelayMs: 50, transient: true });
   await page.evaluate(() => {
     const w = window as any;
     w.interact({ active: true });
@@ -1490,7 +1500,7 @@ test('pause covers a standalone renderer and local end cannot release it', async
 });
 
 test('pause preserves renderer intent and re-covers a native shown notification', async ({ page }) => {
-  await prepare(page, false, false, false, true);
+  await prepare(page, { events: true });
   await page.evaluate(() => {
     const w = window as any;
     w.manager.begin();
@@ -1574,7 +1584,7 @@ test('reconciliation can repeat begin while paused without a cover loop', async 
 
 for (const localFirst of [true, false]) {
   test(`local requests and pauses both retire regardless of release order (local first: ${localFirst})`, async ({ page }) => {
-    await prepare(page, false, false, false, true);
+    await prepare(page, { events: true });
     await page.evaluate(() => {
       const w = window as any;
       w.eventListeners.transitionStarted({ id: 'counter' });
@@ -1879,7 +1889,7 @@ for (const retire of ['invalidate', 'destroy', 'timeout'] as const) {
 }
 
 test('moving DOM handoff ignores an old native acknowledgement after immediate reversal', async ({ page }) => {
-  await prepare(page, false, false, false, false, 50, true, true);
+  await prepare(page, { captureDelayMs: 50, transient: true, webSurface: true });
   await page.evaluate(() => {
     const w = window as any;
     w.interact({ active: true });
@@ -1899,7 +1909,7 @@ test('moving DOM handoff ignores an old native acknowledgement after immediate r
 });
 
 test('an acknowledgement from an earlier return cannot complete a later return', async ({ page }) => {
-  await prepare(page, false, false, false, false, 50, true, true);
+  await prepare(page, { captureDelayMs: 50, transient: true, webSurface: true });
   await page.evaluate(() => {
     const w = window as any;
     w.interact({ active: true });
@@ -1928,7 +1938,7 @@ test('an acknowledgement from an earlier return cannot complete a later return',
 });
 
 test('a resized active image survives immediate reversal after its reusable cache is invalidated', async ({ page }) => {
-  await prepare(page, false, false, false, false, 50, true, true);
+  await prepare(page, { captureDelayMs: 50, transient: true, webSurface: true });
   await page.evaluate(() => {
     const w = window as any;
     w.interact({ active: true });
@@ -1960,7 +1970,7 @@ test('a resized active image survives immediate reversal after its reusable cach
 });
 
 test('an invalid source ends both its visible image and pixel lease on immediate reversal', async ({ page }) => {
-  await prepare(page, false, false, false, false, 50, true, true);
+  await prepare(page, { captureDelayMs: 50, transient: true, webSurface: true });
   await page.evaluate(() => {
     const w = window as any;
     w.interact({ active: true });
@@ -1990,7 +2000,7 @@ test('an invalid source ends both its visible image and pixel lease on immediate
 
 for (const change of ['translation', 'subpixel-noise'] as const) {
   test(`a completed moving-surface return retains its cache through ${change} during the same gesture`, async ({ page }) => {
-    await prepare(page, false, false, false, false, 50, true, true);
+    await prepare(page, { captureDelayMs: 50, transient: true, webSurface: true });
     await page.evaluate(() => {
       const w = window as any;
       w.interact({ active: true });

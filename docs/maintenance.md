@@ -15,7 +15,23 @@ The public entry points are `src/index.ts` and `src/ionic.ts`, with shared contr
 
 `npm run build` bundles `src/native/bootstrap.ts` into `runtime/native-ui-engine.js`, the shared WebView runtime. Android packages this file directly as an asset. The build also copies it into `ios/Sources/WebViewNativeUIEngine/Resources` because SwiftPM requires resources inside the target directory. Both generated files are ignored during development and included in release tags so SwiftPM consumers do not need Node.js. Run `npm run build` before building a source checkout with Xcode. Edit the TypeScript source, not either generated file; CI checks regeneration and verifies the runtime included in npm and Maven archives.
 
-Browser tests mirror these groups under `tests/`. `tests/cordova/` contains the real native consumer fixture.
+Tests follow the responsibility they protect:
+
+- Browser tests under `tests/native`, `tests/projection` and `tests/dom` own bridge,
+  geometry and image-lifecycle contracts. `tests/cordova/` exercises a real consumer.
+- Controls tests under `tests/controls` own Ionic discovery, source/proxy selection,
+  page/modal isolation and adapter event forwarding. Keep generic Engine timing or
+  image-state tests in their owning layer instead of repeating them through Controls.
+- Swift and Android tests own native acquisition, original SDK input, clipping and
+  teardown. Browser mocks cannot prove native drawing or tap/long-press delivery.
+
+A regression should fail for a user-visible contract violation. Prefer output,
+resource ownership and input delivery over private state, exact callback counts
+or the return value of a void method. Counts are useful when the contract promises
+one registration or one input delivery. Use named fixture options; extend an
+existing case when it can protect the same boundary without another setup. Test
+long browser timer boundaries with a controlled clock; keep actual SDK input
+recognition in native tests.
 
 Use Node.js 24, matching CI. From this repository:
 
