@@ -149,9 +149,12 @@ public final class NativeUICoveredSnapshots {
         }
     }
 
-    func invalidateAcquisition(owner: String? = nil) {
+    func invalidateAcquisition(owner: String? = nil, retainPending: Bool = false) {
         let retired = owner.map { acquisitions[$0].map { [$0] } ?? [] } ?? Array(acquisitions.values)
         for job in retired {
+            // The next prepare replaces this lease atomically. Until then a
+            // contact can still measure current frames and acquire fresh pixels.
+            if retainPending, !job.pixels, job.run != nil { continue }
             acquisitions.removeValue(forKey: job.owner)
             if !job.pinned { job.cancel?() }
         }
@@ -217,7 +220,10 @@ public final class NativeUICoveredSnapshots {
         case "painted", "restored":
             retireCopy(token, entry: request["action"] as? String == "painted")
             complete(request["action"] as? String == "painted" ? ["shown": captures[token] != nil] : [:])
-        case "change": invalidateAcquisition(owner: request["captureOwner"] as? String); complete([:])
+        case "change":
+            invalidateAcquisition(owner: request["captureOwner"] as? String,
+                                  retainPending: request["retainPending"] as? Bool == true)
+            complete([:])
         case "release": release(token); complete([:])
         case "reset": reset(); complete([:])
         default: complete([:])

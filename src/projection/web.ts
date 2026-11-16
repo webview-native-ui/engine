@@ -481,7 +481,8 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     }
     visualRevision++;
     generation++;
-    if (preinteraction) void call({ action: 'change', captureOwner: imageIdentity }).catch(() => {});
+    if (preinteraction)
+      void call({ action: 'change', captureOwner: imageIdentity, ...(scrollOwner ? { retainPending: true } : {}) }).catch(() => {});
     schedule();
   };
   const listener = await boundedListener(
@@ -523,7 +524,8 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
   });
   changes.observe(doc.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
   const backgroundChanged = (event: Event) => {
-    if (preinteraction && !projectionNode(event.target as Node | null)) changed();
+    if (preinteraction && !projectionNode(event.target as Node | null))
+      changed(event.type === 'scroll' ? (event.target ?? undefined) : undefined);
   };
   doc.addEventListener('scroll', backgroundChanged, true);
   doc.addEventListener('load', backgroundChanged, true);

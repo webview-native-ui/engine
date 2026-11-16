@@ -1612,6 +1612,24 @@ const beginDelayedReturn = async (page: Page) => {
   await expect.poll(() => page.evaluate(() => !!(window as any).releaseReply)).toBe(true);
 };
 
+test('scroll changes retain pending native acquisition while source invalidation still cancels it', async ({ page }) => {
+  await prepare(page);
+  await page.evaluate(() => {
+    const w = window as any;
+    w.interact({ active: false, capturePolicy: 'preinteraction' });
+    w.calls = [];
+    document.querySelector('#scroll')!.dispatchEvent(new Event('scroll', { bubbles: true }));
+  });
+  const changes = await page.evaluate(() => (window as any).calls.filter((call: any) => call.action === 'change'));
+  expect(changes.length).toBeGreaterThan(0);
+  expect(changes.every((call: any) => call.retainPending === true)).toBe(true);
+  await page.evaluate(() => (window as any).manager.invalidate());
+  expect(
+    await page.evaluate(() => (window as any).calls.filter((call: any) => call.action === 'change').at(-1).retainPending),
+  ).toBeUndefined();
+  await destroyProjection(page);
+});
+
 test('scrolling followed by modal handoff covers with a decoded PNG instead of Web fallback', async ({ page }) => {
   await prepare(page);
   await page.evaluate((png) => {
