@@ -180,8 +180,9 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
   let visualRevision = 0;
   let preparedVisualRevision = -1;
   let stopped = false;
-  let flight = 0;
+  const capturesInFlight = new Set<string>();
   let preinteraction = false;
+  let prepareDuringInteraction = false;
   let captureSerial = 0;
   let requestedGeneration = -1;
   let ownerGeneration = 0;
@@ -253,8 +254,8 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     if (
       stopped ||
       destination !== 'native' ||
-      (flight > 0 && (!preinteraction || requestedGeneration === generation)) ||
-      touching ||
+      (capturesInFlight.size > 0 && (!preinteraction || requestedGeneration === generation)) ||
+      (touching && !prepareDuringInteraction) ||
       handoff ||
       callbacks.blocked() ||
       !latest ||
@@ -269,9 +270,9 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     if (!selected.length) return;
     const capturedLayout = signature(selected);
     const capturedOwnership = selected.map((candidate) => signature([candidate], true));
-    flight++;
     requestedGeneration = generation;
     const captureID = `${imageIdentity}-${++captureSerial}`;
+    capturesInFlight.add(captureID);
     const requestAt = performance.now();
     const owner = ownerGeneration;
     const pinned = () => preinteraction && pinnedCaptureID === captureID && ownerGeneration === owner;
@@ -418,7 +419,8 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
           retireImage(image);
         });
       if (result?.token && !adopted) void call({ action: 'release', token: result.token }).catch(() => {});
-      flight--;
+      capturesInFlight.delete(captureID);
+      if (pinnedCaptureID === captureID) callbacks.wake();
       if (latest && (latest.revision !== revision || visualRevision !== visual)) schedule();
     }
   };
@@ -426,7 +428,7 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
   // available while their replacement is being rendered and decoded.
   const schedule = () => {
     win.clearTimeout(timer);
-    if (!stopped && destination === 'native' && !handoff && !touching && !callbacks.blocked())
+    if (!stopped && destination === 'native' && !handoff && (!touching || prepareDuringInteraction) && !callbacks.blocked())
       timer = win.setTimeout(() => void prepare(), preinteraction ? 0 : captureDelayMs);
   };
   let consideredLayout: string | undefined;
@@ -481,31 +483,45 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     }
     visualRevision++;
     generation++;
-    if (preinteraction)
-      void call({ action: 'change', captureOwner: imageIdentity, ...(scrollOwner ? { retainPending: true } : {}) }).catch(() => {});
+    // Virtual scrollers mutate rows and wrapper transforms as well as emitting
+    // scroll. Retire completed pixels, but keep an unacquired native lease:
+    // contact still reads the current renderer geometry and fresh window pixels.
+    // Ownership/revision changes continue to cancel it through consider/invalidate.
+    if (preinteraction) void call({ action: 'change', captureOwner: imageIdentity, retainPending: true }).catch(() => {});
     schedule();
   };
   const listener = await boundedListener(
-    transport.listen(({ active: pressed, capturePolicy, captureID, captureOwner, captureState, mainThreadMs }) => {
-      if (captureOwner !== undefined && captureOwner !== imageIdentity) return;
-      if (capturePolicy === 'preinteraction') {
-        if (!preinteraction) {
-          preinteraction = true;
-          schedule();
+    transport.listen(
+      ({
+        active: pressed,
+        capturePolicy,
+        captureID,
+        captureOwner,
+        captureState,
+        mainThreadMs,
+        prepareDuringInteraction: armDuringInput,
+      }) => {
+        if (captureOwner !== undefined && captureOwner !== imageIdentity) return;
+        if (capturePolicy === 'preinteraction') {
+          prepareDuringInteraction = armDuringInput === true;
+          if (!preinteraction) {
+            preinteraction = true;
+            schedule();
+          }
+          return;
         }
-        return;
-      }
-      if (pressed && captureID) {
-        pinnedCaptureID = captureID;
-        contactAt = performance.now();
-        reportTiming({ captureID, stage: cached?.captureID === captureID ? 'ready' : captureState, mainThreadMs });
-      } else if (pressed && !touching) pinnedCaptureID = preinteraction ? '' : undefined;
-      touching = pressed;
-      generation++;
-      visualRevision++;
-      win.clearTimeout(timer);
-      if (!pressed) schedule();
-    }),
+        if (pressed && captureID) {
+          pinnedCaptureID = captureID;
+          contactAt = performance.now();
+          reportTiming({ captureID, stage: cached?.captureID === captureID ? 'ready' : captureState, mainThreadMs });
+        } else if (pressed && !touching) pinnedCaptureID = preinteraction ? '' : undefined;
+        touching = pressed;
+        generation++;
+        visualRevision++;
+        win.clearTimeout(timer);
+        if (!pressed || prepareDuringInteraction) schedule();
+      },
+    ),
   );
   const projectionNode = (node: Node | null) =>
     node?.nodeType === 1 &&
@@ -1060,6 +1076,9 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     get handoffPending() {
       return handoffPending;
     },
+    get capturingContact() {
+      return !!pinnedCaptureID && capturesInFlight.has(pinnedCaptureID);
+    },
     retireRestoration,
     end,
     updated,
@@ -1130,6 +1149,9 @@ export const createWebProjectionBatch = async (
     },
     get handoffPending() {
       return engine?.handoffPending ?? false;
+    },
+    get capturingContact() {
+      return engine?.capturingContact ?? false;
     },
     consider(revision, sources) {
       if (stopped) return;

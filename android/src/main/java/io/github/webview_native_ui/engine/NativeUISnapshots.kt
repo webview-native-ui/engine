@@ -9,6 +9,8 @@ import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
+import android.view.MotionEvent
 import android.view.PixelCopy
 import android.view.View
 import android.view.ViewGroup
@@ -91,6 +93,114 @@ class NativeUISnapshots(private val directory: File) : AutoCloseable {
     private var touching = false
     private var pending = false
     private var closed = false
+
+    private class Acquisition(val id: String, val owner: String, val epoch: Long) {
+        var run: (() -> Unit)? = null
+        var cancel: (() -> Unit)? = null
+        var hit: ((MotionEvent) -> Boolean)? = null
+        var stop: ((MotionEvent) -> Unit)? = null
+        var contact: (() -> Unit)? = null
+        var contactTimeout: Runnable? = null
+        var pixels = false
+        var token: String? = null
+        var pinned = false
+        var changedAt = SystemClock.uptimeMillis()
+    }
+
+    private var epoch = 0L
+    private val acquisitions = linkedMapOf<String, Acquisition>()
+    private var observedWindow: Window? = null
+    private var interactionListener: ((JSONObject) -> Unit)? = null
+    private var stopObserver: (() -> Unit)? = null
+
+    /** Acquire immutable pixels before native input; encoding continues after input is replayed. */
+    fun observeInteractions(window: Window, changed: (JSONObject) -> Unit): () -> Unit {
+        onMain()
+        stopObserver?.invoke()
+        if (!supported || closed) return {}
+        observedWindow = window
+        interactionListener = changed
+        val remove =
+            NativeUIWindowInteraction.observe(
+                window,
+                contact = { event, complete ->
+                    val selected =
+                        acquisitions.values.toList().filter {
+                            it.pixels || it.hit?.invoke(event) == true
+                        }
+                    if (selected.isEmpty()) false
+                    else {
+                        val deferred = selected.any { !it.pixels }
+                        var remaining = selected.size
+                        selected.forEach { job ->
+                            job.pinned = true
+                            job.contact = {
+                                if (job.pixels)
+                                    changed(
+                                        JSONObject()
+                                            .put("active", true)
+                                            .put("captureID", job.id)
+                                            .put("captureOwner", job.owner)
+                                            .put("captureState", "processing")
+                                    )
+                                if (--remaining == 0 && deferred) complete(true)
+                            }
+                            if (job.hit?.invoke(event) == true) job.stop?.invoke(event)
+                            if (job.pixels) finishContact(job)
+                            else {
+                                // Optional acquisition must release SDK input before the window's
+                                // mandatory-return timeout can cancel the original gesture.
+                                val expired = Runnable {
+                                    job.cancel?.invoke() ?: finishContact(job)
+                                }
+                                job.contactTimeout = expired
+                                main.postDelayed(expired, 750)
+                                job.run?.invoke() ?: finishContact(job)
+                            }
+                        }
+                        deferred
+                    }
+                },
+            ) { active ->
+                interaction(active)
+                changed(JSONObject().put("active", active))
+            }
+        var listening = true
+        val stop = {
+            if (listening) {
+                listening = false
+                remove()
+                observedWindow = null
+                interactionListener = null
+                epoch++
+                acquisitions.values.toList().forEach { it.cancel?.invoke() }
+                acquisitions.clear()
+            }
+        }
+        stopObserver = stop
+        return stop
+    }
+
+    private fun finishContact(job: Acquisition) {
+        job.contactTimeout?.let { main.removeCallbacks(it) }
+        job.contactTimeout = null
+        val complete = job.contact
+        job.contact = null
+        complete?.invoke()
+    }
+
+    internal fun invalidateAcquisitions(owner: String? = null, retainPending: Boolean = false) {
+        val selected =
+            owner?.let { listOfNotNull(acquisitions[it]) } ?: acquisitions.values.toList()
+        selected.forEach { job ->
+            if (retainPending && !job.pixels) job.changedAt = SystemClock.uptimeMillis()
+            else {
+                acquisitions.remove(job.owner)
+                if (!job.pinned) job.cancel?.invoke()
+            }
+        }
+    }
+
     var coveringToken: String? = null
         private set
 
@@ -147,22 +257,28 @@ class NativeUISnapshots(private val directory: File) : AutoCloseable {
                     return
                 }
                 val expected = ids.toSet()
-                var initial: Map<String, RectF>? = frames(expected, request.getLong("revision"))
-                if (initial!!.keys != expected) {
+                if (frames(expected, request.getLong("revision")).keys != expected) {
                     respond(JSONObject())
                     return
                 }
-                prepare(
+                prepareContact(
+                    request,
                     window,
                     webView,
-                    width,
                     {
-                        val measured = initial ?: frames(expected, request.getLong("revision"))
-                        initial = null
-                        measured.takeIf { it.keys == expected } ?: emptyMap()
+                        frames(expected, request.getLong("revision")).takeIf { it.keys == expected }
+                            ?: emptyMap()
                     },
+                    { views(expected).orEmpty() },
                     complete = respond,
                 )
+            }
+            "change" -> {
+                invalidateAcquisitions(
+                    request.optString("captureOwner").takeIf { request.has("captureOwner") },
+                    request.optBoolean("retainPending"),
+                )
+                respond(JSONObject())
             }
             "cover" -> {
                 val ids = identifiers(token)
@@ -254,6 +370,7 @@ class NativeUISnapshots(private val directory: File) : AutoCloseable {
     fun changed() {
         onMain()
         generation++
+        invalidateAcquisitions()
     }
 
     fun interaction(active: Boolean) {
@@ -271,73 +388,220 @@ class NativeUISnapshots(private val directory: File) : AutoCloseable {
         sourceViews: (() -> Map<String, View>)? = null,
         contentRevision: Long = 0,
         complete: (JSONObject) -> Unit,
+    ) =
+        prepareCapture(
+            window,
+            reference,
+            viewportWidth,
+            frames,
+            sourceViews,
+            contentRevision,
+            complete = complete,
+        )
+
+    internal fun prepareContact(
+        request: JSONObject,
+        window: Window,
+        reference: WebView,
+        frames: () -> Map<String, RectF>,
+        views: () -> List<View>,
+        sourceViews: (() -> Map<String, View>)? = null,
+        complete: (JSONObject) -> Unit,
+    ) {
+        val job =
+            request
+                .optString("captureID")
+                .takeIf { it.isNotEmpty() && observedWindow === window }
+                ?.let { Acquisition(it, request.optString("captureOwner"), epoch) }
+        if (job != null) {
+            invalidateAcquisitions(job.owner)
+            acquisitions[job.owner] = job
+            job.hit = { event ->
+                views().any { view ->
+                    val bounds = Rect()
+                    val location = IntArray(2)
+                    view.rootView.getLocationOnScreen(location)
+                    val visible = view.isShown && view.getGlobalVisibleRect(bounds)
+                    bounds.offset(location[0], location[1])
+                    visible && bounds.contains(event.rawX.toInt(), event.rawY.toInt())
+                }
+            }
+            if (request.optBoolean("stopScrollBeforeCapture"))
+                job.stop = { event ->
+                    val contact = MotionEvent.obtain(event)
+                    val origin = IntArray(2)
+                    reference.getLocationOnScreen(origin)
+                    try {
+                        contact.setLocation(event.rawX - origin[0], event.rawY - origin[1])
+                        reference.onTouchEvent(contact)
+                        contact.action = MotionEvent.ACTION_CANCEL
+                        reference.onTouchEvent(contact)
+                    } finally {
+                        contact.recycle()
+                    }
+                }
+            interactionListener?.invoke(
+                JSONObject()
+                    .put("active", touching)
+                    .put("capturePolicy", "preinteraction")
+                    .put("prepareDuringInteraction", true)
+            )
+        }
+        prepareCapture(
+            window,
+            reference,
+            request.optDouble("viewportWidth"),
+            frames,
+            sourceViews = sourceViews,
+            contentRevision = request.optLong("revision"),
+            acquisition = job,
+            delay = request.optLong("captureDelayMs", 0).coerceAtLeast(0),
+            complete = complete,
+        )
+    }
+
+    private fun prepareCapture(
+        window: Window,
+        reference: View,
+        viewportWidth: Double,
+        frames: () -> Map<String, RectF>,
+        sourceViews: (() -> Map<String, View>)? = null,
+        contentRevision: Long = 0,
+        acquisition: Acquisition? = null,
+        delay: Long = 0,
+        complete: (JSONObject) -> Unit,
     ) {
         onMain()
         if (
             !supported ||
                 closed ||
-                pending ||
-                touching ||
+                (acquisition == null && (pending || touching)) ||
                 viewportWidth <= 0 ||
                 !viewportWidth.isFinite() ||
                 reference.width <= 0
         ) {
+            if (acquisition != null && acquisitions[acquisition.owner] === acquisition)
+                acquisitions.remove(acquisition.owner)
             complete(JSONObject())
             return
         }
-        pending = true
+        if (acquisition == null) pending = true
         val stamp = generation
-        val started = android.os.SystemClock.uptimeMillis()
-        fun fail() {
-            pending = false
-            complete(JSONObject())
-        }
-        fun sample(previous: Map<String, RectF>, stable: Int) {
-            if (
-                closed ||
-                    generation != stamp ||
-                    touching ||
-                    android.os.SystemClock.uptimeMillis() - started >= 1000
-            ) {
-                fail()
-                return
+        val started = SystemClock.uptimeMillis()
+        var finished = false
+        var attempt = 0
+        fun current() =
+            !closed &&
+                !finished &&
+                (acquisition == null || acquisition.epoch == epoch) &&
+                (acquisition?.pinned == true ||
+                    (!touching && (acquisition != null || generation == stamp)))
+        fun finish(result: JSONObject) {
+            if (finished) return
+            finished = true
+            if (acquisition == null) pending = false
+            acquisition?.run = null
+            acquisition?.cancel = null
+            acquisition?.let { job ->
+                job.token = result.optString("token").takeIf { it.isNotEmpty() }
+                if (!result.has("token") && acquisitions[job.owner] === job)
+                    acquisitions.remove(job.owner)
+                finishContact(job)
             }
-            val current =
-                try {
-                    frames().mapValues { RectF(it.value) }
-                } catch (_: Exception) {
+            complete(result)
+        }
+        fun fail() = finish(JSONObject())
+        acquisition?.cancel = { fail() }
+        lateinit var sample: (Map<String, RectF>, Int) -> Unit
+        fun acquire() {
+            val ticket = ++attempt
+            val valid = { current() && ticket == attempt }
+            fun readPixels() {
+                if (!valid()) return
+                val currentFrames =
+                    try {
+                        frames()
+                    } catch (_: RuntimeException) {
+                        fail()
+                        return
+                    }
+                if (currentFrames.isEmpty()) {
                     fail()
                     return
                 }
-            if (current.isEmpty() || current.any { it.key.isEmpty() || !it.value.valid() }) {
-                fail()
-                return
+                capture(
+                    window,
+                    reference,
+                    viewportWidth,
+                    currentFrames,
+                    valid,
+                    sourceViews?.invoke(),
+                    contentRevision,
+                    acquired = {
+                        acquisition?.pixels = true
+                        acquisition?.run = null
+                        acquisition?.let(::finishContact)
+                    },
+                ) {
+                    if (ticket == attempt) {
+                        if (
+                            !it.has("token") &&
+                                acquisition != null &&
+                                !acquisition.pinned &&
+                                touching &&
+                                !finished
+                        )
+                            main.postDelayed({ sample(emptyMap(), 0) }, 16)
+                        else finish(it)
+                    }
+                }
             }
-            val count = if (current == previous) stable + 1 else 0
-            if (count < 3) {
-                main.postDelayed({ sample(current, count) }, 16)
-                return
-            }
-            capture(
-                window,
-                reference,
-                viewportWidth,
-                current,
-                stamp,
-                sourceViews?.invoke(),
-                contentRevision,
-            ) {
-                pending = false
-                complete(it)
-            }
+            // A contact restarts an in-flight idle copy after Chromium has stopped.
+            if (acquisition != null && reference is WebView)
+                NativeUIWebReadiness.prepare(reference, valid) {
+                    if (it) readPixels() else if (valid()) fail()
+                }
+            else readPixels()
         }
+        acquisition?.run = { acquire() }
+        sample =
+            fun(previous: Map<String, RectF>, stable: Int) {
+                if (finished || acquisition?.pinned == true) return
+                if (acquisition != null && touching) {
+                    main.postDelayed({ sample(previous, stable) }, 16)
+                    return
+                }
+                if (
+                    !current() || SystemClock.uptimeMillis() - started >= maxOf(1000, delay + 1000)
+                ) {
+                    fail()
+                    return
+                }
+                val current =
+                    try {
+                        frames().mapValues { RectF(it.value) }
+                    } catch (_: Exception) {
+                        fail()
+                        return
+                    }
+                if (current.isEmpty() || current.any { it.key.isEmpty() || !it.value.valid() }) {
+                    fail()
+                    return
+                }
+                val count = if (current == previous) stable + 1 else 0
+                if (
+                    count < 3 ||
+                        SystemClock.uptimeMillis() - (acquisition?.changedAt ?: started) < delay
+                ) {
+                    main.postDelayed({ sample(current, count) }, 16)
+                    return
+                }
+                acquire()
+            }
         // Stable native bounds do not imply that the Web background has painted.
         // Prepare the Web draw before measuring/capturing the composited window.
-        if (reference is WebView) {
-            NativeUIWebReadiness.prepare(
-                reference,
-                { !closed && generation == stamp && !touching },
-            ) { ready ->
+        if (reference is WebView && acquisition == null) {
+            NativeUIWebReadiness.prepare(reference, { current() }) { ready ->
                 if (ready) sample(emptyMap(), 0) else fail()
             }
         } else sample(emptyMap(), 0)
@@ -348,9 +612,10 @@ class NativeUISnapshots(private val directory: File) : AutoCloseable {
         reference: View,
         viewportWidth: Double,
         frames: Map<String, RectF>,
-        stamp: Long,
+        current: () -> Boolean,
         sourceViews: Map<String, View>?,
         contentRevision: Long,
+        acquired: () -> Unit,
         complete: (JSONObject) -> Unit,
     ) {
         if (Build.VERSION.SDK_INT < 26) {
@@ -379,6 +644,16 @@ class NativeUISnapshots(private val directory: File) : AutoCloseable {
                                 JSONObject()
                                     .put("ids", JSONArray(listOf(part.id)))
                                     .put("url", Uri.fromFile(part.file).toString())
+                                    .put(
+                                        "anchorBounds",
+                                        JSONObject().apply {
+                                            val anchor = frames.getValue(part.id)
+                                            put("x", (anchor.left - part.frame.left) * ratio)
+                                            put("y", (anchor.top - part.frame.top) * ratio)
+                                            put("width", anchor.width() * ratio)
+                                            put("height", anchor.height() * ratio)
+                                        },
+                                    )
                                     .put("x", part.frame.left * ratio)
                                     .put("y", part.frame.top * ratio)
                                     .put("width", part.frame.width() * ratio)
@@ -430,6 +705,7 @@ class NativeUISnapshots(private val directory: File) : AutoCloseable {
                         } == true
                 }
         ) {
+            acquired()
             deliver(
                 cached.parts.map { it.copy(frame = RectF(frames.getValue(it.id))) },
                 reused = true,
@@ -457,11 +733,12 @@ class NativeUISnapshots(private val directory: File) : AutoCloseable {
             }
         try {
             val acceptPixels: (Int) -> Unit = accept@{ result ->
-                if (result != PixelCopy.SUCCESS || closed || generation != stamp || touching) {
+                if (result != PixelCopy.SUCCESS || !current()) {
                     pixels.recycle()
                     complete(JSONObject())
                     return@accept
                 }
+                acquired()
                 val token = UUID.randomUUID().toString()
                 encoder.execute {
                     val parts = mutableListOf<Part>()
@@ -537,9 +814,7 @@ class NativeUISnapshots(private val directory: File) : AutoCloseable {
                     }
                     main.post {
                         if (
-                            closed ||
-                                generation != stamp ||
-                                touching ||
+                            !current() ||
                                 root.width != width ||
                                 root.height != height ||
                                 origin(reference) != location ||
@@ -829,11 +1104,18 @@ class NativeUISnapshots(private val directory: File) : AutoCloseable {
         if (hidden?.first == token) restoreViews()
         if (coveringToken == token) coveringToken = null
         if (copy?.token == token) clearCopy()
+        acquisitions.values
+            .toList()
+            .filter { it.token == token }
+            .forEach { invalidateAcquisitions(it.owner) }
         captures.remove(token)?.parts?.forEach(::releasePixelsIfUnused)
     }
 
     fun reset() {
         onMain()
+        epoch++
+        acquisitions.values.toList().forEach { it.cancel?.invoke() }
+        acquisitions.clear()
         generation++
         touching = false
         val previous = viewCache
@@ -846,6 +1128,8 @@ class NativeUISnapshots(private val directory: File) : AutoCloseable {
     override fun close() {
         onMain()
         closed = true
+        stopObserver?.invoke()
+        stopObserver = null
         reset()
         encoder.shutdown()
     }

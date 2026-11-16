@@ -434,6 +434,77 @@ for (const fallback of ['web', 'native'] as const) {
   });
 }
 
+for (const result of ['success', 'failure', 'none', 'timeout'] as const) {
+  test(`a pinned contact capture survives web fallback until ${result}`, async ({ page }) => {
+    await boot(page, false);
+    if (result === 'timeout') await page.clock.install();
+    await page.evaluate(() => {
+      const w = window as any;
+      w.holdPrepare = true;
+      document.body.innerHTML = '<div id="slot" style="width:120px;height:40px"><button>Fallback</button></div>';
+    });
+    await expect.poll(() => page.evaluate(() => (window as any).pendingPrepare.length)).toBe(1);
+    await page.evaluate(() => {
+      const w = window as any;
+      const request = w.calls.find((call: any) => call.action === 'prepare');
+      w.interaction({ active: false, capturePolicy: 'preinteraction' });
+      w.interaction({ active: true, captureID: request.captureID, captureOwner: request.captureOwner, captureState: 'processing' });
+      w.interaction({ active: false });
+      w.calls = [];
+      // The SDK activates while immutable contact pixels are still being converted.
+      w.events.moving({ slot: 1 });
+    });
+    await expect(page.locator('#slot')).toHaveAttribute('data-native-ui-destination', 'web');
+    await page.evaluate(() => {
+      (window as any).events.updated({ slot: 1 });
+      return new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    });
+    expect(await page.evaluate(() => (window as any).calls.some((call: any) => call.action === 'visibility' && !call.visible))).toBe(false);
+    if (result === 'none') {
+      await page.evaluate(() => (window as any).events.hidden({ slot: 1 }));
+      await expect(page.locator('#slot')).toHaveAttribute('data-native-ui-session-surface', 'none');
+      await expect
+        .poll(() => page.evaluate(() => (window as any).calls.some((call: any) => call.action === 'visibility' && !call.visible)))
+        .toBe(true);
+    }
+    if (result === 'timeout') await page.clock.runFor(5100);
+    else {
+      await page.evaluate((result) => {
+        (window as any).pendingPrepare.shift()(
+          result === 'failure'
+            ? {}
+            : { token: 'contact-pixels', parts: [{ ids: ['view'], url: 'file:///contact.png', x: 8, y: 8, width: 120, height: 40 }] },
+        );
+      }, result);
+    }
+    if (result === 'success') {
+      await expect(page.locator('#slot')).toHaveAttribute('data-native-ui-snapshot-visible', '');
+      expect(await page.evaluate(() => (window as any).calls.filter((call: any) => call.action === 'cover'))).toContainEqual(
+        expect.objectContaining({ token: 'contact-pixels' }),
+      );
+      expect(await page.evaluate(() => (window as any).calls.some((call: any) => call.action === 'visibility' && !call.visible))).toBe(
+        false,
+      );
+    } else {
+      await expect
+        .poll(() => page.evaluate(() => (window as any).calls.some((call: any) => call.action === 'visibility' && !call.visible)))
+        .toBe(true);
+      await expect(page.locator('#slot')).not.toHaveAttribute('data-native-ui-snapshot-visible');
+      expect(await page.evaluate(() => (window as any).calls.some((call: any) => call.action === 'cover'))).toBe(false);
+      if (result === 'timeout') {
+        await page.evaluate(() => (window as any).pendingPrepare.shift()({ token: 'contact-pixels' }));
+      }
+      if (result === 'none' || result === 'timeout') {
+        await expect
+          .poll(() =>
+            page.evaluate(() => (window as any).calls.some((call: any) => call.action === 'release' && call.token === 'contact-pixels')),
+          )
+          .toBe(true);
+      } else await expect(page.locator('#slot button')).toBeVisible();
+    }
+  });
+}
+
 test('native failed fallback recovers rejected handoff without capturing on motion', async ({ page }) => {
   await boot(page, true, '#slot', 'native');
   await expect(page.locator('#slot')).toHaveAttribute('data-native-ui-snapshot', /.+/);

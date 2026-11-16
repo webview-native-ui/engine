@@ -18,7 +18,7 @@ NativeUICoveredSnapshots.automaticallyInterceptsEvents = false
 
 With interception disabled, Engine retains its existing idle capture behavior.
 
-Custom transports should use `observeInteractions(_:changed:)`, forward the entire dictionary to the Web listener, and pass requests through `handle`. Android retains its existing acquisition behavior.
+Custom transports should use `observeInteractions(_:changed:)`, forward the entire dictionary to the Web listener, and pass requests through `handle`. Android hosts use the [snapshot window integration](../reference/platforms.md#android-library) with asynchronous PixelCopy acquisition and preserved native input.
 
 Apple documents [Window event dispatch](https://developer.apple.com/documentation/uikit/uiwindow/sendevent%28_%3A%29) and [adding an inherited-method override](https://developer.apple.com/documentation/objectivec/class_addmethod%28_%3A_%3A_%3A_%3A%29). A [gesture recognizer receives touches before its attached view](https://developer.apple.com/documentation/uikit/uigesturerecognizer/touchesbegan%28_%3Awith%3A%29); that does not establish its ordering relative to other recognizers implementing press appearance, so it is not used as the pre-dispatch guarantee.
 

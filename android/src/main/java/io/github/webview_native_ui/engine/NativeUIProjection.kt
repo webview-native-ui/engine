@@ -431,16 +431,19 @@ constructor(
                 throw error
             }
         } else throw UnsupportedOperationException("WebView document-start scripts are required")
-        stopInteraction =
+        val stopCapture = snapshots.observeInteractions(window) { event -> reply(null, event) }
+        val stopHosting =
             NativeUIWindowInteraction.observe(
                 window,
                 drag = ::coverBeforeScroll,
                 contact = ::restoreForContact,
             ) { active ->
                 windowInteracting = active
-                snapshots.interaction(active)
-                reply(null, JSONObject().put("active", active))
             }
+        stopInteraction = {
+            stopHosting()
+            stopCapture()
+        }
     }
 
     private fun frame(view: View): RectF {
@@ -547,10 +550,15 @@ constructor(
                     complete(JSONObject())
                     return
                 }
-                snapshots.prepare(
+                // The original SDK DOWN is replayed after acquisition; stop source motion now.
+                request.put(
+                    "stopScrollBeforeCapture",
+                    selected.values.any { NativeUIScrollHosting.owns(it, webView) },
+                )
+                snapshots.prepareContact(
+                    request,
                     window,
                     webView,
-                    request.optDouble("viewportWidth"),
                     {
                         val current = views()
                         if (
@@ -563,8 +571,8 @@ constructor(
                             emptyMap()
                         else selected.mapValues { frame(it.value) }
                     },
+                    views = { selected.values.toList() },
                     sourceViews = if (captureMode == CaptureMode.VIEW) ({ selected }) else null,
-                    contentRevision = request.optLong("revision"),
                 ) { result ->
                     result
                         .optString("token")
@@ -589,7 +597,25 @@ constructor(
                                 val ids = part.getJSONArray("ids")
                                 for (i in 0 until ids.length()) {
                                     val id = ids.getString(i)
-                                    selected[id]?.let { entries[id] = Anchor(frame(it), image) }
+                                    if (selected.containsKey(id)) {
+                                        val anchor = part.getJSONObject("anchorBounds")
+                                        entries[id] =
+                                            Anchor(
+                                                RectF(
+                                                    x + anchor.getDouble("x").toFloat() * scale,
+                                                    y + anchor.getDouble("y").toFloat() * scale,
+                                                    x +
+                                                        (anchor.getDouble("x") +
+                                                                anchor.getDouble("width"))
+                                                            .toFloat() * scale,
+                                                    y +
+                                                        (anchor.getDouble("y") +
+                                                                anchor.getDouble("height"))
+                                                            .toFloat() * scale,
+                                                ),
+                                                image,
+                                            )
+                                    }
                                 }
                             }
                             anchors[token] = entries
@@ -597,6 +623,13 @@ constructor(
                         }
                     complete(result)
                 }
+            }
+            "change" -> {
+                snapshots.invalidateAcquisitions(
+                    request.optString("captureOwner").takeIf { request.has("captureOwner") },
+                    request.optBoolean("retainPending"),
+                )
+                complete(JSONObject())
             }
             "prepared" -> {
                 awaitWebDraw(
