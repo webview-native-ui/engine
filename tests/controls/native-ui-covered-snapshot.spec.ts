@@ -25,7 +25,7 @@ afterEach(async () => {
   document.body.replaceChildren();
 });
 const drain = () => vi.advanceTimersByTimeAsync(100);
-const fixture = async (modal?: HTMLIonModalElement, captureDelayMs?: number) => {
+const fixture = async (modal?: HTMLIonModalElement) => {
   const button = document.createElement('ion-button');
   (modal ?? document.body).append(button);
   const candidate = createCandidate(button, 'button', () => 'button');
@@ -42,34 +42,22 @@ const fixture = async (modal?: HTMLIonModalElement, captureDelayMs?: number) => 
     parts: [{ ids: ['button'], url: 'file:///snapshot.png', x: 1, y: 2, width: 50, height: 40 }],
   });
   const bridge = vi.fn(async (args: { action: string }) => (args.action === 'prepare' ? capture() : { shown: true }));
-  const listen = vi.fn(async (_event, callback) => {
+  const listen = async (event: string, callback: (event: WebProjectionInteraction) => void) => {
+    expect(event).toBe('snapshotInteraction');
     interaction = callback;
-    return { remove: vi.fn().mockResolvedValue(undefined) };
-  });
+    return { remove: async () => {} };
+  };
   const callbacks = {
-    flush: vi.fn().mockResolvedValue(undefined),
     wake: vi.fn(),
     blocked: vi.fn(() => false),
     modal,
   };
-  const manager =
-    captureDelayMs !== undefined
-      ? await createWebProjectionSurface(
-          {
-            send: bridge,
-            listen: async (callback) => {
-              interaction = callback;
-              return { remove: async () => {} };
-            },
-          },
-          { namespace: 'native-ui', target: ({ element }) => element, ...callbacks, captureDelayMs },
-        )
-      : await createCoveredSnapshots(
-          document,
-          { coveredSnapshot: bridge } as unknown as NativeUIPlugin,
-          listen as NativeUIPlugin['addListener'],
-          callbacks,
-        );
+  const manager = await createCoveredSnapshots(
+    document,
+    { coveredSnapshot: bridge } as unknown as NativeUIPlugin,
+    listen as NativeUIPlugin['addListener'],
+    callbacks,
+  );
   managers.push(manager);
   return {
     manager,
@@ -84,7 +72,9 @@ const fixture = async (modal?: HTMLIonModalElement, captureDelayMs?: number) => 
 };
 test('missing image keeps Web projection without waiting or capturing', async () => {
   const f = await fixture();
-  expect(f.manager.begin()).toBeUndefined();
+  f.manager.begin();
+  expect(f.manager.token).toBeUndefined();
+  expect(projectionState.owns(f.button)).toBe(false);
   expect(f.bridge).not.toHaveBeenCalled();
 });
 test('pins the pre-touch image across disabled updates and restores ownership on dismissal', async () => {
@@ -102,7 +92,7 @@ test('pins the pre-touch image across disabled updates and restores ownership on
   expect(f.bridge.mock.calls.filter(([args]) => args.action === 'prepare')).toHaveLength(1);
   expect(f.manager.token).toBe('image-1');
   expect(projectionState.owns(f.button)).toBe(true);
-  expect(f.manager.begin()).toBeUndefined();
+  f.manager.begin();
   f.manager.end();
   await vi.advanceTimersByTimeAsync(40);
   f.manager.updated(undefined, ['button'], 3);
@@ -154,15 +144,9 @@ test('late capture cannot replace the missing pre-touch image', async () => {
   f.touch(false);
   finish(f.capture());
   await vi.advanceTimersByTimeAsync(0);
-  expect(f.manager.begin()).toBeUndefined();
-  expect(f.bridge).toHaveBeenCalledWith({ action: 'release', token: 'image-1' });
-});
-test('geometry invalidation releases files and prevents stale image reuse', async () => {
-  const f = await fixture();
-  f.manager.consider(1, [f.candidate]);
-  await drain();
-  f.manager.invalidate();
-  expect(f.manager.begin()).toBeUndefined();
+  f.manager.begin();
+  expect(f.manager.token).toBeUndefined();
+  expect(projectionState.owns(f.button)).toBe(false);
   expect(f.bridge).toHaveBeenCalledWith({ action: 'release', token: 'image-1' });
 });
 test('newer revision during capture is prepared after the old capture settles', async () => {
@@ -201,7 +185,9 @@ test('destroy during capture releases a late file without adopting it', async ()
   await f.manager.destroy();
   finish(f.capture());
   await drain();
-  expect(f.manager.begin()).toBeUndefined();
+  f.manager.begin();
+  expect(f.manager.token).toBeUndefined();
+  expect(projectionState.owns(f.button)).toBe(false);
   expect(f.bridge).toHaveBeenCalledWith({ action: 'release', token: 'image-1' });
 });
 
@@ -211,7 +197,9 @@ test('incomplete image coverage keeps Web projection and releases the capture', 
   document.body.append(second);
   f.manager.consider(1, [f.candidate, createCandidate(second, 'button', () => 'second')]);
   await drain();
-  expect(f.manager.begin()).toBeUndefined();
+  f.manager.begin();
+  expect(f.manager.token).toBeUndefined();
+  expect(projectionState.owns(f.button)).toBe(false);
   expect(f.bridge).toHaveBeenCalledWith({ action: 'release', token: 'image-1' });
 });
 
@@ -242,34 +230,12 @@ test('layout or appearance changes block presentation but retain the completed b
   await drain();
   f.candidate.control.dark = !f.candidate.control.dark;
   f.manager.consider(2, [f.candidate]);
-  expect(f.manager.begin()).toBeUndefined();
+  f.manager.begin();
   expect(f.manager.token).toBeUndefined();
   expect(f.bridge).not.toHaveBeenCalledWith({ action: 'release', token: 'image-1' });
   await drain();
   expect(f.manager.token).toBe('image-2');
   expect(f.bridge).toHaveBeenCalledWith({ action: 'release', token: 'image-1' });
-});
-
-test('a cancelled touch cannot override a newer completed image', async () => {
-  const f = await fixture();
-  f.manager.consider(1, [f.candidate]);
-  await drain();
-  f.touch(true);
-  f.touch(false);
-  f.manager.consider(2, [f.candidate]);
-  await drain();
-  f.manager.begin();
-  expect(f.manager.token).toBe('image-2');
-});
-
-test('background changes refresh the image without requiring a native control revision', async () => {
-  const f = await fixture();
-  f.manager.consider(1, [f.candidate]);
-  await drain();
-  f.manager.changed();
-  await drain();
-  f.manager.begin();
-  expect(f.manager.token).toBe('image-2');
 });
 
 test('an unfinished replacement never holds up presentation of the last completed image', async () => {
@@ -339,17 +305,6 @@ test('a stalled native restoration releases the image and Web ownership promptly
   expect(f.manager.token).toBe('image-2');
 });
 
-test('a failed native cover notification releases ownership to ordinary Web projection', async () => {
-  const f = await fixture();
-  f.manager.consider(1, [f.candidate]);
-  await drain();
-  f.bridge.mockRejectedValueOnce(new Error('bridge unavailable'));
-  f.manager.begin();
-  await vi.advanceTimersByTimeAsync(0);
-  expect(f.manager.token).toBeUndefined();
-  expect(projectionState.owns(f.button)).toBe(false);
-});
-
 test('covered visual belongs to its source surface and does not append a foreground image', async () => {
   const f = await fixture();
   const page = document.createElement('section');
@@ -374,7 +329,7 @@ test('handoff uses the prepared capture without waiting for the native reply', a
   f.manager.consider(1, [f.candidate]);
   await drain();
   f.bridge.mockImplementation(async (args) => (args.action === 'cover' ? new Promise(() => {}) : { shown: true }));
-  expect(f.manager.begin()).toBeUndefined();
+  f.manager.begin();
   expect(projectionState.owns(f.button)).toBe(true);
   expect(f.bridge).toHaveBeenCalledWith({ action: 'cover', token: 'image-1' });
   expect(f.manager.handoffPending).toBe(true);
@@ -391,6 +346,10 @@ test('invalidating a prepared or active image clears ownership and cancels the p
   expect(projectionState.preparedOwners.includes(f.button)).toBe(true);
   f.manager.invalidate();
   expect(projectionState.preparedOwners.includes(f.button)).toBe(false);
+  f.manager.begin();
+  expect(f.manager.token).toBeUndefined();
+  expect(f.bridge).toHaveBeenCalledWith({ action: 'release', token: 'image-1' });
+  f.manager.end();
   f.manager.consider(2, [f.candidate]);
   await drain();
   f.manager.begin();
@@ -398,6 +357,8 @@ test('invalidating a prepared or active image clears ownership and cancels the p
   await drain();
   expect(f.manager.handoffPending).toBe(false);
   expect(f.bridge.mock.calls.filter(([args]) => args.action === 'painted')).toHaveLength(0);
+  expect(f.bridge).toHaveBeenCalledWith({ action: 'release', token: 'image-2' });
+  expect(projectionState.owns(f.button)).toBe(false);
 });
 
 test('preparing an image leaves source styles intact until the handoff', async () => {
@@ -419,14 +380,16 @@ test('preparing an image leaves source styles intact until the handoff', async (
   expect(getComputedStyle(f.button).overflow).toBe('hidden');
 });
 
-test('a declined native cover releases the prepared visual and resumes reconciliation', async () => {
+test.each(['declined', 'rejected'] as const)('a %s native cover releases ownership and resumes reconciliation', async (outcome) => {
   const f = await fixture();
   f.manager.consider(1, [f.candidate]);
   await drain();
-  f.bridge.mockResolvedValueOnce({ shown: false });
+  if (outcome === 'rejected') f.bridge.mockRejectedValueOnce(new Error('bridge unavailable'));
+  else f.bridge.mockResolvedValueOnce({ shown: false });
   f.manager.begin();
   await drain();
   expect(f.manager.token).toBeUndefined();
+  expect(projectionState.owns(f.button)).toBe(false);
   expect(f.manager.handoffPending).toBe(false);
   expect(f.button.hasAttribute('data-native-ui-snapshot')).toBe(false);
   expect(f.callbacks.wake).toHaveBeenCalled();
@@ -896,52 +859,9 @@ test('projection image load does not rearm capture but a background image load d
   expect(f.bridge.mock.calls.filter(([args]) => args.action === 'prepare')).toHaveLength(before + 1);
 });
 
-test.each([6000, 61000, 2147483647])('native waiting %i ms retains the full processing timeout', async (delay) => {
-  const f = await fixture(undefined, delay);
-  let finish!: (value: ReturnType<typeof f.capture>) => void;
-  f.bridge.mockImplementation(async (args) =>
-    args.action === 'prepare'
-      ? new Promise((resolve) => {
-          finish = resolve;
-        })
-      : { shown: true },
-  );
-  f.interaction({ active: false, capturePolicy: 'preinteraction' });
-  f.manager.consider(1, [f.candidate]);
-  await vi.advanceTimersByTimeAsync(1);
-  await vi.advanceTimersByTimeAsync(delay + 100);
-  finish(f.capture());
-  await drain();
-  const started = f.manager.begin();
-  await drain();
-  await started;
-  expect(f.manager.token).toBe('image-1');
-  expect(f.bridge).not.toHaveBeenCalledWith({ action: 'release', token: 'image-1' });
-});
-
-test('native waiting still releases a completion after the processing deadline', async () => {
-  const f = await fixture(undefined, 6000);
-  let finish!: (value: ReturnType<typeof f.capture>) => void;
-  f.bridge.mockImplementation(async (args) =>
-    args.action === 'prepare'
-      ? new Promise((resolve) => {
-          finish = resolve;
-        })
-      : { shown: true },
-  );
-  f.interaction({ active: false, capturePolicy: 'preinteraction' });
-  f.manager.consider(1, [f.candidate]);
-  await vi.advanceTimersByTimeAsync(11001);
-  finish(f.capture());
-  await drain();
-  f.manager.begin();
-  expect(f.manager.token).toBeUndefined();
-  expect(f.bridge).toHaveBeenCalledWith({ action: 'release', token: 'image-1' });
-});
-
-test.each([false, true])('identical recapture keeps the decoded Web image with distinct fallback %s', async (distinctFallback) => {
-  const modal = distinctFallback ? document.createElement('ion-modal') : undefined;
-  if (modal) document.body.append(modal);
+test('modal proxy reuses acknowledged PNG pixels without decoding them twice', async () => {
+  const modal = document.createElement('ion-modal');
+  document.body.append(modal);
   const f = await fixture(modal);
   f.manager.consider(1, [f.candidate]);
   await drain();

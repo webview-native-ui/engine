@@ -67,7 +67,6 @@ class NativeUIProjectionContactTest {
             js(
                 """
                 JSON.stringify({events:nativeEvents.filter(e=>!e.capturePolicy).slice(-25),
-                  transactions:nativeRequests.filter(e=>!['change','track'].includes(e.request.action)).slice(-30).map(e=>({...e,reply:nativeReplies.find(r=>r.key===e.key)})),
                   virtualChanges,attributes:[...document.querySelector('#slot').attributes].map(a=>[a.name,a.value]),
                   images:[...document.querySelectorAll('#slot img')].map(i=>({src:i.src,complete:i.complete,width:i.naturalWidth,opacity:getComputedStyle(i).opacity,display:getComputedStyle(i).display}))})
                 """
@@ -195,14 +194,11 @@ class NativeUIProjectionContactTest {
                     """
                     <meta name="viewport" content="width=device-width,initial-scale=1">
                     <script>
-                    window.testEvents={};window.nativeEvents=[];window.nativeReplies=[];window.nativeRequests=[];window.virtualChanges=0;
-                    const nativePostMessage=nativeUIEngine.postMessage.bind(nativeUIEngine);
-                    nativeUIEngine.postMessage=message=>{nativeRequests.push({...JSON.parse(message),t:performance.now()});return nativePostMessage(message)};
+                    window.testEvents={};window.nativeEvents=[];window.virtualChanges=0;
                     const runtime=globalThis.WebViewNativeUIEngineRuntime;
                     const receive=runtime.receive;
                     globalThis.WebViewNativeUIEngineRuntime={...runtime,receive:(id,key,value,error)=>{
-                      if(key===null) nativeEvents.push({...value,t:performance.now()});
-                      else nativeReplies.push({key,value,error,t:performance.now()});
+                      if(key===null) nativeEvents.push(value);
                       return receive(id,key,value,error);
                     }};
                     window.Capacitor={
