@@ -6,6 +6,43 @@ import WebKit
 @testable import WebViewNativeUIEngine
 
 final class NativeUICoveredSnapshotsTests: XCTestCase {
+    @MainActor func testScrollChangeRetainsLivePendingGeometryButNotCompletedPixels() async throws {
+        let window = SnapshotTestWindow(frame: UIScreen.main.bounds)
+        window.rootViewController = UIViewController(); window.makeKeyAndVisible()
+        let web = try XCTUnwrap(window.rootViewController?.view)
+        let control = UIView(frame: CGRect(x: 40, y: 100, width: 60, height: 44))
+        web.addSubview(control)
+        let snapshots = NativeUICoveredSnapshots()
+        var events: [[String: Any]] = []
+        snapshots.observeInteractions(window) { events.append($0) }
+        defer { snapshots.reset(); window.isHidden = true }
+        let ready = expectation(description: "contact acquires pending scroll pixels")
+        var result: [String: Any]?
+        var measuredY: CGFloat = 0
+        snapshots.handle(["action": "prepare", "ids": ["control"], "revision": 1,
+                          "captureID": "moving", "captureOwner": "page", "captureDelayMs": 500,
+                          "viewportWidth": Double(web.bounds.width), "stopScrollBeforeCapture": true], in: web,
+                         frames: { _, _ in measuredY = control.frame.minY; return ["control": control.frame] },
+                         views: { _ in [control] }, complete: { value in result = value; ready.fulfill() })
+        func changed() {
+            snapshots.handle(["action": "change", "captureOwner": "page", "retainPending": true], in: web,
+                             frames: { _, _ in [:] }, views: { _ in [] }, complete: { _ in })
+        }
+        changed()
+        XCTAssertNil(result, "A scroll must not cancel the only pending contact acquisition")
+        control.frame.origin.y = 160
+        snapshots.pinBeforeInteraction(touchedViews: [control])
+        XCTAssertEqual(measuredY, 160, "Contact measures current geometry, never a pre-scroll frame")
+        XCTAssertEqual(window.draws, 1)
+        await fulfillment(of: [ready], timeout: 3)
+        XCTAssertNotNil(result?["token"])
+        let previousEvents = events.count
+        changed()
+        snapshots.pinBeforeInteraction(touchedViews: [control])
+        XCTAssertEqual(events.count, previousEvents, "Completed pre-scroll pixels cannot be selected by the next contact")
+        XCTAssertEqual(window.draws, 1)
+    }
+
     @MainActor func testCompletedCaptureCannotCoverAnotherWindowWithIdenticalGeometry() async throws {
         let first = SnapshotTestWindow(frame: UIScreen.main.bounds)
         first.rootViewController = UIViewController(); first.makeKeyAndVisible()

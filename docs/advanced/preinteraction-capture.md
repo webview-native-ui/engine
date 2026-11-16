@@ -40,9 +40,17 @@ A request must already have reached native with eligible sources. Before the fir
 
 An iOS host can set `stopScrollBeforeCapture: true` on `prepare` requests to use the same policy as its native activation setting. The default is `false` for existing hosts. While this policy is enabled, idle acquisition waits while any descendant scroll view is tracking, dragging or decelerating; it does not stop a user's scroll in the background. The existing preparation deadline and Web fallback remain in effect.
 
-At the next contact, Engine checks the hit view against the native views supplied for the requested IDs. Only contact inside those native views cancels momentum. All registered owners settle that motion before any owner pins pixels, then the capture remeasures frames instead of using the pre-stop validation geometry. Acquisition still precedes UIKit's highlight and gesture dispatch. Contact in Web content does not invoke this cancellation, and an unregistered window rejects this policy without stopping anything.
+At the next contact, Engine checks the hit view against the native views supplied for the requested IDs. Only contact inside those native views cancels momentum. All registered owners stop that motion and apply layout before any owner pins pixels. Each promoted capture then remeasures current frames and acquires pixels instead of using the pre-stop validation geometry. Contact promotion does not wait for another idle period. Acquisition still precedes UIKit's highlight and gesture dispatch. Contact in Web content does not invoke this cancellation, and an unregistered window rejects this policy without stopping anything.
 
 This cancels the current fling without disabling scrolling. PNG encoding and decoding remain asynchronous, so stopping momentum is not a guarantee that every capture succeeds. Empty, stale or failed captures retain the normal Web fallback. Hosts should retain their activation-time cancellation for actions without a prepared capture. Disable this request flag when the application's `stopScrollOnActivate` setting is `false`.
+
+## Scroll invalidation
+
+Scroll tracking and notifications remain necessary for SDK views such as AdMob: they keep image placement synchronized during scrolling and invalidate composited pixels when the backdrop changes, including behind fixed translucent controls. Taps and long presses remain native input.
+
+A scroll-origin `change` uses `retainPending: true` to retire completed pixels from next-contact selection while preserving a live request that has not acquired pixels. Its frame callback reads current geometry when acquisition runs; a replacement `prepare` atomically retires the older request. This keeps a request available for contact promotion between the scroll notification and the next `prepare`. Source/content invalidation, reset and replacement retain their normal cancellation behavior.
+
+The document scroll listener covers standalone Engine integrations and background motion; renderer-provided `changed(owner)` also covers scrolling within Shadow DOM that does not reach the document. Both entry points are needed, although Light DOM integrations can report the same event through both paths.
 
 ## Idle capture
 
