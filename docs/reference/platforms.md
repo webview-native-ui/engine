@@ -56,6 +56,12 @@ android/gradlew -p android testDebugUnitTest assembleRelease connectedDebugAndro
 
 `NativeUISnapshots` prepares composited PixelCopy images and local PNG files, then covers/restores from that cache. Encoding runs off the UI thread; only one preparation runs per owner. Notify it of visual changes and interaction, and release tokens on teardown. All view/lifecycle calls run on the UI thread. The plugin retains revision, eligibility and fallback policy.
 
+SDK registrations and custom hosts share the same contact acquisition. A Web fallback waits for the selected contact request to settle before hiding its native source; failures and explicit hide still use the normal fallback.
+
+Custom snapshot hosts can call `observeInteractions(window, changed)` and forward the complete event dictionary to their Web transport. The `prepareDuringInteraction` capability keeps a request armed during a Web gesture without acquiring idle pixels while input is active. This enables contact capture: visual changes retain an unacquired request, while renderer revision changes and reset retire obsolete work. Native contact remeasures current frames and acquires PixelCopy pixels before delivering the original SDK input. `stopScrollBeforeCapture` also cancels WebView momentum for that native contact; disabling the flag preserves scrolling. Completed pixels can be selected without another copy. PNG encoding and Web decoding remain asynchronous.
+
+PixelCopy is asynchronous, so the existing window input replay preserves the original event sequence and gesture duration while acquisition completes. An optional capture deadline releases input before the window return deadline; a failed capture uses the normal Web fallback and must not consume the SDK tap. Retain the returned cleanup function and remove the observation on teardown. Do not also forward `NativeUIClippedView.interaction` for the same window, since the window observer already reports that input.
+
 After prepared Web pixels are shown or retired, `NativeUIWebReadiness.prepare` checks readiness for a subsequent WebView draw. Its `current` predicate must validate the owning session, source generation and image revision. The temporary native copy covers this asynchronous handoff; overlay startup itself does not wait. Neither bridge acknowledgement nor this callback proves physical display presentation.
 
 An opaque image can remain beneath an opaque native view between handoffs, but

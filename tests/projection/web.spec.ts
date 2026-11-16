@@ -1612,6 +1612,65 @@ const beginDelayedReturn = async (page: Page) => {
   await expect.poll(() => page.evaluate(() => !!(window as any).releaseReply)).toBe(true);
 };
 
+test('a contact-capable host stays armed while a Web gesture and virtual changes continue', async ({ page }) => {
+  await boot(page);
+  await page.evaluate(async () => {
+    const w = window as any;
+    const source = document.querySelector<HTMLElement>('#source')!;
+    const rect = source.getBoundingClientRect();
+    w.calls = [];
+    w.manager = await w.engine.createWebProjection(
+      w.engine.createWebProjectionScope(source, 'test'),
+      {
+        listen: async (listener: any) => {
+          w.interact = listener;
+          return { remove() {} };
+        },
+        send: async (request: any) => {
+          w.calls.push(request);
+          if (request.action === 'prepare') {
+            w.pending?.resolve({});
+            return new Promise((resolve) => {
+              w.pending = { request, resolve };
+            });
+          }
+          return { shown: true };
+        },
+      },
+      { wake() {}, blocked: () => !!w.blocked, captureDelayMs: 500 },
+    );
+    w.interact({ active: false, capturePolicy: 'preinteraction', prepareDuringInteraction: true });
+    w.manager.consider(1, [{ element: source, control: { id: 'action', ...rect.toJSON() } }]);
+  });
+  await expect.poll(() => page.evaluate(() => !!(window as any).pending)).toBe(true);
+  const initial = await page.evaluate(() => (window as any).pending.request.captureID);
+  await page.evaluate(() => {
+    const w = window as any;
+    w.interact({ active: true });
+    document.querySelector('#scroll')!.lastElementChild!.textContent = 'Recycled during Web drag';
+    w.manager.changed();
+  });
+  await expect.poll(() => page.evaluate(() => (window as any).pending.request.captureID)).not.toBe(initial);
+  await page.evaluate(() => {
+    const w = window as any;
+    const pending = w.pending;
+    w.interact({ active: false });
+    w.interact({
+      active: true,
+      captureID: pending.request.captureID,
+      captureOwner: pending.request.captureOwner,
+      captureState: 'processing',
+    });
+    const rect = document.querySelector('#source')!.getBoundingClientRect();
+    pending.resolve({ token: 'contact', parts: [{ ids: ['action'], url: 'file:///image.png', ...rect.toJSON() }] });
+    w.blocked = true;
+    w.manager.begin();
+  });
+  await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
+  await expect(page.locator('img[data-native-ui-projection-image]')).toHaveCSS('opacity', '1');
+  await destroyProjection(page);
+});
+
 test('virtual list recycling during momentum preserves contact capture for an overlay', async ({ page }) => {
   await boot(page);
   await page.evaluate(async () => {

@@ -325,7 +325,7 @@ export const startNativeSession = async (
     // image. That intermediate state is not a failed projection or a new reveal.
     if (stopped || startingProjection) return;
     applyFailedFallback();
-    if (destination === 'web' && manager && !manager.token && !manager.restoring) {
+    if (destination === 'web' && manager && !manager.token && !manager.restoring && !manager.capturingContact) {
       void bridge.send({ action: 'visibility', visible: false }).catch(() => {});
       target?.removeAttribute(marker);
       return;
@@ -463,7 +463,8 @@ export const startNativeSession = async (
       nativeScroll = tracking?.tracked === true;
       manager.consider(config.captureMode === 'view' ? contentRevision : ++revision, sources());
     } else {
-      await bridge.send({ action: 'visibility', visible: false });
+      if (destination !== 'web' || (!manager.token && !manager.capturingContact))
+        await bridge.send({ action: 'visibility', visible: false });
       setVisibility();
     }
   };
@@ -632,7 +633,7 @@ export const startNativeSession = async (
       // A native show starts a new local request; the screen-wide Web request prevents restoration.
       if (force === 'native' && projectionRequest.isPaused()) manager?.end();
       beginProjection();
-      if (!manager?.token) void bridge.send({ action: 'visibility', visible: false }).catch(() => {});
+      if (!manager?.token && !manager?.capturingContact) void bridge.send({ action: 'visibility', visible: false }).catch(() => {});
       setVisibility();
     } else if (destination === 'native') {
       manager?.end();

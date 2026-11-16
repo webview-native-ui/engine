@@ -50,8 +50,8 @@ export type WebProjectionRequest =
       captureID?: string;
       captureOwner?: string;
       captureDelayMs?: number;
-      /** iOS: defer idle acquisition while scrolling. Native-view contact stops momentum,
-       * then measures and captures before UIKit handles the contact. Defaults to false.
+      /** Native-view contact stops momentum before measuring and acquiring pixels.
+       * iOS also defers idle acquisition while scrolling. Defaults to false.
        */
       stopScrollBeforeCapture?: boolean;
     }
@@ -90,6 +90,8 @@ export interface WebProjectionInteraction {
   active: boolean;
   /** Advertised only by a native window with a pre-dispatch hook. */
   capturePolicy?: 'preinteraction';
+  /** Native can arm a request during a gesture, while deferring idle acquisition until release. */
+  prepareDuringInteraction?: boolean;
   /** Immutable pixels selected before this contact changes the screen. */
   captureID?: string;
   captureOwner?: string;
