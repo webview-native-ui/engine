@@ -481,8 +481,11 @@ const createProjectionEngine = async (scope: WebProjectionScope, transport: WebP
     }
     visualRevision++;
     generation++;
-    if (preinteraction)
-      void call({ action: 'change', captureOwner: imageIdentity, ...(scrollOwner ? { retainPending: true } : {}) }).catch(() => {});
+    // Virtual scrollers mutate rows and wrapper transforms as well as emitting
+    // scroll. Retire completed pixels, but keep an unacquired native lease:
+    // contact still reads the current renderer geometry and fresh window pixels.
+    // Ownership/revision changes continue to cancel it through consider/invalidate.
+    if (preinteraction) void call({ action: 'change', captureOwner: imageIdentity, retainPending: true }).catch(() => {});
     schedule();
   };
   const listener = await boundedListener(

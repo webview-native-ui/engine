@@ -69,7 +69,7 @@ export type WebProjectionRequest =
   | {
       action: 'change';
       captureOwner?: string;
-      /** Scroll changes retire old pixels while keeping live, unacquired geometry available for contact. */
+      /** Visual changes retire old pixels while keeping live, unacquired geometry available for contact. */
       retainPending?: boolean;
     };
 /** Empty prepare results mean capture is unavailable; a partial capture is never valid. */

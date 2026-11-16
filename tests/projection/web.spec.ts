@@ -1612,6 +1612,69 @@ const beginDelayedReturn = async (page: Page) => {
   await expect.poll(() => page.evaluate(() => !!(window as any).releaseReply)).toBe(true);
 };
 
+test('virtual list recycling during momentum preserves contact capture for an overlay', async ({ page }) => {
+  await boot(page);
+  await page.evaluate(async () => {
+    const w = window as any;
+    const source = document.querySelector<HTMLElement>('#source')!;
+    // A fixed action bar is independent of the list recycled underneath it.
+    document.body.append(source);
+    const rect = source.getBoundingClientRect();
+    w.pending = undefined;
+    w.manager = await w.engine.createWebProjection(
+      w.engine.createWebProjectionScope(source, 'test'),
+      {
+        listen: async (listener: any) => {
+          w.interact = listener;
+          return { remove() {} };
+        },
+        send: async (request: any) => {
+          if (request.action === 'prepare')
+            return new Promise((resolve) => {
+              w.pending = { request, resolve };
+            });
+          if (request.action === 'change' && !request.retainPending) {
+            w.pending?.resolve({});
+            w.pending = undefined;
+          }
+          return { shown: true };
+        },
+      },
+      { wake() {}, blocked: () => false, captureDelayMs: 500 },
+    );
+    w.interact({ active: false, capturePolicy: 'preinteraction' });
+    w.manager.consider(1, [{ element: source, control: { id: 'action', x: rect.x, y: rect.y, width: rect.width, height: rect.height } }]);
+  });
+  await expect.poll(() => page.evaluate(() => !!(window as any).pending)).toBe(true);
+  await page.evaluate(async () => {
+    const w = window as any;
+    const list = document.querySelector('#scroll')!;
+    list.dispatchEvent(new Event('scroll', { bubbles: true }));
+    // CDK virtual scrolling updates both the wrapper transform and recycled rows.
+    list.firstElementChild!.setAttribute('style', 'height:100px;transform:translateY(200px)');
+    list.lastElementChild!.textContent = 'New visible wine rows';
+    await Promise.resolve();
+    const pending = w.pending;
+    if (pending) {
+      w.interact({
+        active: true,
+        captureID: pending.request.captureID,
+        captureOwner: pending.request.captureOwner,
+        captureState: 'waiting',
+      });
+      const rect = document.querySelector('#source')!.getBoundingClientRect();
+      pending.resolve({
+        token: 'contact',
+        parts: [{ ids: ['action'], url: 'file:///image.png', x: rect.x, y: rect.y, width: rect.width, height: rect.height }],
+      });
+    } else w.interact({ active: true });
+    w.manager.begin();
+  });
+  await expect(page.locator('#source')).toHaveAttribute('data-native-ui-snapshot-visible', '');
+  await expect(page.locator('img[data-native-ui-projection-image]')).toHaveCSS('opacity', '1');
+  await destroyProjection(page);
+});
+
 test('scroll changes retain pending native acquisition while source invalidation still cancels it', async ({ page }) => {
   await prepare(page);
   await page.evaluate(() => {
