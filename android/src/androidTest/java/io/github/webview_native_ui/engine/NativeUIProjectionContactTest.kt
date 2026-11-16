@@ -197,12 +197,12 @@ class NativeUIProjectionContactTest {
                     <script>
                     window.testEvents={};window.nativeEvents=[];window.nativeReplies=[];window.nativeRequests=[];window.virtualChanges=0;
                     const nativePostMessage=nativeUIEngine.postMessage.bind(nativeUIEngine);
-                    nativeUIEngine.postMessage=message=>{nativeRequests.push(JSON.parse(message));return nativePostMessage(message)};
+                    nativeUIEngine.postMessage=message=>{nativeRequests.push({...JSON.parse(message),t:performance.now()});return nativePostMessage(message)};
                     const runtime=globalThis.WebViewNativeUIEngineRuntime;
                     const receive=runtime.receive;
                     globalThis.WebViewNativeUIEngineRuntime={...runtime,receive:(id,key,value,error)=>{
-                      if(key===null) nativeEvents.push(value);
-                      else nativeReplies.push({key,value,error});
+                      if(key===null) nativeEvents.push({...value,t:performance.now()});
+                      else nativeReplies.push({key,value,error,t:performance.now()});
                       return receive(id,key,value,error);
                     }};
                     window.Capacitor={

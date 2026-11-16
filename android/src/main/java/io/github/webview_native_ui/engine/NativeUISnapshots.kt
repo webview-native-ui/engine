@@ -130,6 +130,7 @@ class NativeUISnapshots(private val directory: File) : AutoCloseable {
                         }
                     if (selected.isEmpty()) false
                     else {
+                        val deferred = selected.any { !it.pixels }
                         var remaining = selected.size
                         selected.forEach { job ->
                             job.pinned = true
@@ -142,7 +143,7 @@ class NativeUISnapshots(private val directory: File) : AutoCloseable {
                                             .put("captureOwner", job.owner)
                                             .put("captureState", "processing")
                                     )
-                                if (--remaining == 0) complete(true)
+                                if (--remaining == 0 && deferred) complete(true)
                             }
                             if (job.hit?.invoke(event) == true) job.stop?.invoke(event)
                             if (job.pixels) finishContact(job)
@@ -157,7 +158,7 @@ class NativeUISnapshots(private val directory: File) : AutoCloseable {
                                 job.run?.invoke() ?: finishContact(job)
                             }
                         }
-                        true
+                        deferred
                     }
                 },
             ) { active ->
