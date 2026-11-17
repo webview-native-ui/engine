@@ -32,14 +32,14 @@ static BOOL drawSafely(BOOL (^draw)(void)) {
     @catch (NSException *exception) { return NO; }
 }
 
-BOOL NUICaptureWithInPlaceFiltering(CALayer *root, BOOL (^draw)(void)) {
+static BOOL capture(CALayer *root, BOOL inPlaceFiltering, BOOL (^draw)(void)) {
     // All mutation is synchronous on main. Reject reentry even on the same thread.
     static BOOL capturing = NO;
     static BOOL disabledAfterRestoreFailure = NO;
     if (!NSThread.isMainThread || capturing) return NO;
     capturing = YES;
     @try {
-        if (disabledAfterRestoreFailure) return drawSafely(draw);
+        if (!inPlaceFiltering || disabledAfterRestoreFailure) return drawSafely(draw);
         NSMutableArray<NSArray *> *states = [NSMutableArray array];
         @try { prepare(root, states); }
         @catch (NSException *exception) {
@@ -59,10 +59,17 @@ BOOL NUICaptureWithInPlaceFiltering(CALayer *root, BOOL (^draw)(void)) {
     @finally { capturing = NO; }
 }
 
+BOOL NUICaptureWithInPlaceFiltering(CALayer *root, BOOL (^draw)(void)) {
+    return capture(root, YES, draw);
+}
+
 BOOL NUICaptureHierarchyWithInPlaceFiltering(UIWindow *window, NSArray<UIView *> *roots, BOOL afterScreenUpdates) {
     if (!NSThread.isMainThread) return NO;
     // Do not pass a Swift closure through an NSException unwind. Drawing stays here.
-    return NUICaptureWithInPlaceFiltering(window.layer, ^BOOL {
+    // Only composited window capture needs the cold-launch backdrop workaround.
+    // Applying it to isolated transparent roots makes Liquid Glass opaque gray.
+    // Keep exception and reentry protection for both drawing paths.
+    return capture(window.layer, roots == nil, ^BOOL {
         if (!roots) return [window drawViewHierarchyInRect:window.bounds afterScreenUpdates:afterScreenUpdates];
         BOOL drawn = YES;
         for (UIView *root in roots) {

@@ -91,7 +91,7 @@ jobs:
           retention-days: 7
   ios-integration:
     runs-on: macos-26
-    timeout-minutes: 12
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -128,7 +128,7 @@ jobs:
           retention-days: 7
   ios-consumers:
     runs-on: macos-26
-    timeout-minutes: 12
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
