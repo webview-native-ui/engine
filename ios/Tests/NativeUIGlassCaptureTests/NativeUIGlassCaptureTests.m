@@ -38,6 +38,15 @@
 }
 @end
 
+@interface ObservingCaptureWindow : UIWindow
+@property (nonatomic, copy) BOOL (^onDraw)(void);
+@end
+@implementation ObservingCaptureWindow
+- (BOOL)drawViewHierarchyInRect:(CGRect)rect afterScreenUpdates:(BOOL)updates {
+    return self.onDraw();
+}
+@end
+
 @interface NativeUIGlassCaptureTests : XCTestCase
 @end
 @implementation NativeUIGlassCaptureTests
@@ -128,6 +137,29 @@
     });
     [self waitForExpectationsWithTimeout:3 handler:nil];
     XCTAssertFalse(root.allowsInPlaceFiltering);
+}
+- (void)testTransparentRootsKeepOriginalGlassFilteringAndRejectReentry {
+    ObservingCaptureWindow *window = [[ObservingCaptureWindow alloc] initWithFrame:CGRectMake(0, 0, 100, 100)];
+    TestGlassLayer *glass = [self glass]; [window.layer addSublayer:glass];
+    __block int draws = 0;
+    window.onDraw = ^BOOL {
+        draws++;
+        XCTAssertFalse(glass.allowsInPlaceFiltering);
+        XCTAssertFalse(NUICaptureHierarchyWithInPlaceFiltering(window, @[window], YES));
+        return YES;
+    };
+    XCTAssertTrue(NUICaptureHierarchyWithInPlaceFiltering(window, @[window], YES));
+    XCTAssertEqual(draws, 1);
+    XCTAssertFalse(glass.allowsInPlaceFiltering);
+    window.onDraw = nil;
+}
+- (void)testWindowCaptureStillAppliesAndRestoresGlassFiltering {
+    ObservingCaptureWindow *window = [[ObservingCaptureWindow alloc] initWithFrame:CGRectMake(0, 0, 100, 100)];
+    TestGlassLayer *glass = [self glass]; [window.layer addSublayer:glass];
+    window.onDraw = ^BOOL { XCTAssertTrue(glass.allowsInPlaceFiltering); return YES; };
+    XCTAssertTrue(NUICaptureHierarchyWithInPlaceFiltering(window, nil, YES));
+    XCTAssertFalse(glass.allowsInPlaceFiltering);
+    window.onDraw = nil;
 }
 - (void)testUIKitDrawingExceptionReturnsFailureWithoutEscaping {
     ThrowingCaptureWindow *window = [[ThrowingCaptureWindow alloc] initWithFrame:CGRectMake(0, 0, 100, 100)];
