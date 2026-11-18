@@ -1,8 +1,6 @@
-# Beyond the WebView.
+# WebView Native UI Engine
 
-**Bring Native UI seamlessly into Web apps.**
-
-Build your screens with the flexibility of the Web and the controls and capabilities of native platforms. WebView Native UI Engine helps them work together as one experience, while keeping your Web layouts and navigation.
+Integrate native views into Web-driven screens in a Capacitor or Cordova plugin. Start by [registering a native view and its Web container](docs/getting-started/initialization.md).
 
 ## Web UI. Native UI. One experience.
 
