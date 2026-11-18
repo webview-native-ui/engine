@@ -41,12 +41,12 @@ On iOS 26+, an experimental workaround using a **private Apple API** is enabled 
 
 The Engine supports **iOS and Android**. Ionic and Angular are optional. Start with a native view and its DOM container, then connect the lifecycle notifications your UI needs. The integration guides cover runtime startup and optional framework support.
 
-| Start here                                                     | Why                                                                                   |
-| -------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| Start here                                                                                                                  | Why                                                                                   |
+| --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
 | [Basic initialization](https://webview-native-ui.com/projects/webview-native-ui-engine/docs/getting-started/initialization) | Register a native view and its DOM container with the minimum required setup.         |
 | [Capacitor plugin guide](https://webview-native-ui.com/projects/webview-native-ui-engine/docs/getting-started/capacitor)    | Connect the Engine to an existing Capacitor plugin.                                   |
 | [Cordova plugin guide](https://webview-native-ui.com/projects/webview-native-ui-engine/docs/getting-started/cordova)        | Use the same lifecycle through Cordova's native hooks.                                |
-| [Documentation](https://webview-native-ui.com/projects/webview-native-ui-engine/docs/overview)                                | Find optional settings, renderer APIs and reference by the problem you need to solve. |
+| [Documentation](https://webview-native-ui.com/projects/webview-native-ui-engine/docs/overview)                              | Find optional settings, renderer APIs and reference by the problem you need to solve. |
 
 Use matching Engine versions across npm and native dependencies, and retain dependency lockfiles for reproducible builds. Android placement requires API 23+, with composited snapshots available from API 26+.
 
