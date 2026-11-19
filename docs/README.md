@@ -1,14 +1,6 @@
 # Documentation
 
-Build Web-driven screens with native controls and capabilities. These guides
-explain how to integrate the Engine into a plugin so Web UI and Native UI can
-coexist. Start with [the shared model](concepts.md): how a native component belongs in a Web layout,
-which layer presents it, and how interaction returns to the live view. Scrolling
-and overlays are examples of that coordination, not separate integration models.
-
-Then choose the smallest integration that fits your ownership model. Register a
-native view and its DOM container, connect the lifecycle notifications your UI
-needs, and add advanced APIs only if you already own a renderer's batching or placement.
+Start with [basic registration](getting-started/initialization.md) to connect a native view to its DOM container. Then follow the host guide for [Capacitor](getting-started/capacitor.md) or [Cordova](getting-started/cordova.md). The [shared model](concepts.md) explains how scrolling, overlays and interaction work across the two layers.
 
 ## Choose by the problem you need to solve
 

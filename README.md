@@ -1,8 +1,6 @@
-# Beyond the WebView.
+# WebView Native UI Engine
 
-**Bring Native UI seamlessly into Web apps.**
-
-Build your screens with the flexibility of the Web and the controls and capabilities of native platforms. WebView Native UI Engine helps them work together as one experience, while keeping your Web layouts and navigation.
+Integrate native views into Web-driven screens in a Capacitor or Cordova plugin. Start by [registering a native view and its Web container](https://webview-native-ui.com/projects/webview-native-ui-engine/docs/getting-started/initialization).
 
 ## Web UI. Native UI. One experience.
 
@@ -35,7 +33,7 @@ The plugin supplies a native view and a DOM container that defines its place in 
 
 When the Web layer needs to own presentation, the Engine displays a prepared image of the native component in that container. When native presentation can resume, it coordinates placement and restoration of the interactive view.
 
-The image is a temporary visual projection, not a second interactive control. It does not forward clicks or play live video. Capture eligibility and platform rendering limits still apply, including differences in Liquid Glass highlights. When a suitable image is unavailable, the integration uses its configured Web fallback. See [concepts and limits](docs/concepts.md) and [platform support](docs/reference/platforms.md) before choosing a component.
+The image is a temporary visual projection, not a second interactive control. It does not forward clicks or play live video. Capture eligibility and platform rendering limits still apply, including differences in Liquid Glass highlights. When a suitable image is unavailable, the integration uses its configured Web fallback. See [concepts and limits](https://webview-native-ui.com/projects/webview-native-ui-engine/docs/concepts) and [platform support](https://webview-native-ui.com/projects/webview-native-ui-engine/docs/reference/platforms) before choosing a component.
 
 On iOS 26+, an experimental workaround using a **private Apple API** is enabled by default for Liquid Glass capture. Review the risks and [disable it if required](docs/experimental/glass-capture.md) before adopting this version.
 
@@ -43,12 +41,12 @@ On iOS 26+, an experimental workaround using a **private Apple API** is enabled 
 
 The Engine supports **iOS and Android**. Ionic and Angular are optional. Start with a native view and its DOM container, then connect the lifecycle notifications your UI needs. The integration guides cover runtime startup and optional framework support.
 
-| Start here                                                     | Why                                                                                   |
-| -------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| [Basic initialization](docs/getting-started/initialization.md) | Register a native view and its DOM container with the minimum required setup.         |
-| [Capacitor plugin guide](docs/getting-started/capacitor.md)    | Connect the Engine to an existing Capacitor plugin.                                   |
-| [Cordova plugin guide](docs/getting-started/cordova.md)        | Use the same lifecycle through Cordova's native hooks.                                |
-| [Documentation](docs/README.md)                                | Find optional settings, renderer APIs and reference by the problem you need to solve. |
+| Start here                                                                                                                  | Why                                                                                   |
+| --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| [Basic initialization](https://webview-native-ui.com/projects/webview-native-ui-engine/docs/getting-started/initialization) | Register a native view and its DOM container with the minimum required setup.         |
+| [Capacitor plugin guide](https://webview-native-ui.com/projects/webview-native-ui-engine/docs/getting-started/capacitor)    | Connect the Engine to an existing Capacitor plugin.                                   |
+| [Cordova plugin guide](https://webview-native-ui.com/projects/webview-native-ui-engine/docs/getting-started/cordova)        | Use the same lifecycle through Cordova's native hooks.                                |
+| [Documentation](https://webview-native-ui.com/projects/webview-native-ui-engine/docs/overview)                              | Find optional settings, renderer APIs and reference by the problem you need to solve. |
 
 Use matching Engine versions across npm and native dependencies, and retain dependency lockfiles for reproducible builds. Android placement requires API 23+, with composited snapshots available from API 26+.
 
@@ -62,14 +60,14 @@ import { enableSupportIonicOverlays } from '@webview-native-ui/engine/ionic';
 enableSupportIonicOverlays();
 ```
 
-Call it once during application startup unless your plugin already enables it. Applications importing it directly need `@webview-native-ui/engine` as a direct dependency. This shared framework integration coordinates coverage across plugins; each plugin retains control of its own presentation API. See [Ionic overlay support](docs/configuration/ionic-overlays.md) for setup, supported overlays and renderer helpers.
+Call it once during application startup unless your plugin already enables it. Applications importing it directly need `@webview-native-ui/engine` as a direct dependency. This shared framework integration coordinates coverage across plugins; each plugin retains control of its own presentation API. See [Ionic overlay support](https://webview-native-ui.com/projects/webview-native-ui-engine/docs/configuration/ionic-overlays) for setup, supported overlays and renderer helpers.
 
 ## Contributing
 
-For repository development, verification and publishing, see [development and releases](docs/maintenance.md).
+For repository development, verification and publishing, see [development and releases](https://webview-native-ui.com/projects/webview-native-ui-engine/docs/maintenance).
 
 ## License
 
 [MIT](LICENSE). Commercial use, modification and redistribution are permitted with the license's notice and attribution requirements. The Engine's license does not change the licenses of applications or plugins that depend on it.
 
-For the optional shared control runtime and adapter boundaries, see [shared controls](docs/controls.md).
+For the optional shared control runtime and adapter boundaries, see [shared controls](https://webview-native-ui.com/projects/webview-native-ui-engine/docs/controls).
