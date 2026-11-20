@@ -957,11 +957,15 @@ test('hidden notification invalidates delayed cover and updates cannot resurrect
     const w = window as any;
     w.holdCover = true;
     w.eventListeners.transitionStarted({ id: 'counter' });
+  });
+  expect(await page.evaluate(() => (window as any).coverReplies.length)).toBe(1);
+  await page.evaluate(() => {
+    const w = window as any;
     w.eventListeners.hidden({ id: 'counter' });
-    w.coverReplies.splice(0).forEach((resolve: (value: { shown: boolean }) => void) => resolve({ shown: true }));
+    w.coverReplies.shift()({ shown: true });
     w.eventListeners.setColors({ id: 'counter' });
   });
-  await page.waitForTimeout(100);
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
   await expect(page.locator('#source')).not.toHaveAttribute('data-native-ui-snapshot-visible');
   expect(await page.evaluate(() => (window as any).calls.filter((call: any) => call.action === 'prepare').length)).toBe(1);
   await page.evaluate(() => (window as any).eventListeners.shown({ id: 'counter' }));
